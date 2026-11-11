@@ -1,0 +1,33 @@
+# Local secrets and engineering data
+.env
+.env.*
+!.env.example
+/data/
+/outputs/
+/.local/
+/NUL
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend and browser checks
+node_modules/
+dist/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Local editor state and logs
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.log
+.DS_Store

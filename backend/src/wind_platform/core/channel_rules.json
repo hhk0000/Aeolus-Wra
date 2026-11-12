@@ -1,0 +1,233 @@
+{
+  "version": "0.1",
+  "rules": [
+    {
+      "id": "wind_speed",
+      "label": "风速",
+      "dimension": "quantity",
+      "source_rows": [
+        2
+      ],
+      "keywords": [
+        "speed",
+        "spd",
+        "WS",
+        "anemometer",
+        "m/s",
+        "风速",
+        "anem",
+        "sp",
+        "Anem",
+        "ws",
+        "Synthesized",
+        "Combined",
+        "SW"
+      ],
+      "exclude_keywords": [
+        "z方向",
+        "垂直",
+        "Z-Direction",
+        "Z-wind",
+        "vertical",
+        "VWindSpeed",
+        "TI"
+      ]
+    },
+    {
+      "id": "wind_direction",
+      "label": "风向",
+      "dimension": "quantity",
+      "source_rows": [
+        3
+      ],
+      "keywords": [
+        "direction",
+        "Windvane",
+        "Dir",
+        "vane",
+        "WD",
+        "deg",
+        "°",
+        "º",
+        "风向",
+        "dir",
+        "wd",
+        "Direction"
+      ],
+      "exclude_keywords": [
+        "°C",
+        "ºC",
+        "�C",
+        "Z-Direction",
+        "degree C"
+      ]
+    },
+    {
+      "id": "air_temperature",
+      "label": "温度",
+      "dimension": "quantity",
+      "source_rows": [
+        4
+      ],
+      "keywords": [
+        "temp",
+        "Tmp",
+        "℃",
+        "°C",
+        "�C",
+        "_C",
+        "TP",
+        "外温",
+        "温度",
+        "degree C",
+        "tem",
+        "Ta",
+        "Temp"
+      ],
+      "exclude_keywords": [
+        "Inner Temperature",
+        "Int Temp",
+        "PTemp"
+      ]
+    },
+    {
+      "id": "air_pressure",
+      "label": "气压",
+      "dimension": "quantity",
+      "source_rows": [
+        5
+      ],
+      "keywords": [
+        "Pres",
+        "Pa",
+        "mb",
+        "bp",
+        "气压",
+        "hPa",
+        "press",
+        "kpa",
+        "pressure",
+        "pr"
+      ],
+      "exclude_keywords": []
+    },
+    {
+      "id": "humidity",
+      "label": "湿度",
+      "dimension": "quantity",
+      "source_rows": [
+        6
+      ],
+      "keywords": [
+        "humidity",
+        "rh",
+        "hr",
+        "%",
+        "hum",
+        "湿度",
+        "humi",
+        "RH",
+        "Humidity"
+      ],
+      "exclude_keywords": [
+        "可靠性",
+        "数据有效率",
+        "Reliability",
+        "Data Availability"
+      ]
+    },
+    {
+      "id": "standard_deviation",
+      "label": "标准差",
+      "dimension": "statistic",
+      "source_rows": [
+        7,
+        9
+      ],
+      "keywords": [
+        "SD",
+        "STD",
+        "偏差",
+        "STDev",
+        "水平风速标准差",
+        "Std",
+        "Deviation",
+        "std"
+      ],
+      "exclude_keywords": [
+        "Pressure",
+        "Temperature"
+      ]
+    },
+    {
+      "id": "voltage",
+      "label": "电压",
+      "dimension": "quantity",
+      "source_rows": [
+        8
+      ],
+      "keywords": [
+        "v",
+        "volt",
+        "voltage"
+      ],
+      "exclude_keywords": [
+        "Avg",
+        "STDev",
+        "Deviation",
+        "Valid",
+        "Level",
+        "Data Availability",
+        "ver"
+      ]
+    },
+    {
+      "id": "mean",
+      "label": "平均值",
+      "dimension": "statistic",
+      "source_rows": [
+        10
+      ],
+      "keywords": [
+        "mean",
+        "Avg",
+        "Mean",
+        "avg"
+      ],
+      "exclude_keywords": [
+        "gust",
+        "Gust"
+      ]
+    },
+    {
+      "id": "maximum",
+      "label": "最大值",
+      "dimension": "statistic",
+      "source_rows": [
+        11
+      ],
+      "keywords": [
+        "最大值",
+        "Maximum",
+        "Max",
+        "max"
+      ],
+      "exclude_keywords": []
+    },
+    {
+      "id": "minimum",
+      "label": "最小值",
+      "dimension": "statistic",
+      "source_rows": [
+        12
+      ],
+      "keywords": [
+        "最小值",
+        "Minimum",
+        "Min",
+        "min"
+      ],
+      "exclude_keywords": []
+    }
+  ]
+}

@@ -448,7 +448,10 @@ export default function DataSources({
               onChange={(e) => setTower("timezone", e.target.value)}
             >
               <option value="">请选择并核对文件说明</option>
-              <option value="Asia/Shanghai">北京时间 UTC+8</option>
+              <option value="Etc/GMT-8">固定 UTC+8（不应用历史夏令时）</option>
+              <option value="Asia/Shanghai">
+                上海时区（含历史夏令时规则）
+              </option>
               <option value="UTC">UTC</option>
             </select>
           </label>

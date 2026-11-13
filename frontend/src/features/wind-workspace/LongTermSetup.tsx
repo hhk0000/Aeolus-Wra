@@ -138,7 +138,12 @@ export default function LongTermSetup({
               >
                 <option value="">请核对来源说明</option>
                 <option value="UTC">UTC</option>
-                <option value="Asia/Shanghai">北京时间 UTC+8</option>
+                <option value="Etc/GMT-8">
+                  固定 UTC+8（不应用历史夏令时）
+                </option>
+                <option value="Asia/Shanghai">
+                  上海时区（含历史夏令时规则）
+                </option>
               </select>
             </label>
             <label className="ww-wide">

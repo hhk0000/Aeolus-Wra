@@ -62,6 +62,8 @@ def test_full_workflow_preserves_original_and_gives_distinct_denominators(client
     run = response.json()
     complete = run["outputs"]["completeness"]["rows"][0]
     assert complete["retention_percent"] == 50
+    assert complete["annual_expected"] == 52560
+    assert complete["annual_valid"] == 1
     assert complete["standard_completeness_percent"] == pytest.approx(100 / 3)
     assert run["outputs"]["monthly"]["rows"][0]["power_density"] == pytest.approx(172.8)
     assert run["outputs"]["turbulence"]["status"] == "unavailable"
@@ -203,3 +205,47 @@ def test_long_term_leap_year_weighting_and_missing_year_lines(tmp_path):
     assert summary["means"][1]["mean_speed"] == pytest.approx(14 / 3)
     assert summary["means"][2]["mean_speed"] == 8
     assert run["outputs"]["reference-years"]["rows"][-1]["concurrent"]
+
+
+def test_365_days_of_records_qualify_across_a_leap_anniversary(tmp_path):
+    from wind_platform.core.calculations import CalculationError
+
+    store = LocalStore(tmp_path)
+    start = datetime(2023, 11, 18, tzinfo=UTC)
+    stamps = [(start + timedelta(hours=i)).isoformat() for i in range(366 * 24)]
+    reference = {
+        "timestamps": stamps,
+        "start": stamps[0],
+        "end_exclusive": (start + timedelta(days=366)).isoformat(),
+        "options": {"timezone": "UTC", "interval_minutes": 60},
+        "channels": [
+            {"id": "c0", "quantity": "speed", "statistic": "mean", "values": [3] * len(stamps)}
+        ],
+        "stage": "reference",
+    }
+    ref = store.put("datasets", reference)
+
+    def result(hours):
+        return store.put(
+            "datasets",
+            {
+                **reference,
+                "stage": "result",
+                "timestamps": stamps[:hours],
+                "end_exclusive": (start + timedelta(hours=hours)).isoformat(),
+                "channels": [{**reference["channels"][0], "values": [3] * hours}],
+            },
+        )
+
+    config = dict(
+        reference_id=ref["id"],
+        speed_channel="c0",
+        start="2023-11-18",
+        end="2024-11-18",
+        timezone="UTC",
+        windows=[1],
+    )
+    run = run_long_term(store, LongTermOptions(result_id=result(365 * 24)["id"], **config))
+    assert run["outputs"]["reference-years"]["rows"][0]["count"] == 366 * 24
+    with pytest.raises(CalculationError, match="365"):
+        run_long_term(store, LongTermOptions(result_id=result(365 * 24 - 1)["id"], **config))

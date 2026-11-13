@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from wind_platform.core.calculations import CalculationError
 
@@ -36,9 +36,15 @@ class ChannelMapping(BaseModel):
     index: int = Field(ge=0)
     quantity: str
     statistic: str = "mean"
-    height: float = Field(gt=0)
+    height: float = Field(ge=0)
     unit: str
     arm: str = ""
+
+    @model_validator(mode="after")
+    def wind_height_must_be_positive(self):
+        if self.quantity in {"speed", "direction"} and self.height == 0:
+            raise ValueError("风速和风向通道的安装高度必须大于0m。")
+        return self
 
 
 class ParseOptions(BaseModel):
@@ -55,16 +61,40 @@ class ParseOptions(BaseModel):
     channels: list[ChannelMapping] = Field(min_length=1, max_length=200)
 
 
-def decode_text(content: bytes) -> tuple[str, str]:
+def _decode_standard(content: bytes) -> tuple[str, str]:
     for encoding in ["utf-8-sig", "gb18030"]:
         try:
-            value = content.decode(encoding)
-            if "\x00" in value:
-                raise CalculationError("文件包含二进制零字节，请使用TXT/CSV文本。")
-            return value, encoding
+            return content.decode(encoding), encoding
         except UnicodeDecodeError:
             continue
     raise CalculationError("文件既不是UTF-8也不是GB18030，请先转换文本编码。")
+
+
+def decode_text(content: bytes) -> tuple[str, str]:
+    if b"\x00" in content:
+        raise CalculationError("文件包含二进制零字节，请使用TXT/CSV文本。")
+    try:
+        return content.decode("utf-8-sig"), "utf-8-sig"
+    except UnicodeDecodeError:
+        pass
+    # Some Windographer exports mix a Windows single-byte degree symbol with
+    # UTF-8 Celsius units. GB18030 alone accepts 0xB0 followed by ']'/'C' as a
+    # Chinese character, silently corrupting the displayed unit. Restore ONLY
+    # the exact known bracketed units, and only in a signed export header.
+    head = content[:65536]
+    header = re.search(rb"(?m)^Date/Time\t[^\r\n]*", head)
+    signature = re.search(rb"(?m)^Created [^\r\n]+ by Windographer [0-9.]+\r?$", head)
+    legacy_units = {b"[\xb0]": "[°]", b"[\xb0C]": "[°C]"}
+    if signature and header and any(unit in header[0] for unit in legacy_units):
+        parts = re.split(rb"(\[[^\]]*\])", header[0])
+        decoded_header = "".join(
+            legacy_units[part] if part in legacy_units else _decode_standard(part)[0]
+            for part in parts
+        )
+        prefix = _decode_standard(content[: header.start()])[0]
+        suffix = _decode_standard(content[header.end() :])[0]
+        return prefix + decoded_header + suffix, "Windographer mixed units (UTF-8/GB18030)"
+    return _decode_standard(content)
 
 
 def split_line(line: str, delimiter: str) -> list[str]:
@@ -74,6 +104,25 @@ def split_line(line: str, delimiter: str) -> list[str]:
     if sep is None:
         raise CalculationError("不支持的分隔符。")
     return next(csv.reader([line], delimiter=sep))
+
+
+def split_headers(line: str, delimiter: str) -> tuple[list[str], int]:
+    headers = split_line(line, delimiter)
+    original_count = len(headers)
+    while headers and not headers[-1].strip():
+        headers.pop()
+    if not headers:
+        raise CalculationError("表头没有命名列，请核对表头行号。")
+    return headers, original_count - len(headers)
+
+
+def normalize_record(cells: list[str], named_columns: int, trailing_header_blanks: int):
+    # Only an exporter-added EMPTY header tail can authorize discarding matching
+    # EMPTY record tails. Missing named columns and extra values remain errors.
+    surplus = len(cells) - named_columns
+    if 0 < surplus <= trailing_header_blanks and all(not v.strip() for v in cells[named_columns:]):
+        return cells[:named_columns]
+    return cells
 
 
 def matches(header: str, keyword: str) -> bool:
@@ -101,6 +150,8 @@ def suggest_channel(header: str, rules=None) -> dict:
     statistic = statistics[0] if len(statistics) == 1 else "" if statistics else "mean"
     if re.search("gust", header, re.I) and statistic == "mean":
         statistic = ""
+    if re.search("gust", header, re.I):
+        quantity = ""
     height = re.search(r"(?<![\d.])(\d+(?:\.\d+)?)\s*m(?![/A-Za-z])", header, re.I)
     unit = {
         "speed": "m/s",
@@ -121,12 +172,17 @@ def suggest_channel(header: str, rules=None) -> dict:
         )
     if quantity == "temperature" and re.search(r"\bK\b", header):
         unit = "K"
+    arm = re.search(
+        r"\d+(?:\.\d+)?\s*m[_\s]+(NNE|ENE|ESE|SSE|SSW|WSW|WNW|NNW|NE|SE|SW|NW|N|E|S|W)(?=[_\s]|$)",
+        header,
+        re.I,
+    )
     return {
         "quantity": quantity,
         "statistic": statistic,
         "height": float(height[1]) if height else None,
         "unit": unit,
-        "arm": "",
+        "arm": arm[1].upper() if arm else "",
         "ambiguous": len(quantities) != 1 or len(statistics) > 1,
         "note": "建议待确认；未识别高度/单位须手工填写。",
     }
@@ -157,7 +213,7 @@ def preview(content: bytes, header_line: int | None = None, delimiter: str | Non
         )
         if not any(sep in line for sep in ["\t", ",", ";"]):
             delimiter = "space"
-    headers = split_line(line, delimiter)
+    headers, trailing_blanks = split_headers(line, delimiter)
     return {
         "encoding": encoding,
         "header_line": header_line,
@@ -166,7 +222,8 @@ def preview(content: bytes, header_line: int | None = None, delimiter: str | Non
         "line_count": len(lines),
         "headers": headers,
         "sample_rows": [
-            split_line(line, delimiter) for line in lines[header_line : header_line + 5]
+            normalize_record(split_line(line, delimiter), len(headers), trailing_blanks)
+            for line in lines[header_line : header_line + 5]
         ],
         "suggestions": [dict(index=i, **suggest_channel(value)) for i, value in enumerate(headers)],
         "text_preview": "\n".join(lines[:35]),
@@ -174,8 +231,8 @@ def preview(content: bytes, header_line: int | None = None, delimiter: str | Non
 
 
 def parse_timestamp(text: str, timezone: str, format_: str) -> datetime:
-    if timezone not in {"UTC", "Asia/Shanghai"}:
-        raise CalculationError("首版明确支持UTC或北京时间，请先转换其他时间基准。")
+    if timezone not in {"UTC", "Asia/Shanghai", "Etc/GMT-8"}:
+        raise CalculationError("首版支持UTC、北京时间历史时区或固定UTC+8，请先转换其他时间基准。")
     if format_ != "auto":
         value = datetime.strptime(text, format_)
     else:
@@ -199,7 +256,7 @@ def parse_dataset(content: bytes, options: ParseOptions) -> dict:
         raise CalculationError("数据起始行应晚于表头且在文件范围内。")
     if options.timestamp_position not in {"start", "end"}:
         raise CalculationError("时间戳位置须为start或end。")
-    headers = split_line(lines[options.header_line - 1], options.delimiter)
+    headers, trailing_blanks = split_headers(lines[options.header_line - 1], options.delimiter)
     indices = [c.index for c in options.channels]
     if (
         len(indices) != len(set(indices))
@@ -224,7 +281,7 @@ def parse_dataset(content: bytes, options: ParseOptions) -> dict:
     for row_no, line in enumerate(lines[options.data_line - 1 :], options.data_line):
         if not line.strip():
             continue
-        cells = split_line(line, options.delimiter)
+        cells = normalize_record(split_line(line, options.delimiter), len(headers), trailing_blanks)
         if len(cells) != len(headers):
             raise CalculationError(
                 f"第{row_no}行有{len(cells)}列，表头有{len(headers)}列；请核对分隔符和数据起始行。"

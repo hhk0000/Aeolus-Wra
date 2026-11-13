@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { getHealth } from "./api";
+import SavedRunPreview from "./features/wind-workspace/SavedRunPreview";
 import AnalysisWorkspace from "./features/wind-workspace/AnalysisWorkspace";
 import {
   ResultsWorkspace,
@@ -122,7 +123,21 @@ function WindScene() {
   );
 }
 export default function App() {
+  const query = new URLSearchParams(window.location.search);
+  return query.has("run") ? (
+    <SavedRunPreview
+      runId={query.get("run") ?? ""}
+      correlationId={query.get("correlation") ?? ""}
+      initialView={query.get("view") ?? "monthly"}
+    />
+  ) : (
+    <WorkspaceApp />
+  );
+}
+
+function WorkspaceApp() {
   const [page, setPage] = useState(0);
+  const [pageHistory, setPageHistory] = useState<number[]>([]);
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
       const saved = JSON.parse(
@@ -271,6 +286,7 @@ export default function App() {
   }, [modal]);
   const current = projects[selected];
   const go = (i: number) => {
+    if (i !== page) setPageHistory((v) => [...v, page]);
     setPage(i);
     setQuery("");
   };
@@ -325,6 +341,16 @@ export default function App() {
       </aside>
       <main>
         <header className="topbar">
+          <button
+            className="ww-button"
+            disabled={!pageHistory.length}
+            onClick={() => {
+              setPage(pageHistory.at(-1) ?? 0);
+              setPageHistory((v) => v.slice(0, -1));
+            }}
+          >
+            ← 返回
+          </button>
           <span>
             Aeolus Wra <span className="slash">/</span>{" "}
             <strong>{sections[page]}</strong>

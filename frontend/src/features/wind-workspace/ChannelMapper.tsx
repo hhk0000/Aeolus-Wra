@@ -80,7 +80,15 @@ export default function ChannelMapper({
       );
       if (
         !channels.length ||
-        channels.some((m) => !m.height || !m.unit || !m.statistic)
+        channels.some(
+          (m) =>
+            m.height === null ||
+            m.height < 0 ||
+            ((m.quantity === "speed" || m.quantity === "direction") &&
+              m.height === 0) ||
+            !m.unit ||
+            !m.statistic,
+        )
       )
         throw new Error(
           "请确认所导入通道的高度、单位和统计类型；无关列选择不导入。",
@@ -214,7 +222,8 @@ export default function ChannelMapper({
             onChange={(e) => setTimezone(e.target.value)}
           >
             <option value="">请核对文件说明</option>
-            <option value="Asia/Shanghai">北京时间 UTC+8</option>
+            <option value="Etc/GMT-8">固定 UTC+8（不应用历史夏令时）</option>
+            <option value="Asia/Shanghai">上海时区（含历史夏令时规则）</option>
             <option value="UTC">UTC</option>
           </select>
         </label>

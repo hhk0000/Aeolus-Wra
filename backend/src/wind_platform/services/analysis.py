@@ -9,6 +9,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from wind_platform.core import calculations as calc
+from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import parse_timestamp
 from wind_platform.core.power_classes import power_class
 from wind_platform.core.standards import ENGINE_VERSION
@@ -16,6 +17,9 @@ from wind_platform.services.store import LocalStore
 
 
 class AnalysisOptions(BaseModel):
+    rose_all_directions: bool = False
+    weibull_method: str = "mle"
+    annual_days: int = Field(default=365, ge=365, le=366)
     raw_id: str | None = None
     qc_id: str | None = None
     result_id: str | None = None
@@ -196,6 +200,10 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                 raise calc.CalculationError("原始与质控步长不同，不能直接计算保留率。")
             a, b, raw_mask = period(raw, config.observed_start, config.observed_end)
             _, _, qc_mask = period(qc, a.isoformat(), b.isoformat())
+            annual_mask = (
+                period(qc, config.start, config.end)[2] if config.start and config.end else None
+            )
+            annual_expected = config.annual_days * 24 * 60 // qc["options"]["interval_minutes"]
             expected = expected_count(a, b, raw["options"]["interval_minutes"])
             if expected == 0:
                 raise calc.CalculationError("没有应测时间格。")
@@ -235,6 +243,10 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                         "raw_records": raw_count,
                         "raw_valid": int(np.isfinite(values(r, raw_mask)).sum()),
                         "qc_valid": len(valid),
+                        "annual_expected": annual_expected,
+                        "annual_valid": int(np.isfinite(values(c, annual_mask)).sum())
+                        if annual_mask is not None
+                        else None,
                         "expected": expected,
                         "retention_percent": len(valid) / raw_count * 100 if raw_count else None,
                         "standard_completeness_percent": len(valid) / expected * 100,
@@ -543,7 +555,7 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
             for c, v in series:
                 freq = calc.frequencies(v)
                 if fit:
-                    fitted = calc.weibull(v)
+                    fitted = fit_weibull(v, config.weibull_method)
                     freq = [dict(row, **fitted["rows"][i]) for i, row in enumerate(freq)]
                     summaries.append(
                         {key: value for key, value in fitted.items() if key != "rows"}
@@ -559,15 +571,45 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
             if d is None:
                 raise calc.CalculationError("请明确结果数据风向通道。")
             rows, summaries = [], []
-            for c, v in series:
+            rose_series = [(c, v, d) for c, v in series]
+            if config.rose_all_directions:
+                rose_series = []
+                for dc in result["channels"]:
+                    if dc["quantity"] != "direction" or dc["statistic"] != "mean":
+                        continue
+                    dv = values(dc, mask)
+                    if config.aggregation == "hourly":
+                        _, direction_arrays = aggregate(
+                            times(result, mask),
+                            [dv],
+                            result["options"]["interval_minutes"],
+                            {0},
+                        )
+                        dv = direction_arrays[0]
+                    for c, v in series:
+                        label = {
+                            **c,
+                            "name": f"{c['name']} / WD-{dc['height']:g}m",
+                            "direction_height": dc["height"],
+                        }
+                        rose_series.append((label, v, dv))
+            for c, v, direction_values in rose_series:
                 for month in range(1, 13) if monthly else [0]:
                     ids = [i for i, t in enumerate(result_stamps) if not month or t.month == month]
                     if not ids:
                         continue
                     try:
-                        item = calc.rose(v[ids], d[ids], config.sectors, config.calm_threshold)
+                        item = calc.rose(
+                            v[ids], direction_values[ids], config.sectors, config.calm_threshold
+                        )
                         rows.extend(
-                            dict(row, channel=c["name"], height=c["height"], month=month)
+                            dict(
+                                row,
+                                channel=c["name"],
+                                height=c["height"],
+                                month=month,
+                                direction_height=c.get("direction_height", direction["height"]),
+                            )
                             for row in item["rows"]
                         )
                         summaries.append(
@@ -786,7 +828,10 @@ def run_long_term(store, config):
         datetime.fromisoformat(result["start"]) > a
         or datetime.fromisoformat(result["end_exclusive"]) < b
     ):
-        raise calc.CalculationError("所选结果文件不覆盖该完整分析年，请核对。")
+        _, _, result_mask = period(result, a.isoformat(), b.isoformat())
+        required = 365 * 24 * 60 / result["options"]["interval_minutes"]
+        if int(result_mask.sum()) < required:
+            raise calc.CalculationError("所选结果文件不足365天数据量，请核对。")
     c = channel(data, config.speed_channel, "speed", "mean")
     rows, all_values = [], {}
     for offset in range(1 - max(config.windows), 1):

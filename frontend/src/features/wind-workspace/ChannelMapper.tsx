@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { applySourceDefaults, DEFAULT_TIMEZONE } from "./autoSetup";
 import { api } from "./api";
 import type { Dataset, Mapping, UploadedFile } from "./api";
 import type { SourceFile, WorkspaceViewProps } from "./model";
@@ -32,16 +33,33 @@ export default function ChannelMapper({
   const [dataLine, setDataLine] = useState(String(preview.data_line));
   const [delimiter, setDelimiter] = useState(preview.delimiter);
   const [maps, setMaps] = useState<Mapping[]>(preview.suggestions);
-  const [stampColumn, setStampColumn] = useState(0);
-  const [timeColumn, setTimeColumn] = useState("");
+  const [stampColumn, setStampColumn] = useState(
+    preview.detected?.timestamp_column ?? 0,
+  );
+  const [timeColumn, setTimeColumn] = useState(
+    preview.detected?.time_column == null
+      ? ""
+      : String(preview.detected.time_column),
+  );
   const [format, setFormat] = useState("");
   const tower = state.towers.find((t) => t.id === source.towerId);
   const [timezone, setTimezone] = useState(
-    tower?.timezone ||
-      (source.kind === "reference" ? state.longTerm.timezone : ""),
+    source.dataset?.options.timezone ||
+      preview.detected?.timezone ||
+      tower?.timezone ||
+      (source.kind === "reference" ? state.longTerm.timezone : "") ||
+      DEFAULT_TIMEZONE,
   );
-  const [step, setStep] = useState(source.kind === "reference" ? "60" : "10");
-  const [position, setPosition] = useState("start");
+  const [step, setStep] = useState(
+    String(
+      source.dataset?.options.interval_minutes ??
+        preview.detected?.interval_minutes ??
+        (source.kind === "reference" ? 60 : 10),
+    ),
+  );
+  const [position, setPosition] = useState(
+    preview.detected?.timestamp_position ?? "start",
+  );
   const [missing, setMissing] = useState("-9999, -999, NaN");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -115,18 +133,17 @@ export default function ChannelMapper({
           }),
         ),
       });
-      onChange((current) => ({
-        ...current,
-        files: current.files.map((f) =>
-          f.id === source.id ? { ...f, dataset } : f,
+      onChange((current) =>
+        applySourceDefaults(
+          {
+            ...current,
+            files: current.files.map((f) =>
+              f.id === source.id ? { ...f, dataset, warning: "" } : f,
+            ),
+          },
+          { ...source, dataset, warning: "" },
         ),
-        towers: current.towers.map((t) =>
-          t.id === source.towerId
-            ? { ...t, timezone: t.timezone || timezone }
-            : t,
-        ),
-        planSaved: false,
-      }));
+      );
       onNotice(
         `已解析 ${dataset.row_count.toLocaleString()} 条记录、${dataset.channels.length} 个通道。原文件单独保留，未修改。`,
       );
@@ -148,6 +165,11 @@ export default function ChannelMapper({
           SHA256 {preview.sha256.slice(0, 12)}…
         </span>
       </div>
+      {(preview.detected?.warnings?.length ?? 0) > 0 && (
+        <p className="ww-inline-note">
+          自动识别提示：{preview.detected!.warnings!.join("；")}
+        </p>
+      )}
       <div className="ww-fields ww-fields-four">
         <label>
           表头行号（1起）

@@ -1,3 +1,4 @@
+import { activateTower } from "./autoSetup";
 import AnalysisSetup from "./AnalysisSetup";
 import CorrelationSetup from "./CorrelationSetup";
 import DataSources from "./DataSources";
@@ -45,7 +46,7 @@ export default function AnalysisWorkspace(props: Props) {
         <div>
           <span className="ww-overline">FROM DATA TO INSIGHT</span>
           <h2>让每一份数据，流向正确的分析</h2>
-          <p>四类输入独立管理，图表、统计表与报告内容沿用明确的数据来源。</p>
+          <p>拖入资料后自动识别测风塔、通道与时段，按左侧步骤查看分析。</p>
         </div>
         <div className="ww-completion">
           <strong>
@@ -58,70 +59,74 @@ export default function AnalysisWorkspace(props: Props) {
           </div>
         </div>
       </section>
-      <div className="ww-workspace-toolbar">
-        <div className="ww-primary-tabs" role="tablist" aria-label="分析工作流">
-          {tabs.map(([id, label, number]) => (
-            <button
-              key={id}
-              id={`ww-tab-${id}`}
-              role="tab"
-              aria-controls={`ww-panel-${id}`}
-              aria-selected={state.activeTab === id}
-              className={state.activeTab === id ? "active" : ""}
-              onClick={() =>
-                onChange((current) => ({ ...current, activeTab: id }))
-              }
-            >
-              <span>{number}</span>
-              {label}
-            </button>
-          ))}
-        </div>
-        <button className="ww-button" onClick={downloadConfiguration}>
-          ↓ 导出配置
-        </button>
-      </div>
-      {state.activeTab !== "data" && (
-        <div className="ww-active-tower">
-          <label>
-            当前测风塔{" "}
-            <select
-              aria-label="分析测风塔"
-              value={state.activeTowerId}
-              onChange={(e) =>
-                onChange((current) => ({
-                  ...current,
-                  activeTowerId: e.target.value,
-                }))
-              }
-            >
-              {state.towers.map((tower) => (
-                <option key={tower.id} value={tower.id}>
-                  {tower.name || "未命名测风塔"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="ww-text-button"
-            onClick={() =>
-              onChange((current) => ({ ...current, activeTab: "data" }))
-            }
+      <div className="ww-workspace-board">
+        <div className="ww-workspace-toolbar">
+          <div
+            className="ww-primary-tabs"
+            role="tablist"
+            aria-orientation="vertical"
+            aria-label="分析工作流"
           >
-            管理数据资料 →
+            {tabs.map(([id, label, number]) => (
+              <button
+                key={id}
+                id={`ww-tab-${id}`}
+                role="tab"
+                aria-controls={`ww-panel-${id}`}
+                aria-selected={state.activeTab === id}
+                className={state.activeTab === id ? "active" : ""}
+                onClick={() =>
+                  onChange((current) => ({ ...current, activeTab: id }))
+                }
+              >
+                <span>{number}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className="ww-button" onClick={downloadConfiguration}>
+            ↓ 导出配置
           </button>
         </div>
-      )}
-      <div
-        role="tabpanel"
-        id={`ww-panel-${state.activeTab}`}
-        aria-labelledby={`ww-tab-${state.activeTab}`}
-      >
-        {state.activeTab === "data" && <DataSources {...props} />}
-        {state.activeTab === "analysis" && <AnalysisSetup {...props} />}
-        {state.activeTab === "correlation" && <CorrelationSetup {...props} />}
-        {state.activeTab === "long-term" && <LongTermSetup {...props} />}
-        {state.activeTab === "tools" && <AlgorithmTools {...props} />}
+        {state.activeTab !== "data" && (
+          <div className="ww-active-tower">
+            <label>
+              当前测风塔{" "}
+              <select
+                aria-label="分析测风塔"
+                value={state.activeTowerId}
+                onChange={(e) =>
+                  onChange((current) => activateTower(current, e.target.value))
+                }
+              >
+                {state.towers.map((tower) => (
+                  <option key={tower.id} value={tower.id}>
+                    {tower.name || "未命名测风塔"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="ww-text-button"
+              onClick={() =>
+                onChange((current) => ({ ...current, activeTab: "data" }))
+              }
+            >
+              管理数据资料 →
+            </button>
+          </div>
+        )}
+        <div
+          role="tabpanel"
+          id={`ww-panel-${state.activeTab}`}
+          aria-labelledby={`ww-tab-${state.activeTab}`}
+        >
+          {state.activeTab === "data" && <DataSources {...props} />}
+          {state.activeTab === "analysis" && <AnalysisSetup {...props} />}
+          {state.activeTab === "correlation" && <CorrelationSetup {...props} />}
+          {state.activeTab === "long-term" && <LongTermSetup {...props} />}
+          {state.activeTab === "tools" && <AlgorithmTools {...props} />}
+        </div>
       </div>
       <div className="ww-workspace-footer">
         <span>本机计算 · 来源与版本可追溯 · 每项结果独立提示适用条件</span>

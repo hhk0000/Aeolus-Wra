@@ -46,6 +46,7 @@ export const SOURCE_TYPES: {
 ];
 
 export interface Tower {
+  intervalMinutes?: string;
   id: string;
   name: string;
   latitude: string;
@@ -100,6 +101,8 @@ export interface CorrelationJob extends CorrelationDraft {
 }
 
 export interface WorkspaceState {
+  analysisByTower?: Record<string, WorkspaceState["analysis"]>;
+  autoValues?: Record<string, Partial<Record<keyof Tower, string>>>;
   activeTab: WorkspaceTab;
   towers: Tower[];
   activeTowerId: string;

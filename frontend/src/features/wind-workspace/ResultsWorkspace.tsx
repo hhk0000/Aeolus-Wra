@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { activateTower } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
 import type { SourceKind, WorkspaceTab, WorkspaceViewProps } from "./model";
 import { ResultView } from "./ResultView";
@@ -74,10 +75,7 @@ export function ResultsWorkspace({
             aria-label="图表测风塔"
             value={state.activeTowerId}
             onChange={(e) =>
-              onChange((current) => ({
-                ...current,
-                activeTowerId: e.target.value,
-              }))
+              onChange((current) => activateTower(current, e.target.value))
             }
           >
             {state.towers.map((t) => (

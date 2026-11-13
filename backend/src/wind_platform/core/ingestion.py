@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import re
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -188,6 +189,95 @@ def suggest_channel(header: str, rules=None) -> dict:
     }
 
 
+_STAMP_FORMATS = (
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+)
+
+
+def _read_stamp(token: str) -> datetime:
+    """Parse one timestamp label without guessing month/day order."""
+    cleaned = token.strip().replace("/", "-")
+    try:
+        return datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+    for fmt in _STAMP_FORMATS:
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"unrecognized timestamp: {token!r}")
+
+
+def _timestamp_columns(headers: list[str]) -> tuple[int, int | None]:
+    """Pick the date/timestamp column, and a separate time-of-day column if present."""
+    strong = [
+        index
+        for index, header in enumerate(headers)
+        if re.search(r"date|日期|时间戳|timestamp|datetime", header, re.I)
+    ]
+    weak = [
+        index
+        for index, header in enumerate(headers)
+        if index not in strong and re.fullmatch(r"time|时间|时刻|hh:?mm", header.strip(), re.I)
+    ]
+    timestamp_column = strong[0] if strong else weak[0] if weak else 0
+    time_column = next(
+        (
+            index
+            for index, header in enumerate(headers)
+            if index != timestamp_column and re.fullmatch(r"time|时间|时刻", header.strip(), re.I)
+        ),
+        None,
+    )
+    return timestamp_column, time_column
+
+
+def _detect_timezone(stamps: list[datetime], preamble: str) -> tuple[str | None, list[str]]:
+    """Infer a supported timezone only from explicit evidence; never silently assume."""
+    aware = [stamp for stamp in stamps if stamp.utcoffset() is not None]
+    if aware and len(aware) != len(stamps):
+        return None, ["文件内时间戳部分带时区偏移、部分不带，导入时请明确时间基准。"]
+    if aware:
+        offsets = {stamp.utcoffset() for stamp in aware}
+        if len(offsets) > 1:
+            return None, ["文件内时间戳的UTC偏移不一致，请核对或先统一时间基准。"]
+        offset = offsets.pop().total_seconds()
+        known = {0: "UTC", 28800: "Etc/GMT-8"}
+        if offset in known:
+            return known[offset], []
+        return None, [f"文件时间戳偏移为 UTC{offset / 3600:+g} 小时，首版仅支持UTC或固定UTC+8。"]
+    declaration = re.search(
+        r"(?:time\s*zone|时间基准|时区|tz)\s*[:=：]\s*(?:UTC|GMT)\s*([+-]\s*\d{1,2}(?::\d{2})?)?",
+        preamble,
+        re.I,
+    )
+    if declaration:
+        hours = declaration.group(1)
+        if hours is None:
+            return "UTC", []
+        value = int(hours.replace(" ", "").split(":")[0])
+        if value == 0:
+            return "UTC", []
+        if value == 8:
+            return "Etc/GMT-8", []
+        return None, [f"文件声明的时区偏移为 UTC{value:+d}，首版仅支持UTC或固定UTC+8。"]
+    if re.search(r"北京时间|中国标准时间", preamble):
+        return "Etc/GMT-8", []
+    return None, []
+
+
+def _detect_position(preamble: str) -> str:
+    if re.search(r"时间戳.*(?:终点|结束)|time\s*stamps?.*\bend\b", preamble, re.I):
+        return "end"
+    if re.search(r"时间戳.*(?:起点|开始)|time\s*stamps?.*\b(?:start|beginning)\b", preamble, re.I):
+        return "start"
+    return "start"
+
+
 def preview(content: bytes, header_line: int | None = None, delimiter: str | None = None) -> dict:
     text, encoding = decode_text(content)
     lines = text.splitlines()
@@ -214,7 +304,53 @@ def preview(content: bytes, header_line: int | None = None, delimiter: str | Non
         if not any(sep in line for sep in ["\t", ",", ";"]):
             delimiter = "space"
     headers, trailing_blanks = split_headers(line, delimiter)
+    timestamp_column, time_column = _timestamp_columns(headers)
+    stamps = []
+    skipped = 0
+    for row in lines[header_line : header_line + 300]:
+        cells = split_line(row, delimiter)
+        try:
+            token = cells[timestamp_column].strip()
+            if time_column is not None:
+                token += " " + cells[time_column].strip()
+            stamps.append(_read_stamp(token))
+        except (IndexError, ValueError):
+            skipped += 1
+
+    def step_seconds(earlier: datetime, later: datetime) -> int | None:
+        if (earlier.utcoffset() is None) != (later.utcoffset() is None):
+            return None  # mixed offset awareness; reported separately
+        return int((later - earlier).total_seconds())
+
+    gaps = Counter(
+        seconds
+        for earlier, later in zip(stamps, stamps[1:], strict=False)
+        if (seconds := step_seconds(earlier, later)) is not None and seconds > 0
+    )
+    gap_seconds = gaps.most_common(1)[0][0] if gaps else None
+    interval = gap_seconds // 60 if gap_seconds and gap_seconds % 60 == 0 else None
+    if interval is not None and not 1 <= interval <= 1440:
+        interval = None
+    warnings = []
+    if not stamps:
+        warnings.append("未识别到可用时间戳，请在导入设置中选择时间列或手动指定格式。")
+    elif not gaps:
+        warnings.append("时间戳可以解析，但没有识别出重复步长；请核对时间列或手动设置步长。")
+    if skipped and stamps:
+        warnings.append(f"前{len(stamps) + skipped}行中有{skipped}行时间戳未能解析，已跳过。")
+    preamble = "\n".join(lines[: header_line - 1])
+    timezone, timezone_warnings = _detect_timezone(stamps, preamble)
+    warnings.extend(timezone_warnings)
+    position = _detect_position(preamble)
     return {
+        "detected": {
+            "timestamp_column": timestamp_column,
+            "time_column": time_column,
+            "interval_minutes": interval,
+            "timezone": timezone,
+            "timestamp_position": position,
+            "warnings": warnings,
+        },
         "encoding": encoding,
         "header_line": header_line,
         "data_line": header_line + 1,

@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { initializeDefaults } from "./autoSetup";
 import type { Run } from "./api";
 import type { WorkspaceState } from "./model";
 
@@ -25,7 +26,7 @@ export function loadWorkspaceCache(): Record<number, WorkspaceState> {
         ([, s]) =>
           Array.isArray(s?.state?.towers) && Array.isArray(s?.state?.files),
       )
-      .map(([id, saved]) => [id, saved.state]),
+      .map(([id, saved]) => [id, initializeDefaults(saved.state)]),
   );
 }
 export function saveWorkspaceCache(workspaces: Record<number, WorkspaceState>) {

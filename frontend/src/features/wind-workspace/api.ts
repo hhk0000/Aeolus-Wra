@@ -18,6 +18,14 @@ export interface Mapping {
   ambiguous?: boolean;
 }
 export interface UploadedFile {
+  detected?: {
+    timestamp_column: number;
+    time_column: number | null;
+    interval_minutes: number | null;
+    timezone: string | null;
+    timestamp_position: string;
+    warnings?: string[];
+  };
   id: string;
   sha256: string;
   encoding: string;

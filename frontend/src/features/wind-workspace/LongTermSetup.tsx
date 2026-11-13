@@ -1,3 +1,4 @@
+import { applySourceDefaults, nextAnniversary } from "./autoSetup";
 import { useState } from "react";
 import { filesForTower, longTermErrors } from "./model";
 import type { WorkspaceViewProps } from "./model";
@@ -27,6 +28,13 @@ export default function LongTermSetup({
   const reference = references.find(
     (f) => f.id === state.longTerm.fileId,
   )?.dataset;
+  const span =
+    new Date(tower.analysisEnd).getTime() -
+    new Date(tower.analysisStart).getTime();
+  const referenceEnd =
+    tower.analysisStart && span >= 365 * 86400000
+      ? nextAnniversary(tower.analysisStart)
+      : tower.analysisEnd;
   async function run() {
     setShowErrors(true);
     if (errors.length) return;
@@ -37,13 +45,7 @@ export default function LongTermSetup({
         (f) => f.id === state.analysis.resultFileId,
       )?.dataset;
       if (!reference || !result)
-        throw new Error(
-          "请解析中尺度与结果文件，并在风资源分析中选择本次结果文件。",
-        );
-      if (reference.options.timezone !== state.longTerm.timezone)
-        throw new Error(
-          "此处时间基准与中尺度解析记录不一致；请核对来源，在数据资料中重新解析后使用。",
-        );
+        throw new Error("请先导入中尺度与结果数据，文件将自动关联。");
       const channels = means(reference).filter(
         (c) => c.height === Number(state.longTerm.height),
       );
@@ -55,7 +57,7 @@ export default function LongTermSetup({
         speed_channel: channels[0].id,
         direction_channel: state.longTerm.directionChannel || undefined,
         start: tower.analysisStart,
-        end: tower.analysisEnd,
+        end: referenceEnd,
         timezone: tower.timezone,
         windows: years,
         direction_period: state.longTerm.directionPeriod,
@@ -93,11 +95,12 @@ export default function LongTermSetup({
               <select
                 value={state.longTerm.fileId}
                 onChange={(e) =>
-                  onChange((current) => ({
-                    ...current,
-                    longTerm: { ...current.longTerm, fileId: e.target.value },
-                    planSaved: false,
-                  }))
+                  onChange((current) => {
+                    const file = current.files.find(
+                      (f) => f.id === e.target.value,
+                    );
+                    return file ? applySourceDefaults(current, file) : current;
+                  })
                 }
               >
                 <option value="">选择已添加的中尺度数据</option>
@@ -124,28 +127,14 @@ export default function LongTermSetup({
                 placeholder="例如 100"
               />
             </label>
-            <label>
-              中尺度数据时间基准
-              <select
-                value={state.longTerm.timezone}
-                onChange={(e) =>
-                  onChange((current) => ({
-                    ...current,
-                    longTerm: { ...current.longTerm, timezone: e.target.value },
-                    planSaved: false,
-                  }))
-                }
-              >
-                <option value="">请核对来源说明</option>
-                <option value="UTC">UTC</option>
-                <option value="Etc/GMT-8">
-                  固定 UTC+8（不应用历史夏令时）
-                </option>
-                <option value="Asia/Shanghai">
-                  上海时区（含历史夏令时规则）
-                </option>
-              </select>
-            </label>
+            <details className="ww-wide">
+              <summary>时间设置（高级）</summary>
+              <p>
+                已沿用文件导入时的时间设置：
+                {reference?.options.timezone || "导入后自动识别"}
+                。如需更改，在数据资料中展开对应文件的导入设置。
+              </p>
+            </details>
             <label className="ww-wide">
               长期统计窗口（年）
               <input
@@ -186,9 +175,9 @@ export default function LongTermSetup({
             <span>结果数据分析年</span>
             <strong>
               {tower.analysisStart || "开始日期待确认"} <span>→</span>{" "}
-              {tower.analysisEnd || "结束日期待确认"}
+              {referenceEnd || "结束日期待确认"}
             </strong>
-            <small>在“风资源分析”页确认；不会自动改用自然年。</small>
+            <small>按结果数据起点逐周年分组；已自动沿用导入的时间设置。</small>
           </div>
         </section>
         <section className="ww-panel ww-longterm-preview">

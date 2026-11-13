@@ -1,11 +1,6 @@
 import { useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import {
-  SOURCE_TYPES,
-  filesForTower,
-  newTower,
-  suggestHeaderMetadata,
-} from "./model";
+import { SOURCE_TYPES, filesForTower, newTower } from "./model";
 import type {
   SourceFile,
   SourceKind,
@@ -15,6 +10,13 @@ import type {
 import { api } from "./api";
 import type { UploadedFile } from "./api";
 import ChannelMapper from "./ChannelMapper";
+import {
+  activateTower,
+  applySourceDefaults,
+  autoParseSource,
+  DEFAULT_TIMEZONE,
+  forgetFile,
+} from "./autoSetup";
 
 export default function DataSources({
   state,
@@ -29,9 +31,6 @@ export default function DataSources({
     (f) =>
       f.id === previewId && (f.towerId === tower.id || f.kind === "reference"),
   );
-  const suggestions =
-    preview?.kind === "raw" ? suggestHeaderMetadata(preview.preview) : {};
-  const suggestionCount = Object.keys(suggestions).length;
 
   function setTower(key: keyof Tower, value: string) {
     onChange((current) => ({
@@ -84,7 +83,7 @@ export default function DataSources({
           kind === "reference" ? "reference" : selectedTowerId,
         );
         const server = await api<UploadedFile>("/files", form);
-        return {
+        const source: SourceFile = {
           id: crypto.randomUUID(),
           kind,
           towerId: kind === "reference" ? null : selectedTowerId,
@@ -98,6 +97,14 @@ export default function DataSources({
           warning: "",
           server,
         };
+        try {
+          return await autoParseSource(
+            source,
+            tower.timezone || DEFAULT_TIMEZONE,
+          );
+        } catch (e) {
+          return { ...source, warning: (e as Error).message };
+        }
       }),
     );
     const additions = results
@@ -122,16 +129,24 @@ export default function DataSources({
               item.file.lastModified === next.file.lastModified,
           ),
       );
-      return {
+      const next: typeof current = {
         ...current,
         files: [...current.files, ...fresh],
         planSaved: false,
       };
+      return fresh.reduce(
+        (value, file) => applySourceDefaults(value, file),
+        next,
+      );
     });
     if (additions[0]) setPreviewId(additions[0].id);
     setBusy(false);
     if (additions.length)
-      onNotice("原始字节已保存到本机分析服务，请确认时间与通道映射后解析。");
+      onNotice(
+        additions.every((f) => f.dataset)
+          ? "数据已自动导入，测风塔信息和分析配置已更新。"
+          : "文件已保存；部分信息无法识别，请展开对应文件的导入设置补充。",
+      );
   }
 
   function pick(kind: SourceKind, event: ChangeEvent<HTMLInputElement>) {
@@ -162,10 +177,7 @@ export default function DataSources({
             value={tower.id}
             onChange={(e) => {
               setPreviewId("");
-              onChange((current) => ({
-                ...current,
-                activeTowerId: e.target.value,
-              }));
+              onChange((current) => activateTower(current, e.target.value));
             }}
           >
             {state.towers.map((t) => (
@@ -179,12 +191,16 @@ export default function DataSources({
           className="ww-button"
           onClick={() => {
             const next = newTower(crypto.randomUUID(), state.towers.length + 1);
-            onChange((current) => ({
-              ...current,
-              towers: [...current.towers, next],
-              activeTowerId: next.id,
-              planSaved: false,
-            }));
+            onChange((current) =>
+              activateTower(
+                {
+                  ...current,
+                  towers: [...current.towers, next],
+                  planSaved: false,
+                },
+                next.id,
+              ),
+            );
             setPreviewId("");
           }}
         >
@@ -263,13 +279,17 @@ export default function DataSources({
                         className="ww-remove"
                         aria-label={`移除${source.shortLabel}文件 ${item.file.name}`}
                         onClick={() => {
-                          onChange((current) => ({
-                            ...current,
-                            files: current.files.filter(
-                              (f) => f.id !== item.id,
+                          onChange((current) =>
+                            forgetFile(
+                              {
+                                ...current,
+                                files: current.files.filter(
+                                  (f) => f.id !== item.id,
+                                ),
+                              },
+                              item.id,
                             ),
-                            planSaved: false,
-                          }));
+                          );
                           if (previewId === item.id) setPreviewId("");
                         }}
                       >
@@ -289,66 +309,41 @@ export default function DataSources({
       </p>
 
       {preview && (
-        <section className="ww-panel ww-file-preview">
-          <div className="ww-section-heading">
-            <div>
-              <span className="ww-overline">FILE HEADER</span>
-              <h2>{preview.file.name}</h2>
-            </div>
-            <button className="ww-button" onClick={() => setPreviewId("")}>
-              收起预览
-            </button>
-          </div>
-          {preview.warning ? (
-            <p className="ww-error">{preview.warning}</p>
-          ) : (
-            <pre>{preview.preview || "文件为空。"}</pre>
+        <details className="ww-panel" open={!preview.dataset}>
+          <summary>
+            查看文件头与导入设置 ·{" "}
+            {preview.dataset ? "已自动识别" : "需要补充识别信息"}
+          </summary>
+          <h3>{preview.file.name}</h3>
+          {preview.warning && <p className="ww-error">{preview.warning}</p>}
+          <p>
+            {preview.dataset
+              ? `已导入 ${preview.dataset.row_count.toLocaleString()} 条记录，信息已自动填入。`
+              : "文件已保存，请补充下方未识别的信息。"}
+          </p>
+          <details>
+            <summary>文件头原文</summary>
+            <pre>{preview.preview}</pre>
+          </details>
+          {preview.server && (
+            <ChannelMapper
+              key={preview.id}
+              source={preview}
+              state={state}
+              onChange={onChange}
+              onNotice={onNotice}
+            />
           )}
-          <div className="ww-preview-bottom">
-            <p>预览文件开头，用于核对基本信息；不代表已完成数据导入。</p>
-            {preview.kind === "raw" && (
-              <button
-                className="ww-button"
-                disabled={!suggestionCount}
-                onClick={() => {
-                  onChange((current) => ({
-                    ...current,
-                    towers: current.towers.map((t) =>
-                      t.id === tower.id ? { ...t, ...suggestions } : t,
-                    ),
-                    planSaved: false,
-                  }));
-                  onNotice(
-                    `已填写 ${suggestionCount} 项文件头建议，请核对测风塔基本信息。`,
-                  );
-                }}
-              >
-                {suggestionCount
-                  ? `采用 ${suggestionCount} 项基本信息建议`
-                  : "未匹配到明确的基本信息"}
-              </button>
-            )}
-          </div>
-        </section>
+        </details>
       )}
-      {preview?.server && (
-        <ChannelMapper
-          key={preview.id}
-          source={preview}
-          state={state}
-          onChange={onChange}
-          onNotice={onNotice}
-        />
-      )}
-
       <section className="ww-panel">
         <div className="ww-section-heading">
           <div>
             <span className="ww-overline">MAST INFORMATION</span>
             <h2>测风塔基本信息</h2>
-            <p>可采用原始文件头中的明确键值建议，未识别的信息在这里补充。</p>
+            <p>已根据文件自动填写。需要调整时可直接修改；空白项可按需补充。</p>
           </div>
-          <span className="ww-quiet-tag">请核对后使用</span>
+          <span className="ww-quiet-tag">自动识别 · 可修改</span>
         </div>
         <div className="ww-fields ww-fields-four">
           <label>
@@ -442,23 +437,28 @@ export default function DataSources({
             />
           </label>
           <label>
-            测风数据时间基准
-            <select
-              value={tower.timezone}
-              onChange={(e) => setTower("timezone", e.target.value)}
-            >
-              <option value="">请选择并核对文件说明</option>
-              <option value="Etc/GMT-8">固定 UTC+8（不应用历史夏令时）</option>
-              <option value="Asia/Shanghai">
-                上海时区（含历史夏令时规则）
-              </option>
-              <option value="UTC">UTC</option>
-            </select>
+            数据时间设置
+            <input
+              value={
+                tower.timezone === "Etc/GMT-8"
+                  ? "北京时间 UTC+8（默认）"
+                  : tower.timezone || "导入后自动识别"
+              }
+              readOnly
+            />
+            <small>特殊时间设置可在文件的高级导入设置中调整。</small>
           </label>
           <label>
             原始数据步长
-            <input value="10 分钟" readOnly />
-            <small>按本次需求记录；实际间隔仍需在导入时核对。</small>
+            <input
+              value={
+                tower.intervalMinutes
+                  ? `${tower.intervalMinutes} 分钟`
+                  : "导入数据后自动识别"
+              }
+              readOnly
+            />
+            <small>按文件中的实际时间间隔识别。</small>
           </label>
         </div>
         <details className="ww-details">
@@ -467,7 +467,7 @@ export default function DataSources({
             要素：风速、风向、温度、气压、湿度、电压。统计类型：平均值、标准差、最大值、最小值。
           </p>
           <p>
-            关键字及排除词后续可增删。排除词优先、短词按边界识别；所有自动建议均需在上方映射中核对，高度与单位可直接修改。
+            关键字及排除词后续可增删。排除词优先、短词按边界识别；识别结果已自动应用，高度与单位可在导入设置中修改。
           </p>
         </details>
       </section>

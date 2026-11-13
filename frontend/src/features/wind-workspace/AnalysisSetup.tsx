@@ -1,3 +1,4 @@
+import { dateTimeInput } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
 import type { WorkspaceViewProps } from "./model";
 import CalculationPanel from "./CalculationPanel";
@@ -26,9 +27,9 @@ export default function AnalysisSetup({
         <div className="ww-section-heading">
           <div>
             <span className="ww-overline">ANALYSIS YEAR</span>
-            <h2>以结果数据确定分析年</h2>
+            <h2>分析时段与轮毂高度</h2>
             <p>
-              结果文件已经完成分析年选取、插补、订正与轮毂高度外推；这里记录它实际覆盖的时段。
+              默认采用结果文件的实际起止时间与最高风速层；有特殊要求可直接修改。
             </p>
           </div>
           <span className="ww-source-chip result">结果数据</span>
@@ -37,16 +38,16 @@ export default function AnalysisSetup({
           <label>
             结果数据分析年起点
             <input
-              type="date"
-              value={tower.analysisStart}
+              type="datetime-local"
+              value={dateTimeInput(tower.analysisStart)}
               onChange={(e) => changeAnalysis("analysisStart", e.target.value)}
             />
           </label>
           <label>
             结果数据分析年终点（不含当天）
             <input
-              type="date"
-              value={tower.analysisEnd}
+              type="datetime-local"
+              value={dateTimeInput(tower.analysisEnd)}
               onChange={(e) => changeAnalysis("analysisEnd", e.target.value)}
             />
           </label>
@@ -73,7 +74,8 @@ export default function AnalysisSetup({
           统一采用左闭右开区间，例如2024-07-01至2025-07-01。长期参考沿用这里的分析年，不自动切换自然年。
         </p>
       </section>
-      <section className="ww-panel ww-qc-scope">
+      <details className="ww-panel ww-qc-scope">
+        <summary>质控统计范围（高级）</summary>
         <div>
           <h2>质控数据统计范围</h2>
           <p>
@@ -96,7 +98,7 @@ export default function AnalysisSetup({
             <option value="analysis">与结果数据分析年一致</option>
           </select>
         </label>
-      </section>
+      </details>
       <CalculationPanel state={state} onChange={onChange} onNotice={onNotice} />
       <div className="ww-section-heading">
         <div>

@@ -136,3 +136,12 @@ def test_non_minute_step_is_rejected_as_unknown():
         "2024-01-01T00:01:00\t7\n"
     )
     assert meta["interval_minutes"] is None
+
+
+@pytest.mark.parametrize("offset", ["+08:30", "-00:30", "+00:30", "+05:45", "+08:60"])
+def test_timezone_declaration_must_not_discard_offset_minutes(offset):
+    meta = detected(
+        f"Time Zone: UTC{offset}\nDate/Time\tWS100m\n2024-01-01 00:00\t5\n2024-01-01 00:10\t6\n"
+    )
+    assert meta["timezone"] is None
+    assert meta["warnings"]

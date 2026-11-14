@@ -259,12 +259,17 @@ def _detect_timezone(stamps: list[datetime], preamble: str) -> tuple[str | None,
         hours = declaration.group(1)
         if hours is None:
             return "UTC", []
-        value = int(hours.replace(" ", "").split(":")[0])
+        label = hours.replace(" ", "")
+        pieces = label[1:].split(":")
+        minutes = int(pieces[1]) if len(pieces) > 1 else 0
+        value = (int(pieces[0]) * 60 + minutes) * (-1 if label.startswith("-") else 1)
+        if minutes >= 60:
+            return None, [f"文件声明的时区 UTC{label} 分钟数无效，请核对时间基准。"]
         if value == 0:
             return "UTC", []
-        if value == 8:
+        if value == 480:
             return "Etc/GMT-8", []
-        return None, [f"文件声明的时区偏移为 UTC{value:+d}，首版仅支持UTC或固定UTC+8。"]
+        return None, [f"文件声明的时区偏移为 UTC{label}，首版仅支持UTC或固定UTC+8。"]
     if re.search(r"北京时间|中国标准时间", preamble):
         return "Etc/GMT-8", []
     return None, []

@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { RoseChart } from "./RoseChart";
@@ -230,166 +230,180 @@ function CartesianPlot({
   const label = (row: Record<string, unknown>) =>
     String(row.period ?? row.bin ?? row.label ?? row.group ?? "");
   return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      role="img"
-      aria-label="真实计算结果图"
-      fontFamily="Microsoft YaHei, sans-serif"
-    >
-      <rect width={w} height={h} fill="white" />
-      {[0, 1, 2, 3, 4].map((n) => (
-        <g key={n}>
-          <line
-            x1={left}
-            x2={right}
-            y1={top + (n * (bottom - top)) / 4}
-            y2={top + (n * (bottom - top)) / 4}
-            stroke="#e6ece8"
-          />
-          <text
-            x={left - 8}
-            y={top + (n * (bottom - top)) / 4 + 4}
-            textAnchor="end"
-            fontSize="11"
-            fill="#78887f"
-          >
-            {(
-              maxFor(used[0]) -
-              (n / 4) * (maxFor(used[0]) - minFor(used[0]))
-            ).toFixed(isTI || isShear ? 3 : 1)}
-          </text>
-          {dual && (
-            <text
-              x={right + 8}
-              y={top + (n * (bottom - top)) / 4 + 4}
-              fontSize="11"
-              fill={palette[1]}
-            >
-              {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
-            </text>
-          )}
-        </g>
-      ))}
-      {used.map((key, k) => (
-        <g key={key}>
-          {(isAnnual || isFrequency || outputId === "density") &&
-          key !== "fitted_frequency" &&
-          bars ? (
-            rows.map(
-              (row, i) =>
-                numeric(row[key]) && (
-                  <rect
-                    key={i}
-                    x={
-                      x(i) -
-                      ((right - left) / rows.length) * 0.35 +
-                      ((k * (right - left)) / rows.length) * 0.25
-                    }
-                    y={y(Number(row[key]), key)}
-                    width={Math.max(
-                      0.5,
-                      ((right - left) / rows.length) *
-                        (isFrequency ? 0.25 : 0.65),
-                    )}
-                    height={bottom - y(Number(row[key]), key)}
-                    fill={row.concurrent ? "#c65757" : palette[k]}
-                    opacity={row.complete === false ? 0.35 : 0.8}
-                  >
-                    <title>
-                      {label(row)} · {labels[key]}：{display(row[key])}
-                      {row.complete === false ? "（不完整周年）" : ""}
-                    </title>
-                  </rect>
-                ),
-            )
-          ) : (
-            <>
-              <polyline
-                fill="none"
-                stroke={palette[k]}
-                strokeWidth="2.3"
-                points={rows
-                  .map((row, i) =>
-                    numeric(row[key])
-                      ? `${x(i)},${y(Number(row[key]), key)}`
-                      : "",
-                  )
-                  .filter(Boolean)
-                  .join(" ")}
-              />
-              {rows.map(
-                (row, i) =>
-                  numeric(row[key]) && (
-                    <circle
-                      key={i}
-                      cx={x(i)}
-                      cy={y(Number(row[key]), key)}
-                      r="2.5"
-                      fill={palette[k]}
-                    >
-                      <title>
-                        {label(row)} · {labels[key]}：{display(row[key])}
-                      </title>
-                    </circle>
-                  ),
-              )}
-            </>
-          )}
-        </g>
-      ))}
-      {means
-        .filter((m) => numeric(m.mean_speed))
-        .map((m, i) => (
-          <g key={i}>
+    <figure className="ww-plot-figure">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        role="img"
+        aria-label="真实计算结果图"
+        fontFamily="Microsoft YaHei, sans-serif"
+      >
+        <rect width={w} height={h} fill="white" />
+        {[0, 1, 2, 3, 4].map((n) => (
+          <g key={n}>
             <line
               x1={left}
               x2={right}
-              y1={y(Number(m.mean_speed), "mean_speed")}
-              y2={y(Number(m.mean_speed), "mean_speed")}
-              stroke={String(m.color ?? palette[(i + 1) % palette.length])}
-              strokeDasharray="6 4"
+              y1={top + (n * (bottom - top)) / 4}
+              y2={top + (n * (bottom - top)) / 4}
+              stroke="#e6ece8"
             />
+            <text
+              x={left - 8}
+              y={top + (n * (bottom - top)) / 4 + 4}
+              textAnchor="end"
+              fontSize="11"
+              fill="#78887f"
+            >
+              {(
+                maxFor(used[0]) -
+                (n / 4) * (maxFor(used[0]) - minFor(used[0]))
+              ).toFixed(isTI || isShear ? 3 : 1)}
+            </text>
+            {dual && (
+              <text
+                x={right + 8}
+                y={top + (n * (bottom - top)) / 4 + 4}
+                fontSize="11"
+                fill={palette[1]}
+              >
+                {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
+              </text>
+            )}
           </g>
         ))}
-      {rows.map(
-        (row, i) =>
-          i % Math.max(1, Math.ceil(rows.length / 13)) === 0 && (
-            <text
-              key={i}
-              x={x(i)}
-              y={bottom + 20}
-              textAnchor="middle"
-              fill="#718278"
-              fontSize={isAnnual ? 9 : 11}
-            >
-              {isAnnual ? label(row).slice(0, 4) : label(row)}
-            </text>
-          ),
-      )}
-      <text x={left} y="16" fontSize="11" fill={palette[0]}>
-        {labels[used[0]]}
-      </text>
-      {dual && (
-        <text x={right} y="16" textAnchor="end" fontSize="11" fill={palette[1]}>
-          右轴：风功率密度 W/m²
+        {used.map((key, k) => (
+          <g key={key}>
+            {(isAnnual || isFrequency || outputId === "density") &&
+            key !== "fitted_frequency" &&
+            bars ? (
+              rows.map(
+                (row, i) =>
+                  numeric(row[key]) && (
+                    <rect
+                      key={i}
+                      x={
+                        x(i) -
+                        ((right - left) / rows.length) * 0.35 +
+                        ((k * (right - left)) / rows.length) * 0.25
+                      }
+                      y={y(Number(row[key]), key)}
+                      width={Math.max(
+                        0.5,
+                        ((right - left) / rows.length) *
+                          (isFrequency ? 0.25 : 0.65),
+                      )}
+                      height={bottom - y(Number(row[key]), key)}
+                      fill={row.concurrent ? "#c65757" : palette[k]}
+                      opacity={row.complete === false ? 0.35 : 0.8}
+                    >
+                      <title>
+                        {label(row)} · {labels[key]}：{display(row[key])}
+                        {row.complete === false ? "（不完整周年）" : ""}
+                      </title>
+                    </rect>
+                  ),
+              )
+            ) : (
+              <>
+                <polyline
+                  fill="none"
+                  stroke={palette[k]}
+                  strokeWidth="2.3"
+                  points={rows
+                    .map((row, i) =>
+                      numeric(row[key])
+                        ? `${x(i)},${y(Number(row[key]), key)}`
+                        : "",
+                    )
+                    .filter(Boolean)
+                    .join(" ")}
+                />
+                {rows.map(
+                  (row, i) =>
+                    numeric(row[key]) && (
+                      <circle
+                        key={i}
+                        cx={x(i)}
+                        cy={y(Number(row[key]), key)}
+                        r="2.5"
+                        fill={palette[k]}
+                      >
+                        <title>
+                          {label(row)} · {labels[key]}：{display(row[key])}
+                        </title>
+                      </circle>
+                    ),
+                )}
+              </>
+            )}
+          </g>
+        ))}
+        {means
+          .filter((m) => numeric(m.mean_speed))
+          .map((m, i) => (
+            <g key={i}>
+              <line
+                x1={left}
+                x2={right}
+                y1={y(Number(m.mean_speed), "mean_speed")}
+                y2={y(Number(m.mean_speed), "mean_speed")}
+                stroke={String(m.color ?? palette[(i + 1) % palette.length])}
+                strokeDasharray="6 4"
+              />
+            </g>
+          ))}
+        {rows.map(
+          (row, i) =>
+            i % Math.max(1, Math.ceil(rows.length / 13)) === 0 && (
+              <text
+                key={i}
+                x={x(i)}
+                y={bottom + 20}
+                textAnchor="middle"
+                fill="#718278"
+                fontSize={isAnnual ? 9 : 11}
+              >
+                {isAnnual ? label(row).slice(0, 4) : label(row)}
+              </text>
+            ),
+        )}
+        <text x={left} y="16" fontSize="11" fill={palette[0]}>
+          {labels[used[0]]}
         </text>
-      )}
-      {used.map((key, i) => (
-        <g key={key}>
-          <line
-            x1={left + i * 220}
-            x2={left + 20 + i * 220}
-            y1="329"
-            y2="329"
-            stroke={palette[i]}
-            strokeWidth="3"
-          />
-          <text x={left + 27 + i * 220} y="333" fontSize="11" fill="#62756a">
-            {isAnnual ? "周年均值（绿柱）/ 测风同期（红柱）" : labels[key]}
+        {dual && (
+          <text
+            x={right}
+            y="16"
+            textAnchor="end"
+            fontSize="11"
+            fill={palette[1]}
+          >
+            右轴：风功率密度 W/m²
           </text>
-        </g>
-      ))}
-    </svg>
+        )}
+      </svg>
+      <div className="ww-plot-legend" aria-label="图例">
+        {isAnnual ? (
+          <>
+            <span>
+              <i className="box" style={{ background: palette[0] }} />
+              周年均值（绿柱）
+            </span>
+            <span>
+              <i className="box" style={{ background: "#c65757" }} />
+              测风同期（红柱）
+            </span>
+          </>
+        ) : (
+          used.map((key, i) => (
+            <span key={key}>
+              <i style={{ borderColor: palette[i % palette.length] }} />
+              {labels[key]}
+            </span>
+          ))
+        )}
+      </div>
+    </figure>
   );
 }
 

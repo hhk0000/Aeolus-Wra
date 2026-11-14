@@ -1809,6 +1809,38 @@
   overflow-x: auto;
   max-width: 100%;
 }
+.ww-plot-figure {
+  margin: 0;
+}
+.ww-plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  margin: 10px 2px 0;
+  font-size: 12px;
+  color: #4f6759;
+}
+.ww-plot-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ww-plot-legend i {
+  width: 24px;
+  height: 0;
+  border-top: 3px solid;
+  border-radius: 2px;
+  flex: none;
+}
+.ww-plot-legend i.box {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 3px;
+}
 .ww-rose-stack {
   display: grid;
   grid-template-columns: 1fr;

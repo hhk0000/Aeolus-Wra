@@ -142,20 +142,12 @@ export interface WorkspaceState {
 
 export const OUTPUTS = [
   {
-    id: "raw-records",
-    title: "测风塔原始数据统计",
-    description: "10 分钟记录数、测风时段与传感器配置",
-    kind: "raw",
-    required: ["raw"],
-    form: "统计表",
-  },
-  {
     id: "completeness",
-    title: "有效数据完整率",
-    description: "质控保留数据量 / 同时段原始数据量",
+    title: "数据完整率统计",
+    description: "实测、实测有效、完整年三张完整率表",
     kind: "qc",
     required: ["raw", "qc"],
-    form: "对照表",
+    form: "统计表",
   },
   {
     id: "density",

@@ -253,14 +253,6 @@ function Plot({
                         </circle>
                       ),
                   )}
-                  <text
-                    x={65 + j * 135}
-                    y="320"
-                    fill={colors[j % colors.length]}
-                    fontSize="11"
-                  >
-                    {names[f] ?? f}
-                  </text>
                 </g>
               ))}
               {rows.map(
@@ -280,6 +272,30 @@ function Plot({
             </>
           )}
         </svg>
+        {fields.length > 0 && (
+          <div className="ww-plot-legend" aria-label="图例">
+            {fields.map((f, j) => {
+              const box = [
+                "frequency",
+                "energy_frequency",
+                "fitted_frequency",
+              ].includes(f);
+              return (
+                <span key={f}>
+                  <i
+                    className={box ? "box" : ""}
+                    style={
+                      box
+                        ? { background: colors[j % colors.length] }
+                        : { borderColor: colors[j % colors.length] }
+                    }
+                  />
+                  {names[f] ?? f}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
     </figure>
   );
@@ -503,54 +519,47 @@ export function InteractiveResultView({
     const towerId = String(
       run.sources?.qc?.tower_id ?? run.sources?.raw?.tower_id ?? "",
     );
-    const sources = [
+    const tables = [
       {
-        source: "原始数据",
-        get: (r: Row) => Number(r.raw_valid ?? r.valid_count ?? 0),
+        title: "实测数据完整率",
+        valid: (r: Row) => Number(r.raw_valid ?? r.valid_count ?? 0),
         expected: (r: Row) => Number(r.expected ?? r.expected_count ?? basis),
       },
       {
-        source: "质控数据",
-        get: (r: Row) => Number(r.qc_valid ?? r.valid_count ?? 0),
+        title: "实测有效数据完整率",
+        valid: (r: Row) => Number(r.qc_valid ?? r.valid_count ?? 0),
         expected: (r: Row) => Number(r.raw_records ?? r.record_count ?? basis),
       },
+      {
+        title: "完整年有效数据完整率（365天基准）",
+        valid: (r: Row) =>
+          Number(r.annual_valid ?? r.qc_valid ?? r.valid_count ?? 0),
+        expected: (r: Row) => Number(r.annual_expected ?? basis),
+      },
     ];
-    const merged = data.flatMap((r) =>
-      sources.map((s) => ({
-        塔号: towerId,
-        数据来源: s.source,
-        通道: r.channel,
-        应测数据: s.expected(r),
-        实测数据: s.get(r),
-        缺失数据: Math.max(0, s.expected(r) - s.get(r)),
-        完整率: `${((100 * s.get(r)) / s.expected(r)).toFixed(2)}%`,
-      })),
-    );
-    const annual = data.map((r) => {
-      const valid = Number(r.annual_valid ?? r.qc_valid ?? r.valid_count ?? 0);
-      const expected = Number(r.annual_expected ?? basis);
-      return {
-        塔号: towerId,
-        数据来源: "完整年（365天基准）",
-        通道: r.channel,
-        应测数据: expected,
-        实测数据: valid,
-        缺失数据: Math.max(0, expected - valid),
-        完整率: `${((100 * valid) / expected).toFixed(2)}%`,
-      };
-    });
     return (
       <div>
-        <section>
-          <h3>测风数据完整率统计</h3>
-          <DataTable rows={merged} />
-        </section>
-        <section>
-          <h3>完整年有效数据完整率（365天基准）</h3>
-          <DataTable rows={annual} />
-        </section>
+        {tables.map((t) => (
+          <section key={t.title}>
+            <h3>{t.title}</h3>
+            <DataTable
+              rows={data.map((r) => {
+                const expected = t.expected(r);
+                const valid = t.valid(r);
+                return {
+                  塔号: towerId,
+                  通道: r.channel,
+                  应测数据: expected,
+                  实测数据: valid,
+                  缺失数据: Math.max(0, expected - valid),
+                  完整率: `${((100 * valid) / expected).toFixed(2)}%`,
+                };
+              })}
+            />
+          </section>
+        ))}
         <p>
-          同一张表按“数据来源”区分原始与质控口径；完整年按365天、每日144条，超出基准的记录保留，完整率可超过100%。日历覆盖缺口与365天数据量判据分别记录。
+          同一模块并列三张表：实测按原始有效数/应测数；实测有效按质控有效数/同期原始记录数；完整年按365天、每日144条基准，超出基准的记录保留，完整率可超过100%。
         </p>
       </div>
     );

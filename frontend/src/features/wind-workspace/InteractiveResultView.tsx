@@ -34,6 +34,7 @@ function Plot({
   density = false,
   rose = "",
   energy = false,
+  zoom = "1",
 }: {
   rows: Row[];
   fields: string[];
@@ -41,23 +42,28 @@ function Plot({
   density?: boolean;
   rose?: string;
   energy?: boolean;
+  zoom?: string;
 }) {
   const [hover, setHover] = useState("");
-  const w = 800,
-    h = 330,
+  const w = rose ? 900 : 800,
+    h = rose ? 640 : 330,
     L = 65,
     R = 725,
     T = 35,
     B = 270;
+  const cx = rose ? 450 : 400,
+    cy = rose ? 310 : 165;
+  const base = 80,
+    maxR = 200;
   const point = (a: number, r: number) => [
-    400 + Math.sin((a * Math.PI) / 180) * r,
-    165 - Math.cos((a * Math.PI) / 180) * r,
+    cx + Math.sin((a * Math.PI) / 180) * r,
+    cy - Math.cos((a * Math.PI) / 180) * r,
   ];
   const roseKey = energy ? "energy_frequency" : "frequency";
   const max =
     Math.max(0.001, ...rows.map((r) => Number(r[roseKey]) || 0)) * 1.1;
   const rp = (r: Row) =>
-    point(Number(r.degrees), 30 + (Number(r[roseKey]) / max) * 110);
+    point(Number(r.degrees), base + (Number(r[roseKey]) / max) * maxR);
   const limits = (f: string) => {
     const shared = fields.includes("power_density") ? [f] : fields;
     const vals = rows
@@ -79,182 +85,201 @@ function Plot({
   return (
     <figure style={{ margin: 0 }}>
       <figcaption>{title}</figcaption>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        role="img"
-        aria-label={title}
-        style={{ width: "100%", background: "white" }}
-      >
-        <text x="65" y="20" fontSize="12">
-          {hover || title}
-        </text>
-        {rose ? (
-          <>
-            {[0, 0.25, 0.5, 0.75, 1].map((t) => (
-              <g key={t}>
-                <circle
-                  cx="400"
-                  cy="165"
-                  r={30 + t * 110}
-                  fill="none"
-                  stroke="#dce5df"
-                  strokeDasharray="3 3"
-                />
-                <text x="405" y={165 - 30 - t * 110} fontSize="9">
-                  {(max * t).toFixed(1)}%
-                </text>
-              </g>
-            ))}
-            {rows.map((r, i) => {
-              const a = Number(r.degrees),
-                da = 180 / rows.length;
-              const r1 = 30 + (Number(r[roseKey]) / max) * 110;
-              const p1 = point(a - da, r1),
-                p2 = point(a + da, r1),
-                p3 = point(a + da, 30),
-                p4 = point(a - da, 30),
-                label = point(a, 155);
-              return (
-                <g
-                  key={i}
-                  onMouseEnter={() =>
-                    setHover(`${r.label}: ${Number(r[roseKey]).toFixed(2)}%`)
-                  }
-                >
-                  <line
-                    x1="400"
-                    y1="165"
-                    x2={label[0]}
-                    y2={label[1]}
-                    stroke="#edf0ee"
-                  />
-                  {rose === "filled" && (
-                    <path
-                      d={`M${p1} A${r1},${r1} 0 0 1 ${p2} L${p3} A30,30 0 0 0 ${p4} Z`}
-                      fill="#326f35"
+      <div className="ww-plot-scroll">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          role="img"
+          aria-label={title}
+          style={{
+            width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
+            minWidth: rose ? 560 : 480,
+            background: "white",
+          }}
+        >
+          <text x="65" y="20" fontSize="12">
+            {hover || title}
+          </text>
+          {rose ? (
+            <>
+              {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+                const r = base + t * maxR;
+                const tick = [
+                  cx + Math.sin(Math.PI / 4) * (r + 6),
+                  cy - Math.cos(Math.PI / 4) * (r + 6),
+                ];
+                return (
+                  <g key={t}>
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={r}
+                      fill="none"
+                      stroke="#dce5df"
+                      strokeDasharray="3 3"
                     />
-                  )}
-                  <text
-                    x={label[0]}
-                    y={label[1]}
-                    textAnchor="middle"
-                    fontSize="9"
-                  >
-                    {a}°
-                  </text>
-                </g>
-              );
-            })}
-            {rose === "line" && (
-              <polygon
-                points={rows.map((r) => rp(r).join(",")).join(" ")}
-                fill="none"
-                stroke="#326f35"
-                strokeWidth="2"
-              />
-            )}
-            <circle cx="400" cy="165" r="30" fill="#f6f7f6" stroke="#a5b5aa" />
-          </>
-        ) : (
-          <>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <g key={i}>
-                <line
-                  x1={L}
-                  x2={R}
-                  y1={T + (i * (B - T)) / 4}
-                  y2={T + (i * (B - T)) / 4}
-                  stroke="#e4ebe6"
-                />
-                {fields.slice(0, 2).map((f, j) => {
-                  const [lo, hi] = limits(f);
-                  return (
-                    <text
-                      key={f}
-                      x={j ? R + 6 : L - 6}
-                      y={T + (i * (B - T)) / 4}
-                      textAnchor={j ? "start" : "end"}
-                      fill={colors[j]}
-                      fontSize="10"
-                    >
-                      {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
+                    <text x={tick[0]} y={tick[1]} fontSize="10" fill="#7f9487">
+                      {(max * t).toFixed(1)}%
                     </text>
-                  );
-                })}
-              </g>
-            ))}
-            {fields.map((f, j) => (
-              <g key={f}>
-                {["frequency", "energy_frequency"].includes(f) &&
-                  rows.map((r, i) => (
-                    <rect
-                      key={`bar-${i}`}
-                      x={x(i) - 6 + j * 5}
-                      y={y(Number(r[f]), f)}
-                      width="5"
-                      height={B - y(Number(r[f]), f)}
-                      fill={colors[j % colors.length]}
+                  </g>
+                );
+              })}
+              {rows.map((r, i) => {
+                const a = Number(r.degrees),
+                  da = 180 / rows.length;
+                const r1 = base + (Number(r[roseKey]) / max) * maxR;
+                const p1 = point(a - da, r1),
+                  p2 = point(a + da, r1),
+                  p3 = point(a + da, base),
+                  p4 = point(a - da, base),
+                  label = point(a, base + maxR + 22);
+                return (
+                  <g
+                    key={i}
+                    onMouseEnter={() =>
+                      setHover(`${r.label}: ${Number(r[roseKey]).toFixed(2)}%`)
+                    }
+                  >
+                    <line
+                      x1={cx}
+                      y1={cy}
+                      x2={label[0]}
+                      y2={label[1]}
+                      stroke="#edf0ee"
+                    />
+                    {rose === "filled" && (
+                      <path
+                        d={`M${p1} A${r1},${r1} 0 0 1 ${p2} L${p3} A${base},${base} 0 0 0 ${p4} Z`}
+                        fill="#326f35"
+                      />
+                    )}
+                    <text
+                      x={label[0]}
+                      y={label[1]}
+                      textAnchor="middle"
+                      fontSize="11"
                     >
-                      <title>{Number(r[f]).toFixed(3)}%</title>
-                    </rect>
-                  ))}
-                <polyline
-                  points={rows
-                    .map((r, i) =>
-                      r[f] != null ? `${x(i)},${y(Number(r[f]), f)}` : "",
-                    )
-                    .filter(Boolean)
-                    .join(" ")}
+                      {a}°
+                    </text>
+                  </g>
+                );
+              })}
+              {rose === "line" && (
+                <polygon
+                  points={rows.map((r) => rp(r).join(",")).join(" ")}
                   fill="none"
-                  stroke={colors[j % colors.length]}
+                  stroke="#326f35"
                   strokeWidth="2"
                 />
-                {rows.map(
-                  (r, i) =>
-                    r[f] != null && (
-                      <circle
-                        key={i}
-                        cx={x(i)}
-                        cy={y(Number(r[f]), f)}
-                        r="3"
-                        fill={colors[j % colors.length]}
-                        onMouseEnter={() =>
-                          setHover(
-                            `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
-                          )
-                        }
+              )}
+              <circle
+                cx={cx}
+                cy={cy}
+                r={base}
+                fill="#f6f7f6"
+                stroke="#a5b5aa"
+              />
+            </>
+          ) : (
+            <>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <g key={i}>
+                  <line
+                    x1={L}
+                    x2={R}
+                    y1={T + (i * (B - T)) / 4}
+                    y2={T + (i * (B - T)) / 4}
+                    stroke="#e4ebe6"
+                  />
+                  {fields.slice(0, 2).map((f, j) => {
+                    const [lo, hi] = limits(f);
+                    return (
+                      <text
+                        key={f}
+                        x={j ? R + 6 : L - 6}
+                        y={T + (i * (B - T)) / 4}
+                        textAnchor={j ? "start" : "end"}
+                        fill={colors[j]}
+                        fontSize="10"
                       >
-                        <title>{Number(r[f]).toFixed(4)}</title>
-                      </circle>
-                    ),
-                )}
-                <text
-                  x={65 + j * 135}
-                  y="320"
-                  fill={colors[j % colors.length]}
-                  fontSize="11"
-                >
-                  {names[f] ?? f}
-                </text>
-              </g>
-            ))}
-            {rows.map(
-              (r, i) =>
-                i % Math.max(1, Math.ceil(rows.length / 24)) === 0 && (
+                        {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
+                      </text>
+                    );
+                  })}
+                </g>
+              ))}
+              {fields.map((f, j) => (
+                <g key={f}>
+                  {["frequency", "energy_frequency"].includes(f) &&
+                    rows.map((r, i) => (
+                      <rect
+                        key={`bar-${i}`}
+                        x={x(i) - 6 + j * 5}
+                        y={y(Number(r[f]), f)}
+                        width="5"
+                        height={B - y(Number(r[f]), f)}
+                        fill={colors[j % colors.length]}
+                      >
+                        <title>{Number(r[f]).toFixed(3)}%</title>
+                      </rect>
+                    ))}
+                  <polyline
+                    points={rows
+                      .map((r, i) =>
+                        r[f] != null ? `${x(i)},${y(Number(r[f]), f)}` : "",
+                      )
+                      .filter(Boolean)
+                      .join(" ")}
+                    fill="none"
+                    stroke={colors[j % colors.length]}
+                    strokeWidth="2"
+                  />
+                  {rows.map(
+                    (r, i) =>
+                      r[f] != null && (
+                        <circle
+                          key={i}
+                          cx={x(i)}
+                          cy={y(Number(r[f]), f)}
+                          r="3"
+                          fill={colors[j % colors.length]}
+                          onMouseEnter={() =>
+                            setHover(
+                              `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
+                            )
+                          }
+                        >
+                          <title>{Number(r[f]).toFixed(4)}</title>
+                        </circle>
+                      ),
+                  )}
                   <text
-                    key={i}
-                    x={x(i)}
-                    y="292"
-                    textAnchor="middle"
-                    fontSize="9"
+                    x={65 + j * 135}
+                    y="320"
+                    fill={colors[j % colors.length]}
+                    fontSize="11"
                   >
-                    {String(r.period ?? r.bin ?? r.label ?? "")}
+                    {names[f] ?? f}
                   </text>
-                ),
-            )}
-          </>
-        )}
-      </svg>
+                </g>
+              ))}
+              {rows.map(
+                (r, i) =>
+                  i % Math.max(1, Math.ceil(rows.length / 24)) === 0 && (
+                    <text
+                      key={i}
+                      x={x(i)}
+                      y="292"
+                      textAnchor="middle"
+                      fontSize="9"
+                    >
+                      {String(r.period ?? r.bin ?? r.label ?? "")}
+                    </text>
+                  ),
+              )}
+            </>
+          )}
+        </svg>
+      </div>
     </figure>
   );
 }
@@ -334,7 +359,8 @@ export function InteractiveResultView({
   const [hidden, setHidden] = useState<string[]>(() =>
       turbulence ? ["mean", "std", "characteristic"] : [],
     ),
-    [rose, setRose] = useState("both"),
+    [rose, setRose] = useState("line"),
+    [zoom, setZoom] = useState("1"),
     [month, setMonth] = useState("1");
   const [method, setMethod] = useState(
       String(run.config.weibull_method ?? "mle"),
@@ -473,45 +499,57 @@ export function InteractiveResultView({
           String(r.channel).includes("Avg") ||
           !String(r.channel).includes("_"),
       );
-    const tables = [
+    const towerId = String(
+      run.sources?.qc?.tower_id ?? run.sources?.raw?.tower_id ?? "",
+    );
+    const sources = [
       {
-        title: "实测数据完整率",
+        source: "原始数据",
         get: (r: Row) => Number(r.raw_valid ?? r.valid_count ?? 0),
         expected: (r: Row) => Number(r.expected ?? r.expected_count ?? basis),
       },
       {
-        title: "有效数据完整率（质控）",
+        source: "质控数据",
         get: (r: Row) => Number(r.qc_valid ?? r.valid_count ?? 0),
         expected: (r: Row) => Number(r.raw_records ?? r.record_count ?? basis),
       },
-      {
-        title: "完整年有效数据完整率（365天基准）",
-        get: (r: Row) =>
-          Number(r.annual_valid ?? r.qc_valid ?? r.valid_count ?? 0),
-        expected: (r: Row) => Number(r.annual_expected ?? basis),
-      },
     ];
+    const merged = data.flatMap((r) =>
+      sources.map((s) => ({
+        塔号: towerId,
+        数据来源: s.source,
+        通道: r.channel,
+        应测数据: s.expected(r),
+        实测数据: s.get(r),
+        缺失数据: Math.max(0, s.expected(r) - s.get(r)),
+        完整率: `${((100 * s.get(r)) / s.expected(r)).toFixed(2)}%`,
+      })),
+    );
+    const annual = data.map((r) => {
+      const valid = Number(r.annual_valid ?? r.qc_valid ?? r.valid_count ?? 0);
+      const expected = Number(r.annual_expected ?? basis);
+      return {
+        塔号: towerId,
+        数据来源: "完整年（365天基准）",
+        通道: r.channel,
+        应测数据: expected,
+        实测数据: valid,
+        缺失数据: Math.max(0, expected - valid),
+        完整率: `${((100 * valid) / expected).toFixed(2)}%`,
+      };
+    });
     return (
       <div>
-        {tables.map((t) => (
-          <section key={t.title}>
-            <h3>{t.title}</h3>
-            <DataTable
-              rows={data.map((r) => ({
-                塔号: String(
-                  run.sources?.qc?.tower_id ?? run.sources?.raw?.tower_id ?? "",
-                ),
-                通道: r.channel,
-                应测数据: t.expected(r),
-                实测数据: t.get(r),
-                缺失数据: Math.max(0, t.expected(r) - t.get(r)),
-                完整率: `${((100 * t.get(r)) / t.expected(r)).toFixed(2)}%`,
-              }))}
-            />
-          </section>
-        ))}
+        <section>
+          <h3>测风数据完整率统计</h3>
+          <DataTable rows={merged} />
+        </section>
+        <section>
+          <h3>完整年有效数据完整率（365天基准）</h3>
+          <DataTable rows={annual} />
+        </section>
         <p>
-          完整年按365天、每日144条；超出基准的记录保留，完整率可超过100%。日历覆盖缺口与365天数据量判据分别记录。
+          同一张表按“数据来源”区分原始与质控口径；完整年按365天、每日144条，超出基准的记录保留，完整率可超过100%。日历覆盖缺口与365天数据量判据分别记录。
         </p>
       </div>
     );
@@ -655,14 +693,32 @@ export function InteractiveResultView({
           )}
           {isRose && (
             <>
-              <label>
-                玫瑰图样式
-                <select value={rose} onChange={(e) => setRose(e.target.value)}>
-                  <option value="both">折线与填充均显示</option>
-                  <option value="line">中心留白折线</option>
-                  <option value="filled">中心留白填充扇环</option>
-                </select>
-              </label>
+              {custom && (
+                <>
+                  <label>
+                    玫瑰图样式
+                    <select
+                      value={rose}
+                      onChange={(e) => setRose(e.target.value)}
+                    >
+                      <option value="line">中心留白折线</option>
+                      <option value="filled">中心留白填充扇环</option>
+                    </select>
+                  </label>
+                  <label>
+                    图表缩放
+                    <select
+                      value={zoom}
+                      onChange={(e) => setZoom(e.target.value)}
+                    >
+                      <option value="1">100%</option>
+                      <option value="1.25">125%</option>
+                      <option value="1.5">150%</option>
+                      <option value="2">200%</option>
+                    </select>
+                  </label>
+                </>
+              )}
               {outputId === "monthly-rose" && (
                 <label>
                   月份
@@ -814,6 +870,28 @@ export function InteractiveResultView({
                 };
               });
             }
+            const densityValues = subset
+              .map((r) => Number(r.density))
+              .filter((v) => Number.isFinite(v));
+            const meanOf = (key: string) => {
+              const values = subset
+                .map((r) => Number(r[key]))
+                .filter(Number.isFinite);
+              return values.length
+                ? values.reduce((sum, v) => sum + v, 0) / values.length
+                : undefined;
+            };
+            const densityFooter =
+              outputId === "density" && densityValues.length
+                ? {
+                    period: "平均",
+                    density:
+                      densityValues.reduce((sum, v) => sum + v, 0) /
+                      densityValues.length,
+                    temperature_c: meanOf("temperature_c"),
+                    pressure_pa: meanOf("pressure_pa"),
+                  }
+                : undefined;
             return (
               <section className="ww-panel" key={c}>
                 <h3>{c || output.title}</h3>
@@ -851,12 +929,13 @@ export function InteractiveResultView({
                 {isRose ? (
                   (rose === "both" ? ["line", "filled"] : [rose]).map(
                     (style) => (
-                      <div className="ww-month-grid" key={style}>
+                      <div className="ww-rose-stack" key={style}>
                         <Plot
                           rows={subset}
                           fields={[]}
                           title={`WD-${String(subset[0]?.direction_height ?? output.summary?.direction_height ?? height)}m · ${style}`}
                           rose={style}
+                          zoom={zoom}
                         />
                         <Plot
                           rows={subset}
@@ -864,6 +943,7 @@ export function InteractiveResultView({
                           title={`WPD-${height}m · ${style}`}
                           rose={style}
                           energy
+                          zoom={zoom}
                         />
                       </div>
                     ),
@@ -885,7 +965,7 @@ export function InteractiveResultView({
                     density={outputId === "density"}
                   />
                 )}
-                <DataTable rows={subset} />
+                <DataTable rows={subset} footer={densityFooter} />
               </section>
             );
           })}

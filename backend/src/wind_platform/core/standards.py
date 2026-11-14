@@ -36,7 +36,7 @@ STANDARDS = [
     },
     {
         "id": "ENTERPRISE",
-        "name": "RETEC-T-SJY-005 V1.0",
+        "name": "企业参考标准 V1.0",
         "title": "测风数据处理和分析",
         "level": "企业参考",
         "status": "用户提供，2025-03-21",

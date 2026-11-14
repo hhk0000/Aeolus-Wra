@@ -1742,6 +1742,21 @@
   overflow-x: auto;
   max-width: 100%;
 }
+.ww-table-summary td {
+  font-weight: 700;
+  background: #f1f8f3;
+  border-top: 2px solid #cfe3d6;
+  color: var(--ww-ink);
+}
+.ww-plot-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.ww-rose-stack {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
 .ww-results {
   overflow-x: hidden;
 }

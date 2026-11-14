@@ -80,7 +80,13 @@ function display(value: unknown): string {
 const numeric = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value);
 
-export function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
+export function DataTable({
+  rows,
+  footer,
+}: {
+  rows: Record<string, unknown>[];
+  footer?: Record<string, unknown>;
+}) {
   const [page, setPage] = useState(0);
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter(
     (key) => key !== "points" && key !== "through_origin",
@@ -107,6 +113,13 @@ export function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
                 ))}
               </tr>
             ))}
+            {footer && (
+              <tr className="ww-table-summary">
+                {keys.map((key) => (
+                  <td key={key}>{display(footer[key])}</td>
+                ))}
+              </tr>
+            )}
           </tbody>
         </table>
         {!rows.length && (
@@ -644,6 +657,7 @@ export function BaseResultView({
   const [month, setMonth] = useState("");
   const [windowValue, setWindowValue] = useState("");
   const [hiddenMeans, setHiddenMeans] = useState<string[]>([]);
+  const [roseKind, setRoseKind] = useState<"wd" | "wpd">("wd");
   const container = useRef<HTMLDivElement>(null);
   const allRows = output.rows ?? [];
   const channels = [
@@ -668,6 +682,25 @@ export function BaseResultView({
       (!months.length || String(r.month) === monthFilter) &&
       (!windows.length || String(r.window) === windowFilter),
   );
+  const densityValues = rows
+    .map((r) => Number(r.density))
+    .filter((v) => Number.isFinite(v));
+  const meanOf = (key: string) => {
+    const values = rows.map((r) => Number(r[key])).filter(Number.isFinite);
+    return values.length
+      ? values.reduce((sum, v) => sum + v, 0) / values.length
+      : undefined;
+  };
+  const densityFooter =
+    outputId === "density" && densityValues.length
+      ? {
+          period: "平均",
+          density:
+            densityValues.reduce((sum, v) => sum + v, 0) / densityValues.length,
+          temperature_c: meanOf("temperature_c"),
+          pressure_pa: meanOf("pressure_pa"),
+        }
+      : undefined;
   const isRose = outputId.includes("rose");
   const isScatter = outputId === "correlation";
   const parameters = (
@@ -729,6 +762,18 @@ export function BaseResultView({
                 {windows.map((w) => (
                   <option key={w}>{w}</option>
                 ))}
+              </select>
+            </label>
+          )}
+          {isRose && (
+            <label>
+              风向图类型
+              <select
+                value={roseKind}
+                onChange={(e) => setRoseKind(e.target.value as "wd" | "wpd")}
+              >
+                <option value="wd">风向分布</option>
+                <option value="wpd">风能分布</option>
               </select>
             </label>
           )}
@@ -807,10 +852,7 @@ export function BaseResultView({
             ) : outputId === "shear" ? (
               <ShearPlots rows={rows} summary={output.summary} />
             ) : isRose ? (
-              <>
-                <RosePlot rows={rows} />
-                <RosePlot rows={rows} energy />
-              </>
+              <RosePlot rows={rows} energy={roseKind === "wpd"} />
             ) : isScatter ? (
               rows.map((row, i) => (
                 <article key={i}>
@@ -891,7 +933,7 @@ export function BaseResultView({
                 </p>
               ),
           )}
-          <DataTable rows={rows} />
+          <DataTable rows={rows} footer={densityFooter} />
         </>
       )}
       <details className="ww-details">

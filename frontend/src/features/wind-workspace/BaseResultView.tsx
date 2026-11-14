@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+﻿import { useRef, useState } from "react";
 import { downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
+import { RoseChart } from "./RoseChart";
 
 const palette = ["#2c7a63", "#d49a46", "#657fbd", "#bb6777"];
 const labels: Record<string, string> = {
@@ -154,78 +155,24 @@ export function DataTable({
 function RosePlot({
   rows,
   energy = false,
+  rose = "line",
+  zoom = "1",
+  title,
 }: {
   rows: Record<string, unknown>[];
   energy?: boolean;
+  rose?: string;
+  zoom?: string;
+  title?: string;
 }) {
-  const key = energy ? "energy_frequency" : "frequency";
-  const max = Math.max(1, ...rows.map((r) => Number(r[key]) || 0));
-  const point = (deg: number, r: number) => [
-    200 + Math.sin((deg * Math.PI) / 180) * r,
-    175 - Math.cos((deg * Math.PI) / 180) * r,
-  ];
   return (
-    <svg
-      viewBox="0 0 400 350"
-      role="img"
-      aria-label={energy ? "风能玫瑰图" : "风向玫瑰图"}
-      fontFamily="Microsoft YaHei, sans-serif"
-    >
-      <rect width="400" height="350" fill="white" />
-      <text x="200" y="22" textAnchor="middle" fill="#33483f" fontSize="13">
-        {energy ? "风能方向频率 %" : "风向频率 %"}
-      </text>
-      {[0.25, 0.5, 0.75, 1].map((fraction) => (
-        <g key={fraction}>
-          <circle
-            cx="200"
-            cy="175"
-            r={fraction * 120}
-            fill="none"
-            stroke="#e2e9e5"
-          />
-          <text x="205" y={175 - fraction * 120} fill="#82918a" fontSize="9">
-            {(max * fraction).toFixed(1)}
-          </text>
-        </g>
-      ))}
-      {rows.map((row, i) => {
-        const deg = Number(row.degrees);
-        const end = point(deg, (Number(row[key] ?? 0) / max) * 120);
-        const label = point(deg, 143);
-        return (
-          <g key={i}>
-            <line
-              x1="200"
-              y1="175"
-              x2={point(deg, 120)[0]}
-              y2={point(deg, 120)[1]}
-              stroke="#edf0ee"
-            />
-            <line
-              x1="200"
-              y1="175"
-              x2={end[0]}
-              y2={end[1]}
-              stroke={energy ? palette[1] : palette[0]}
-              strokeWidth={Math.min(20, 180 / rows.length)}
-            />
-            <text
-              x={label[0]}
-              y={label[1] + 3}
-              textAnchor="middle"
-              fontSize="10"
-              fill="#5f7168"
-            >
-              {String(row.label)}
-            </text>
-            <title>
-              {String(row.label)}：{display(row[key])}%
-            </title>
-          </g>
-        );
-      })}
-    </svg>
+    <RoseChart
+      rows={rows}
+      energy={energy}
+      rose={rose}
+      zoom={zoom}
+      title={title ?? (energy ? "风能方向频率" : "风向频率")}
+    />
   );
 }
 
@@ -661,6 +608,8 @@ export function BaseResultView({
   const [windowValue, setWindowValue] = useState("");
   const [hiddenMeans, setHiddenMeans] = useState<string[]>([]);
   const [roseKind, setRoseKind] = useState<"wd" | "wpd">("wd");
+  const [roseStyle, setRoseStyle] = useState("line");
+  const [roseZoom, setRoseZoom] = useState("1");
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
   const [ltLine, setLtLine] = useState(true);
@@ -782,7 +731,7 @@ export function BaseResultView({
               </select>
             </label>
           )}
-          {isRose && (
+          {isRose && outputId === "reference-rose" && (
             <label>
               风向图类型
               <select
@@ -791,6 +740,32 @@ export function BaseResultView({
               >
                 <option value="wd">风向分布</option>
                 <option value="wpd">风能分布</option>
+              </select>
+            </label>
+          )}
+          {isRose && outputId === "reference-rose" && (
+            <label>
+              玫瑰图样式
+              <select
+                value={roseStyle}
+                onChange={(e) => setRoseStyle(e.target.value)}
+              >
+                <option value="line">中心留白折线</option>
+                <option value="filled">中心留白填充扇环</option>
+              </select>
+            </label>
+          )}
+          {isRose && outputId === "reference-rose" && (
+            <label>
+              图表缩放
+              <select
+                value={roseZoom}
+                onChange={(e) => setRoseZoom(e.target.value)}
+              >
+                <option value="1">100%</option>
+                <option value="1.25">125%</option>
+                <option value="1.5">150%</option>
+                <option value="2">200%</option>
               </select>
             </label>
           )}
@@ -908,7 +883,13 @@ export function BaseResultView({
             ) : outputId === "shear" ? (
               <ShearPlots rows={rows} summary={output.summary} />
             ) : isRose ? (
-              <RosePlot rows={rows} energy={roseKind === "wpd"} />
+              <RosePlot
+                rows={rows}
+                energy={roseKind === "wpd"}
+                rose={roseStyle}
+                zoom={roseZoom}
+                title={`长期累计${roseKind === "wpd" ? "风能" : "风向"} · ${roseStyle === "filled" ? "填充" : "折线"}`}
+              />
             ) : isScatter ? (
               rows.map((row, i) => (
                 <article key={i}>
@@ -957,7 +938,7 @@ export function BaseResultView({
               {String(parameters.note ?? "")}
             </div>
           )}
-          {isRose && (
+          {isRose && outputId === "reference-rose" && (
             <p className="ww-inline-note">
               风向与风能使用同期有效配对；静风频率和未配对数量详见参数记录，扇区加静风频率为100%。
             </p>

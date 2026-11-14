@@ -3,6 +3,7 @@ import { api, downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
+import { RoseChart } from "./RoseChart";
 import { addReportChart } from "./chartReports";
 
 type Row = Record<string, unknown>;
@@ -930,16 +931,14 @@ export function InteractiveResultView({
                   (rose === "both" ? ["line", "filled"] : [rose]).map(
                     (style) => (
                       <div className="ww-rose-stack" key={style}>
-                        <Plot
+                        <RoseChart
                           rows={subset}
-                          fields={[]}
                           title={`WD-${String(subset[0]?.direction_height ?? output.summary?.direction_height ?? height)}m · ${style}`}
                           rose={style}
                           zoom={zoom}
                         />
-                        <Plot
+                        <RoseChart
                           rows={subset}
-                          fields={[]}
                           title={`WPD-${height}m · ${style}`}
                           rose={style}
                           energy

@@ -1724,6 +1724,63 @@
   height: 0;
   border-top: 2px dashed;
 }
+.ww-lt-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--ww-line);
+  border-radius: 12px;
+  background: #fbfdfb;
+  font-size: 11px;
+  color: var(--ww-ink-soft);
+}
+.ww-lt-controls > span {
+  font-weight: 600;
+  color: var(--ww-ink);
+}
+.ww-lt-windows {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: #eef4ef;
+  border-radius: 999px;
+}
+.ww-lt-windows button {
+  border: 0;
+  background: transparent;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #5d7a68;
+  cursor: pointer;
+}
+.ww-lt-windows button.active {
+  background: #ffffff;
+  color: var(--ww-accent-deep);
+  box-shadow: 0 1px 3px rgba(22, 56, 42, 0.18);
+  font-weight: 600;
+}
+.ww-lt-divider {
+  width: 1px;
+  height: 18px;
+  background: #dbe7df;
+}
+.ww-lt-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #e3ece6;
+  border-radius: 999px;
+  background: #ffffff;
+  cursor: pointer;
+}
+.ww-lt-controls small {
+  color: #8aa196;
+}
 .ww-align-hint {
   display: flex;
   align-items: center;

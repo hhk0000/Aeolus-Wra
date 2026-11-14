@@ -233,10 +233,12 @@ function CartesianPlot({
   rows,
   outputId,
   means = [],
+  bars = true,
 }: {
   rows: Record<string, unknown>[];
   outputId: string;
   means?: Record<string, unknown>[];
+  bars?: boolean;
 }) {
   const isAnnual = outputId === "reference-years";
   const isTI = outputId === "turbulence";
@@ -324,7 +326,8 @@ function CartesianPlot({
       {used.map((key, k) => (
         <g key={key}>
           {(isAnnual || isFrequency || outputId === "density") &&
-          key !== "fitted_frequency" ? (
+          key !== "fitted_frequency" &&
+          bars ? (
             rows.map(
               (row, i) =>
                 numeric(row[key]) && (
@@ -658,6 +661,9 @@ export function BaseResultView({
   const [windowValue, setWindowValue] = useState("");
   const [hiddenMeans, setHiddenMeans] = useState<string[]>([]);
   const [roseKind, setRoseKind] = useState<"wd" | "wpd">("wd");
+  const [ltWindow, setLtWindow] = useState("30");
+  const [ltBars, setLtBars] = useState(true);
+  const [ltLine, setLtLine] = useState(true);
   const container = useRef<HTMLDivElement>(null);
   const allRows = output.rows ?? [];
   const channels = [
@@ -715,6 +721,17 @@ export function BaseResultView({
   const visibleMeans: Record<string, unknown>[] = means
     .filter((m) => !hiddenMeans.includes(String(m.years)))
     .map((m) => ({ ...m, color: meanColor(String(m.years)) }));
+  const isAnnual = outputId === "reference-years";
+  const annualRows = isAnnual
+    ? rows.slice(-Math.max(1, Number(ltWindow) || 30))
+    : rows;
+  const chartMeans: Record<string, unknown>[] = isAnnual
+    ? ltLine
+      ? means
+          .filter((m) => String(m.years) === ltWindow)
+          .map((m) => ({ ...m, color: meanColor(String(m.years)) }))
+      : []
+    : visibleMeans;
   const exportPlots = () => {
     container.current
       ?.querySelectorAll("svg")
@@ -791,7 +808,46 @@ export function BaseResultView({
         </div>
       ) : (
         <>
-          {means.length > 0 && (
+          {isAnnual && means.length > 0 && (
+            <div
+              className="ww-lt-controls"
+              role="group"
+              aria-label="长期窗口与图形"
+            >
+              <span>统计窗口</span>
+              <div className="ww-lt-windows">
+                {means.map((m) => (
+                  <button
+                    type="button"
+                    key={String(m.years)}
+                    className={ltWindow === String(m.years) ? "active" : ""}
+                    onClick={() => setLtWindow(String(m.years))}
+                  >
+                    {String(m.years)} 年
+                  </button>
+                ))}
+              </div>
+              <span className="ww-lt-divider" />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ltBars}
+                  onChange={(e) => setLtBars(e.target.checked)}
+                />
+                柱状图
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ltLine}
+                  onChange={(e) => setLtLine(e.target.checked)}
+                />
+                均值线
+              </label>
+              <small>只绘制所选窗口的年际柱与水平均值线。</small>
+            </div>
+          )}
+          {!isAnnual && means.length > 0 && (
             <div
               className="ww-mean-toggles"
               role="group"
@@ -875,15 +931,16 @@ export function BaseResultView({
               ))
             ) : (
               <CartesianPlot
-                rows={rows}
+                rows={annualRows}
                 outputId={outputId}
-                means={visibleMeans}
+                means={chartMeans}
+                bars={isAnnual ? ltBars : true}
               />
             )}
           </div>
-          {visibleMeans.length > 0 && (
+          {chartMeans.length > 0 && (
             <div className="ww-mean-legend" aria-label="均值线图例">
-              {visibleMeans.map((m) => (
+              {chartMeans.map((m) => (
                 <span key={String(m.years)}>
                   <i style={{ borderColor: String(m.color) }} />
                   {String(m.years)} 年均值 {Number(m.mean_speed).toFixed(3)} m/s
@@ -933,7 +990,10 @@ export function BaseResultView({
                 </p>
               ),
           )}
-          <DataTable rows={rows} footer={densityFooter} />
+          <DataTable
+            rows={isAnnual ? annualRows : rows}
+            footer={densityFooter}
+          />
         </>
       )}
       <details className="ww-details">

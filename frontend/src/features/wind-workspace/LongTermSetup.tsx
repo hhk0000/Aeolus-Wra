@@ -76,7 +76,7 @@ export default function LongTermSetup({
         planSaved: true,
       }));
       onNotice(
-        "周年序列、同期红柱与长期均值已计算；不足完整年数的均值线已停止绘制。",
+        "周年序列、同期黄柱与中尺度均值已计算；不足完整年数的均值线已停止绘制。",
       );
     } catch (e) {
       setApiError((e as Error).message);
@@ -198,7 +198,7 @@ export default function LongTermSetup({
           </div>
           <div
             className="ww-annual-skeleton"
-            aria-label="逐年柱图、同期红柱、长期均值线的布局示意，不含计算数据"
+            aria-label="逐年柱图、同期黄柱、中尺度均值线的布局示意，不含计算数据"
           >
             <div className="ww-placeholder-bars">
               {Array.from({ length: 18 }, (_, i) => (

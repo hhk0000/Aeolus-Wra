@@ -240,7 +240,7 @@ export const OUTPUTS = [
   {
     id: "reference-years",
     title: "长期年际风速变化",
-    description: "逐年柱图、同期红柱与 30/20/10 年均值线",
+    description: "逐年柱图、同期黄柱与中尺度均值线",
     kind: "reference",
     required: ["result", "reference"],
     form: "柱图 + 均值线",

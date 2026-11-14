@@ -1722,7 +1722,7 @@
 .ww-mean-legend i {
   width: 22px;
   height: 0;
-  border-top: 2px dashed;
+  border-top: 2px solid;
 }
 .ww-lt-controls {
   display: flex;

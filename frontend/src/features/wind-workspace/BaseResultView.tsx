@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+﻿import { useRef, useState } from "react";
 import { downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { RoseChart } from "./RoseChart";
@@ -293,7 +293,7 @@ function CartesianPlot({
                           (isFrequency ? 0.25 : 0.65),
                       )}
                       height={bottom - y(Number(row[key]), key)}
-                      fill={row.concurrent ? "#c65757" : palette[k]}
+                      fill={isAnnual && row.concurrent ? "#e3b341" : palette[k]}
                       opacity={row.complete === false ? 0.35 : 0.8}
                     >
                       <title>
@@ -347,8 +347,8 @@ function CartesianPlot({
                 x2={right}
                 y1={y(Number(m.mean_speed), "mean_speed")}
                 y2={y(Number(m.mean_speed), "mean_speed")}
-                stroke={String(m.color ?? palette[(i + 1) % palette.length])}
-                strokeDasharray="6 4"
+                stroke="#c0392b"
+                strokeWidth="2"
               />
             </g>
           ))}
@@ -390,9 +390,15 @@ function CartesianPlot({
               周年均值（绿柱）
             </span>
             <span>
-              <i className="box" style={{ background: "#c65757" }} />
-              测风同期（红柱）
+              <i className="box" style={{ background: "#e3b341" }} />
+              测风同期（黄柱）
             </span>
+            {means.length > 0 && (
+              <span>
+                <i style={{ borderColor: "#c0392b" }} />
+                中尺度均值线
+              </span>
+            )}
           </>
         ) : (
           used.map((key, i) => (
@@ -676,14 +682,10 @@ export function BaseResultView({
     (output.summary?.channels ?? []) as Record<string, unknown>[]
   ).find((p) => p.channel === channel);
   const means = (output.summary?.means ?? []) as Record<string, unknown>[];
-  const meanColor = (years: string) => {
-    const order = ["30", "20", "10"];
-    const index = order.indexOf(years);
-    return palette[(index < 0 ? 1 : index + 1) % palette.length];
-  };
+  const meanColor = () => "#c0392b";
   const visibleMeans: Record<string, unknown>[] = means
     .filter((m) => !hiddenMeans.includes(String(m.years)))
-    .map((m) => ({ ...m, color: meanColor(String(m.years)) }));
+    .map((m) => ({ ...m, color: meanColor() }));
   const isAnnual = outputId === "reference-years";
   const annualRows = isAnnual
     ? rows.slice(-Math.max(1, Number(ltWindow) || 30))
@@ -692,7 +694,7 @@ export function BaseResultView({
     ? ltLine
       ? means
           .filter((m) => String(m.years) === ltWindow)
-          .map((m) => ({ ...m, color: meanColor(String(m.years)) }))
+          .map((m) => ({ ...m, color: meanColor() }))
       : []
     : visibleMeans;
   const exportPlots = () => {
@@ -938,7 +940,8 @@ export function BaseResultView({
               {chartMeans.map((m) => (
                 <span key={String(m.years)}>
                   <i style={{ borderColor: String(m.color) }} />
-                  {String(m.years)} 年均值 {Number(m.mean_speed).toFixed(3)} m/s
+                  {String(m.years)} 年中尺度均值{" "}
+                  {Number(m.mean_speed).toFixed(3)} m/s
                 </span>
               ))}
             </div>

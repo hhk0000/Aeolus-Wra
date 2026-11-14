@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { applySourceDefaults, DEFAULT_TIMEZONE } from "./autoSetup";
+import {
+  applySourceDefaults,
+  DEFAULT_TIMEZONE,
+  useErrorFocus,
+} from "./autoSetup";
 import { api } from "./api";
 import type { Dataset, Mapping, UploadedFile } from "./api";
 import type { SourceFile, WorkspaceViewProps } from "./model";
@@ -63,6 +67,7 @@ export default function ChannelMapper({
   const [missing, setMissing] = useState("-9999, -999, NaN");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const errorRef = useErrorFocus<HTMLParagraphElement>(error);
   function map(index: number, changes: Partial<Mapping>) {
     setMaps((current) =>
       current.map((m, i) => (i === index ? { ...m, ...changes } : m)),
@@ -380,7 +385,7 @@ export default function ChannelMapper({
         支臂标识用于检查切变通道是否来自相同安装方向；不同通道保持独立。气压导入统一转Pa、温度统一转℃。
       </p>
       {error && (
-        <p className="ww-error" role="alert">
+        <p className="ww-error" role="alert" ref={errorRef} tabIndex={-1}>
           {error}
         </p>
       )}

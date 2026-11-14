@@ -1,4 +1,8 @@
-import { applySourceDefaults, nextAnniversary } from "./autoSetup";
+import {
+  applySourceDefaults,
+  nextAnniversary,
+  useErrorFocus,
+} from "./autoSetup";
 import { useState } from "react";
 import { filesForTower, longTermErrors } from "./model";
 import type { WorkspaceViewProps } from "./model";
@@ -25,6 +29,10 @@ export default function LongTermSetup({
     ),
   ].filter((n) => Number.isInteger(n) && n > 0 && n <= 100);
   const errors = longTermErrors(state);
+  const errorsRef = useErrorFocus<HTMLUListElement>(
+    showErrors && errors.length ? errors.join("；") : "",
+  );
+  const apiErrorRef = useErrorFocus<HTMLParagraphElement>(apiError);
   const reference = references.find(
     (f) => f.id === state.longTerm.fileId,
   )?.dataset;
@@ -239,7 +247,12 @@ export default function LongTermSetup({
         </section>
       </div>
       {showErrors && errors.length > 0 && (
-        <ul className="ww-error-list" role="alert">
+        <ul
+          className="ww-error-list"
+          role="alert"
+          ref={errorsRef}
+          tabIndex={-1}
+        >
           {errors.map((message) => (
             <li key={message}>{message}</li>
           ))}
@@ -270,7 +283,7 @@ export default function LongTermSetup({
         </div>
       </section>
       {apiError && (
-        <p className="ww-error" role="alert">
+        <p className="ww-error" role="alert" ref={apiErrorRef} tabIndex={-1}>
           {apiError}
         </p>
       )}

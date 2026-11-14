@@ -16,6 +16,7 @@ import {
   autoParseSource,
   DEFAULT_TIMEZONE,
   forgetFile,
+  useErrorFocus,
 } from "./autoSetup";
 
 export default function DataSources({
@@ -26,6 +27,7 @@ export default function DataSources({
   const [busy, setBusy] = useState(false);
   const [previewId, setPreviewId] = useState("");
   const [error, setError] = useState("");
+  const errorRef = useErrorFocus<HTMLParagraphElement>(error);
   const tower = state.towers.find((t) => t.id === state.activeTowerId)!;
   const preview = state.files.find(
     (f) =>
@@ -209,7 +211,7 @@ export default function DataSources({
         <p>原始、质控、结果按塔管理；中尺度文件在当前项目内共享。</p>
       </div>
       {error && (
-        <p className="ww-error" role="alert">
+        <p className="ww-error" role="alert" ref={errorRef} tabIndex={-1}>
           {error}
         </p>
       )}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { applySourceDefaults } from "./autoSetup";
+import { applySourceDefaults, useErrorFocus } from "./autoSetup";
 import { api, means } from "./api";
 import type { Channel, Run } from "./api";
 import type { SourceKind, WorkspaceViewProps } from "./model";
@@ -25,6 +25,7 @@ export default function CalculationPanel({
 }: WorkspaceViewProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const errorRef = useErrorFocus<HTMLParagraphElement>(error);
   const tower = state.towers.find((t) => t.id === state.activeTowerId)!;
   const config = state.analysis;
   const selected = (kind: SourceKind, id: string) =>
@@ -304,7 +305,7 @@ export default function CalculationPanel({
         </fieldset>
       </details>
       {error && (
-        <p className="ww-error" role="alert">
+        <p className="ww-error" role="alert" ref={errorRef} tabIndex={-1}>
           {error}
         </p>
       )}

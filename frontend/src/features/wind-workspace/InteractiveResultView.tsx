@@ -270,6 +270,7 @@ export function InteractiveResultView({
   outputId: string;
   exportMode?: boolean;
 }) {
+  const turbulence = outputId === "turbulence";
   const [directions, setDirections] = useState<
     { id: string; name: string; height: number }[]
   >([]);
@@ -330,15 +331,16 @@ export function InteractiveResultView({
     [error, setError] = useState("");
   const [all, setAll] = useState(exportMode),
     [channel, setChannel] = useState("");
-  const [hidden, setHidden] = useState<string[]>([]),
+  const [hidden, setHidden] = useState<string[]>(() =>
+      turbulence ? ["mean", "std", "characteristic"] : [],
+    ),
     [rose, setRose] = useState("both"),
     [month, setMonth] = useState("1");
   const [method, setMethod] = useState(
       String(run.config.weibull_method ?? "mle"),
     ),
     [sectors, setSectors] = useState(Number(run.config.sectors ?? 16));
-  const [sref, setSref] = useState("0.18"),
-    [iec, setIec] = useState(true),
+  const [iec, setIec] = useState(true),
     [low, setLow] = useState(""),
     [high, setHigh] = useState("");
   const output = run.outputs[outputId] ?? initial;
@@ -355,8 +357,7 @@ export function InteractiveResultView({
     (channels.includes(channel) ? channel : "") ||
     (typeof preferred === "string" ? preferred : channels[0]) ||
     "";
-  const turbulence = outputId === "turbulence",
-    isRose = outputId.includes("rose"),
+  const isRose = outputId.includes("rose"),
     completeness = ["raw-records", "completeness"].includes(outputId);
   const fields = turbulence
     ? ["mean", "std", "characteristic", "representative"]
@@ -407,7 +408,6 @@ export function InteractiveResultView({
     weibullMethod: method,
     sectors,
     iec,
-    sref,
     low,
     high,
     runId: run.id,
@@ -679,26 +679,14 @@ export function InteractiveResultView({
             </>
           )}
           {turbulence && (
-            <>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={iec}
-                  onChange={(e) => setIec(e.target.checked)}
-                />
-                IEC 61400-1 第3版参考曲线
-              </label>
-              <label>
-                S类自定义 Iref
-                <input
-                  type="number"
-                  min="0.001"
-                  step=".01"
-                  value={sref}
-                  onChange={(e) => setSref(e.target.value)}
-                />
-              </label>
-            </>
+            <label>
+              <input
+                type="checkbox"
+                checked={iec}
+                onChange={(e) => setIec(e.target.checked)}
+              />
+              IEC 61400-1 第3版 A/B/C 参考曲线
+            </label>
           )}
           {outputId === "shear" && (
             <>
@@ -823,10 +811,6 @@ export function InteractiveResultView({
                   IEC_A: v > 0 ? 0.16 * (0.75 + 5.6 / v) : null,
                   IEC_B: v > 0 ? 0.14 * (0.75 + 5.6 / v) : null,
                   IEC_C: v > 0 ? 0.12 * (0.75 + 5.6 / v) : null,
-                  IEC_S:
-                    v > 0 && Number(sref) > 0
-                      ? Number(sref) * (0.75 + 5.6 / v)
-                      : null,
                 };
               });
             }
@@ -892,7 +876,7 @@ export function InteractiveResultView({
                         (f) => !hidden.includes(f) && !hidden.includes(c + f),
                       ),
                       ...(turbulence && iec
-                        ? ["IEC_A", "IEC_B", "IEC_C", "IEC_S"].filter(
+                        ? ["IEC_A", "IEC_B", "IEC_C"].filter(
                             (f) => !hidden.includes(f),
                           )
                         : []),
@@ -906,10 +890,10 @@ export function InteractiveResultView({
             );
           })}
           {turbulence && iec && (
-            <p>
-              IEC参考为代表湍流曲线
-              Iref·(0.75+5.6/V)，A/B/C的Iref为0.16/0.14/0.12；S使用自定义值，不能自动作为标准固定等级。比较时选择代表TI。
-              {["IEC_A", "IEC_B", "IEC_C", "IEC_S"].map((f) => (
+            <p className="ww-inline-note">
+              IEC参考为代表湍流曲线 Iref·(0.75+5.6/V)，A/B/C的Iref为
+              0.16/0.14/0.12；S类按项目要求暂不显示。默认显示代表TI，可在上方勾选平均、特征或标准差湍流。
+              {["IEC_A", "IEC_B", "IEC_C"].map((f) => (
                 <label key={f}>
                   <input
                     type="checkbox"

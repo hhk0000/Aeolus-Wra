@@ -28,6 +28,13 @@ export function ResultsWorkspace({
     active?.kind === "reference"
       ? state.longTermRuns[tower.id]
       : state.analysisRuns[tower.id];
+  const outputMap = {
+    ...(state.analysisRuns[tower.id]?.outputs ?? {}),
+    ...(state.longTermRuns[tower.id]?.outputs ?? {}),
+  };
+  const computed = selected.filter(
+    (o) => outputMap[o.id]?.status === "ready",
+  ).length;
   const output = active && run?.outputs[active.id];
   const job =
     state.correlationJobs.find((j) => j.id === activeId) ??
@@ -36,16 +43,29 @@ export function ResultsWorkspace({
     job?.runs?.[Math.min(pairIndex, (job?.runs?.length ?? 1) - 1)];
   return (
     <div className="ww-results">
-      <div className="ww-section-heading">
-        <div>
+      <section className="ww-results-hero">
+        <div className="ww-results-hero-copy">
           <span className="ww-overline">CHART & TABLE COLLECTION</span>
           <h2>风资源计算成果</h2>
           <p>图、表与运行快照引用同一组数据与参数；修改配置后请重新计算。</p>
         </div>
-        <button className="ww-button" onClick={() => onConfigure("analysis")}>
-          调整分析配置 →
-        </button>
-      </div>
+        <div className="ww-results-hero-stats">
+          <div>
+            <strong>{tower.name}</strong>
+            <span>当前测风塔</span>
+          </div>
+          <div>
+            <strong>
+              {computed}
+              <i>/{selected.length}</i>
+            </strong>
+            <span>成果可用</span>
+          </div>
+          <button className="ww-button" onClick={() => onConfigure("analysis")}>
+            调整分析配置 →
+          </button>
+        </div>
+      </section>
       <div className="ww-gallery-filter">
         <div role="group" aria-label="图表来源筛选">
           {(
@@ -69,22 +89,25 @@ export function ResultsWorkspace({
             </button>
           ))}
         </div>
-        <label>
-          测风塔
-          <select
-            aria-label="图表测风塔"
-            value={state.activeTowerId}
-            onChange={(e) =>
-              onChange((current) => activateTower(current, e.target.value))
-            }
-          >
-            {state.towers.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="ww-gallery-tools">
+          <span className="ww-gallery-count">共 {filtered.length} 组</span>
+          <label>
+            测风塔
+            <select
+              aria-label="图表测风塔"
+              value={state.activeTowerId}
+              onChange={(e) =>
+                onChange((current) => activateTower(current, e.target.value))
+              }
+            >
+              {state.towers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
       <div className="ww-gallery-layout">
         <aside className="ww-chart-list">

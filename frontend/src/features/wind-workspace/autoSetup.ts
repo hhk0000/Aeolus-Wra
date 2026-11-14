@@ -1,9 +1,25 @@
+import { useEffect, useRef } from "react";
 import { api, means } from "./api";
 import type { Channel, Dataset } from "./api";
 import { createWorkspace, suggestHeaderMetadata } from "./model";
 import type { SourceFile, Tower, WorkspaceState } from "./model";
 
 export const DEFAULT_TIMEZONE = "Etc/GMT-8";
+/** Scroll a validation message into view (and focus it) whenever it appears. */
+export function useErrorFocus<T extends HTMLElement>(message: string) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    if (!message) return;
+    const node = ref.current;
+    if (!node) return;
+    const id = window.requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.focus?.({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [message]);
+  return ref;
+}
 export function localInput(value: string, timezone = DEFAULT_TIMEZONE) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,

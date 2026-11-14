@@ -1,9 +1,32 @@
 import { useState } from "react";
+import { localInput, useErrorFocus } from "./autoSetup";
 import { correlationErrors, heightPairs, sourceLabel } from "./model";
 import type { CorrelationDraft, WorkspaceViewProps } from "./model";
 import { api, means } from "./api";
 import type { Run, Dataset } from "./api";
 import { parseHeights } from "./model";
+
+function alignedPeriod(
+  files: WorkspaceViewProps["state"]["files"],
+  towers: WorkspaceViewProps["state"]["towers"],
+  leftId: string,
+  rightId: string,
+) {
+  const target = files.find((f) => f.id === leftId)?.dataset;
+  if (!target) return null;
+  let start = target.start;
+  let end = target.end_exclusive;
+  const reference = files.find((f) => f.id === rightId)?.dataset;
+  if (reference) {
+    if (reference.start > start) start = reference.start;
+    if (reference.end_exclusive < end) end = reference.end_exclusive;
+  }
+  if (!start || !end || start >= end) return null;
+  const towerId = files.find((f) => f.id === leftId)?.towerId;
+  const timezone =
+    towers.find((t) => t.id === towerId)?.timezone || "Etc/GMT-8";
+  return { start: localInput(start, timezone), end: localInput(end, timezone) };
+}
 
 export default function CorrelationSetup({
   state,
@@ -23,6 +46,50 @@ export default function CorrelationSetup({
   );
   const pairs = heightPairs(draft);
   const errors = correlationErrors(state);
+  const errorsRef = useErrorFocus<HTMLUListElement>(
+    showErrors && errors.length ? errors.join("；") : "",
+  );
+  const apiErrorRef = useErrorFocus<HTMLParagraphElement>(apiError);
+  const alignment = alignedPeriod(
+    state.files,
+    state.towers,
+    draft.leftFileId,
+    draft.rightFileId,
+  );
+
+  function aligned(
+    current: WorkspaceViewProps["state"],
+    next: CorrelationDraft,
+  ) {
+    const range = alignedPeriod(
+      current.files,
+      current.towers,
+      next.leftFileId,
+      next.rightFileId,
+    );
+    return range ? { ...next, ...range } : next;
+  }
+  function selectFile(key: "leftFileId" | "rightFileId", id: string) {
+    onChange((current) => {
+      const next: CorrelationDraft = {
+        ...current.correlation,
+        [key]: id,
+        ...(key === "leftFileId" && current.correlation.mode === "cross-tower"
+          ? { rightFileId: "" }
+          : {}),
+      };
+      return {
+        ...current,
+        correlation: aligned(current, next),
+      };
+    });
+  }
+  function realign() {
+    onChange((current) => ({
+      ...current,
+      correlation: aligned(current, current.correlation),
+    }));
+  }
 
   function change<K extends keyof CorrelationDraft>(
     key: K,
@@ -158,11 +225,11 @@ export default function CorrelationSetup({
             onClick={() => {
               onChange((current) => ({
                 ...current,
-                correlation: {
+                correlation: aligned(current, {
                   ...current.correlation,
                   mode: id as CorrelationDraft["mode"],
                   rightFileId: "",
-                },
+                }),
               }));
               setShowErrors(false);
             }}
@@ -186,18 +253,7 @@ export default function CorrelationSetup({
               目标数据（Y）
               <select
                 value={draft.leftFileId}
-                onChange={(e) => {
-                  onChange((current) => ({
-                    ...current,
-                    correlation: {
-                      ...current.correlation,
-                      leftFileId: e.target.value,
-                      ...(draft.mode === "cross-tower"
-                        ? { rightFileId: "" }
-                        : {}),
-                    },
-                  }));
-                }}
+                onChange={(e) => selectFile("leftFileId", e.target.value)}
               >
                 <option value="">选择原始 / 质控 / 结果文件</option>
                 {targets.map((file) => (
@@ -212,7 +268,7 @@ export default function CorrelationSetup({
                 对比数据（X）
                 <select
                   value={draft.rightFileId}
-                  onChange={(e) => change("rightFileId", e.target.value)}
+                  onChange={(e) => selectFile("rightFileId", e.target.value)}
                 >
                   <option value="">
                     {draft.mode === "reference"
@@ -268,6 +324,20 @@ export default function CorrelationSetup({
                 onChange={(e) => change("end", e.target.value)}
               />
             </label>
+            <div className="ww-align-hint">
+              <small>
+                {alignment
+                  ? `已按${left?.file.name ?? "测风塔数据"}的有效时段自动对齐：${alignment.start.replace("T", " ")} → ${alignment.end.replace("T", " ")}（终点不含）`
+                  : "选择已解析的目标数据后，自动按测风塔有效时段对齐。"}
+              </small>
+              <button
+                type="button"
+                className="ww-text-button"
+                onClick={realign}
+              >
+                重新按测风时段对齐
+              </button>
+            </div>
             <label className="ww-wide">
               回归模型
               <select
@@ -396,7 +466,12 @@ export default function CorrelationSetup({
         </p>
       </div>
       {showErrors && errors.length > 0 && (
-        <ul className="ww-error-list" role="alert">
+        <ul
+          className="ww-error-list"
+          role="alert"
+          ref={errorsRef}
+          tabIndex={-1}
+        >
           {errors.map((message) => (
             <li key={message}>{message}</li>
           ))}
@@ -467,7 +542,7 @@ export default function CorrelationSetup({
         </div>
       </section>
       {apiError && (
-        <p className="ww-error" role="alert">
+        <p className="ww-error" role="alert" ref={apiErrorRef} tabIndex={-1}>
           {apiError}
         </p>
       )}

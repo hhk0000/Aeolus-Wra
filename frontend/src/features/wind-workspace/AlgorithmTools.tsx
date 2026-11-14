@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useErrorFocus } from "./autoSetup";
 import { api, means } from "./api";
 import type { Dataset, Run } from "./api";
 import type { SourceFile, WorkspaceViewProps } from "./model";
@@ -26,6 +27,7 @@ export default function AlgorithmTools({
   const [referenceConfirmed, setReferenceConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const errorRef = useErrorFocus<HTMLParagraphElement>(error);
   const [lastRun, setLastRun] = useState<Run | null>(null);
   const files = state.files.filter(
     (f) =>
@@ -390,7 +392,7 @@ export default function AlgorithmTools({
           </div>
         )}
         {error && (
-          <p className="ww-error" role="alert">
+          <p className="ww-error" role="alert" ref={errorRef} tabIndex={-1}>
             {error}
           </p>
         )}

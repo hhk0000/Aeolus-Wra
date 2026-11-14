@@ -383,18 +383,9 @@ function CartesianPlot({
               x2={right}
               y1={y(Number(m.mean_speed), "mean_speed")}
               y2={y(Number(m.mean_speed), "mean_speed")}
-              stroke={palette[(i + 1) % palette.length]}
+              stroke={String(m.color ?? palette[(i + 1) % palette.length])}
               strokeDasharray="6 4"
             />
-            <text
-              x={right - 4}
-              y={y(Number(m.mean_speed), "mean_speed") - 5}
-              textAnchor="end"
-              fontSize="10"
-              fill={palette[(i + 1) % palette.length]}
-            >
-              {String(m.years)}年均值 {Number(m.mean_speed).toFixed(3)}
-            </text>
           </g>
         ))}
       {rows.map(
@@ -652,6 +643,7 @@ export function BaseResultView({
   const [selectedChannel, setSelectedChannel] = useState("");
   const [month, setMonth] = useState("");
   const [windowValue, setWindowValue] = useState("");
+  const [hiddenMeans, setHiddenMeans] = useState<string[]>([]);
   const container = useRef<HTMLDivElement>(null);
   const allRows = output.rows ?? [];
   const channels = [
@@ -682,6 +674,14 @@ export function BaseResultView({
     (output.summary?.channels ?? []) as Record<string, unknown>[]
   ).find((p) => p.channel === channel);
   const means = (output.summary?.means ?? []) as Record<string, unknown>[];
+  const meanColor = (years: string) => {
+    const order = ["30", "20", "10"];
+    const index = order.indexOf(years);
+    return palette[(index < 0 ? 1 : index + 1) % palette.length];
+  };
+  const visibleMeans: Record<string, unknown>[] = means
+    .filter((m) => !hiddenMeans.includes(String(m.years)))
+    .map((m) => ({ ...m, color: meanColor(String(m.years)) }));
   const exportPlots = () => {
     container.current
       ?.querySelectorAll("svg")
@@ -746,6 +746,35 @@ export function BaseResultView({
         </div>
       ) : (
         <>
+          {means.length > 0 && (
+            <div
+              className="ww-mean-toggles"
+              role="group"
+              aria-label="长期均值线显示"
+            >
+              <span>图上均值线</span>
+              {means.map((m) => {
+                const years = String(m.years);
+                return (
+                  <label key={years}>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenMeans.includes(years)}
+                      onChange={() =>
+                        setHiddenMeans((v) =>
+                          v.includes(years)
+                            ? v.filter((x) => x !== years)
+                            : [...v, years],
+                        )
+                      }
+                    />
+                    {years} 年均值线
+                  </label>
+                );
+              })}
+              <small>只勾选需要的窗口，无需返回配置修改。</small>
+            </div>
+          )}
           <div
             ref={container}
             className={
@@ -803,9 +832,23 @@ export function BaseResultView({
                 </article>
               ))
             ) : (
-              <CartesianPlot rows={rows} outputId={outputId} means={means} />
+              <CartesianPlot
+                rows={rows}
+                outputId={outputId}
+                means={visibleMeans}
+              />
             )}
           </div>
+          {visibleMeans.length > 0 && (
+            <div className="ww-mean-legend" aria-label="均值线图例">
+              {visibleMeans.map((m) => (
+                <span key={String(m.years)}>
+                  <i style={{ borderColor: String(m.color) }} />
+                  {String(m.years)} 年均值 {Number(m.mean_speed).toFixed(3)} m/s
+                </span>
+              ))}
+            </div>
+          )}
           {outputId === "weibull" && parameters && (
             <div className="ww-callout">
               形状参数 k={display(parameters.k)} · 尺度参数 c=

@@ -1,5 +1,7 @@
 # Aeolus-Wra · 风资源自动化分析平台
 
+GPT / DSH 接续开发先读 [固定交接入口](HANDOFF.md) 与 [协作检索规则](docs/COLLABORATION.md)。收到“在某 AI 的基础上继续开发”时，按入口自动查找版本、需求及待办。
+
 本地开发起步，逐步演进为云端服务。正式仓库：
 [hhk0000/Aeolus-Wra](https://github.com/hhk0000/Aeolus-Wra)。
 

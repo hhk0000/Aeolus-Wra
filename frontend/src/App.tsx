@@ -554,7 +554,21 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === 3 && <ReportOutline state={workspace} />}
+              {page === 3 && (
+                <ReportOutline
+                  key={selected}
+                  state={workspace}
+                  projectName={current.name}
+                  onChange={updateWorkspace}
+                  onAnalyze={() => {
+                    updateWorkspace((current) => ({
+                      ...current,
+                      activeTab: "analysis",
+                    }));
+                    go(1);
+                  }}
+                />
+              )}
               {page === 4 && <ReviewWorkspace state={workspace} />}
               {page === 5 && <StandardsLibrary />}
             </>

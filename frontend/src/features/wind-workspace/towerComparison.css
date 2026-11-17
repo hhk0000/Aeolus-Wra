@@ -1,0 +1,36 @@
+.ww-report-tower,
+.ww-comparison-towers > div,
+.ww-comparison-downloads {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ww-report-tower {
+  margin: 18px 0;
+}
+.ww-report-tower select,
+.ww-comparison-towers select {
+  width: auto;
+  max-width: 100%;
+}
+.ww-comparison-towers {
+  display: grid;
+  gap: 12px;
+}
+.ww-comparison-towers label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 9em;
+}
+.ww-comparison-towers input {
+  width: auto;
+}
+.ww-comparison-output svg {
+  margin: 12px 0;
+}
+.ww-comparison-output caption {
+  text-align: left;
+  margin: 15px 0 8px;
+}

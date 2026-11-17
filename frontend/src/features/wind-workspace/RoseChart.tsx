@@ -1,8 +1,12 @@
 import { useState } from "react";
+import { EXCEL } from "./chartTheme";
 
 type Row = Record<string, unknown>;
 
-/** Shared wind-rose drawing used by interactive and long-term reference charts. */
+/**
+ * Excel radar (wind-rose) chart: polygonal rings, 16 compass labels, percent
+ * labels along the vertical axis, thin blue line, no markers or centre hole.
+ */
 export function RoseChart({
   rows,
   title,
@@ -18,23 +22,33 @@ export function RoseChart({
 }) {
   const [hover, setHover] = useState("");
   const w = 900,
-    h = 640,
+    h = 680,
     cx = 450,
-    cy = 310,
-    base = 80,
-    maxR = 200;
+    cy = 340,
+    maxR = 280,
+    labelR = maxR + 36;
   const key = energy ? "energy_frequency" : "frequency";
-  const max = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0)) * 1.1;
+  const rawMax = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0));
+  const max = Math.max(1, Math.ceil(rawMax / 5) * 5);
   const point = (a: number, r: number): [number, number] => [
     cx + Math.sin((a * Math.PI) / 180) * r,
     cy - Math.cos((a * Math.PI) / 180) * r,
   ];
+  const angleOf = (r: Row) =>
+    Number.isFinite(Number(r.degrees)) && r.degrees !== undefined
+      ? Number(r.degrees)
+      : (360 / Math.max(1, rows.length)) * (Number(r.sector ?? 0) + 0.5);
   if (!rows.length)
     return (
       <div className="ww-simple-empty">
         <p>暂无可绘制的方向数据</p>
       </div>
     );
+  const ringValues = [0.2, 0.4, 0.6, 0.8, 1].map((t) => max * t);
+  const ringPoints = (value: number) =>
+    rows
+      .map((r) => point(angleOf(r), (value / max) * maxR).join(","))
+      .join(" ");
   return (
     <figure style={{ margin: 0 }}>
       <figcaption>{title}</figcaption>
@@ -43,93 +57,119 @@ export function RoseChart({
           viewBox={`0 0 ${w} ${h}`}
           role="img"
           aria-label={title}
+          fontFamily={EXCEL.font}
+          fontSize={EXCEL.tickSize}
           style={{
             width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
             minWidth: 560,
             background: "white",
           }}
         >
-          <text x={cx} y="24" textAnchor="middle" fontSize="12">
-            {hover || title}
-          </text>
-          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-            const r = base + t * maxR;
-            const tick = point(45, r + 6);
+          {ringValues.map((value) => (
+            <g key={value}>
+              <polygon
+                points={ringPoints(value)}
+                fill="none"
+                stroke={EXCEL.grid}
+                strokeWidth="1"
+              />
+              <text
+                x={cx + 6}
+                y={cy - (value / max) * maxR + 4}
+                fontSize={EXCEL.tickSize}
+                fill={EXCEL.text}
+              >
+                {value.toFixed(0)}%
+              </text>
+            </g>
+          ))}
+          {rows.map((r, i) => {
+            const a = angleOf(r);
+            const end = point(a, maxR);
             return (
-              <g key={t}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={r}
-                  fill="none"
-                  stroke="#dce5df"
-                  strokeDasharray="3 3"
-                />
-                <text x={tick[0]} y={tick[1]} fontSize="10" fill="#7f9487">
-                  {(max * t).toFixed(1)}%
-                </text>
-              </g>
+              <line
+                key={i}
+                x1={cx}
+                y1={cy}
+                x2={end[0]}
+                y2={end[1]}
+                stroke={EXCEL.grid}
+                strokeWidth="1"
+              />
             );
           })}
           {rows.map((r, i) => {
-            const a = Number(r.degrees),
-              da = 180 / rows.length;
-            const r1 = base + (Number(r[key]) / max) * maxR;
-            const p1 = point(a - da, r1),
-              p2 = point(a + da, r1),
-              p3 = point(a + da, base),
-              p4 = point(a - da, base),
-              label = point(a, base + maxR + 22);
+            const a = angleOf(r);
+            const label = point(a, labelR);
             return (
-              <g
+              <text
                 key={i}
+                x={label[0]}
+                y={label[1]}
+                textAnchor="middle"
+                fontSize={EXCEL.tickSize + 1}
+                fill={EXCEL.text}
+              >
+                {String(r.label ?? a)}
+              </text>
+            );
+          })}
+          <polygon
+            points={rows
+              .map((r) =>
+                point(angleOf(r), (Number(r[key]) / max) * maxR).join(","),
+              )
+              .join(" ")}
+            fill={rose === "filled" ? EXCEL.series[0] : "none"}
+            fillOpacity={rose === "filled" ? 0.25 : 0}
+            stroke={EXCEL.series[0]}
+            strokeWidth="2"
+          />
+          {rows.map((r, i) => {
+            const a = angleOf(r);
+            const p = point(a, (Number(r[key]) / max) * maxR);
+            return (
+              <circle
+                key={`marker-${i}`}
+                cx={p[0]}
+                cy={p[1]}
+                r={3}
+                fill={EXCEL.series[0]}
+              />
+            );
+          })}
+          {rows.map((r, i) => {
+            const a = angleOf(r);
+            const p = point(a, (Number(r[key]) / max) * maxR);
+            return (
+              <circle
+                key={i}
+                cx={p[0]}
+                cy={p[1]}
+                r={6}
+                fill="transparent"
                 onMouseEnter={() =>
                   setHover(`${r.label}: ${Number(r[key]).toFixed(2)}%`)
                 }
               >
-                <line
-                  x1={cx}
-                  y1={cy}
-                  x2={label[0]}
-                  y2={label[1]}
-                  stroke="#edf0ee"
-                />
-                {rose === "filled" && (
-                  <path
-                    d={`M${p1} A${r1},${r1} 0 0 1 ${p2} L${p3} A${base},${base} 0 0 0 ${p4} Z`}
-                    fill="#326f35"
-                  />
-                )}
-                <text
-                  x={label[0]}
-                  y={label[1]}
-                  textAnchor="middle"
-                  fontSize="11"
-                >
-                  {a}°
-                </text>
                 <title>
                   {String(r.label)} · {Number(r[key]).toFixed(2)}%
                 </title>
-              </g>
+              </circle>
             );
           })}
-          {rose === "line" && (
-            <polygon
-              points={rows
-                .map((r) =>
-                  point(
-                    Number(r.degrees),
-                    base + (Number(r[key]) / max) * maxR,
-                  ).join(","),
-                )
-                .join(" ")}
-              fill="none"
-              stroke="#326f35"
-              strokeWidth="2"
-            />
-          )}
-          <circle cx={cx} cy={cy} r={base} fill="#f6f7f6" stroke="#a5b5aa" />
+          <text x={cx} y={28} textAnchor="middle" fontSize={EXCEL.tickSize + 2}>
+            {hover}
+          </text>
+          <rect
+            x="1"
+            y="1"
+            width={w - 2}
+            height={h - 2}
+            fill="none"
+            stroke={EXCEL.axis}
+            strokeWidth="2"
+          />
         </svg>
       </div>
     </figure>

@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from wind_platform import __version__
 from wind_platform.api.health import router as health_router
+from wind_platform.api.reports import router as reports_router
 from wind_platform.api.wind import router as wind_router
 from wind_platform.core.calculations import CalculationError
 from wind_platform.services.store import LocalStore
@@ -18,6 +19,7 @@ def create_app(data_dir=None) -> FastAPI:
     )
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(wind_router, prefix="/api/v1")
+    app.include_router(reports_router, prefix="/api/v1")
     app.state.wind_store = LocalStore(data_dir)
 
     @app.exception_handler(CalculationError)

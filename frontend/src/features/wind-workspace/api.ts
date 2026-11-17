@@ -80,6 +80,17 @@ export interface Method {
   status: string;
   version: string;
 }
+
+export function runTowerName(run: Run, workspaceTowerName?: string): string {
+  const recorded = run.config.tower_name;
+  if (typeof recorded === "string" && recorded.trim()) return recorded.trim();
+  if (workspaceTowerName?.trim()) return workspaceTowerName.trim();
+  // Older standalone snapshots predate tower names. Use the same mast-number
+  // convention as drag-and-drop import, then fall back to the recorded ID.
+  const source = run.sources?.raw ?? run.sources?.qc ?? run.sources?.result;
+  const file = String(source?.filename ?? "");
+  return file.match(/-(\d{6})_/u)?.[1] || String(source?.tower_id || "—");
+}
 export interface Registry {
   engine_version: string;
   verified_on: string;
@@ -95,12 +106,17 @@ export interface Registry {
   notice: string;
 }
 
-export async function api<T>(path: string, body?: unknown): Promise<T> {
+export async function api<T>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(
     `/api/v1${path}`,
     body === undefined
-      ? {}
+      ? { signal }
       : {
+          signal,
           method: "POST",
           ...(body instanceof FormData
             ? { body }

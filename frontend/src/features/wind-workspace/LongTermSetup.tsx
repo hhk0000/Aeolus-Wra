@@ -60,6 +60,7 @@ export default function LongTermSetup({
       if (channels.length !== 1)
         throw new Error("参考高度的风速通道未唯一匹配，请核对映射。");
       const response = await api<Run>("/long-term", {
+        tower_name: tower.name,
         reference_id: reference.id,
         result_id: result.id,
         speed_channel: channels[0].id,

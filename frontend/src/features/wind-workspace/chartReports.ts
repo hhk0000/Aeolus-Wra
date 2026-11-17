@@ -11,9 +11,12 @@ export function readCharts(): SavedChart[] {
     return Array.isArray(value)
       ? value.filter(
           (c) =>
+            c &&
             typeof c.id === "string" &&
             typeof c.title === "string" &&
-            typeof c.html === "string",
+            typeof c.html === "string" &&
+            c.config &&
+            typeof c.config === "object",
         )
       : [];
   } catch {
@@ -31,6 +34,14 @@ export function addReportChart(
       ...readCharts(),
       { id: crypto.randomUUID(), title, html, config },
     ]),
+  );
+  window.dispatchEvent(new Event("aeolus-report-change"));
+}
+
+export function removeReportChart(id: string) {
+  localStorage.setItem(
+    key,
+    JSON.stringify(readCharts().filter((chart) => chart.id !== id)),
   );
   window.dispatchEvent(new Event("aeolus-report-change"));
 }

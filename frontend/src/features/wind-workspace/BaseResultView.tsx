@@ -1,9 +1,10 @@
-﻿import { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
+import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 
-const palette = ["#2c7a63", "#d49a46", "#657fbd", "#bb6777"];
+const palette = EXCEL.series;
 const labels: Record<string, string> = {
   channel: "通道",
   height: "高度 m",
@@ -181,11 +182,13 @@ function CartesianPlot({
   outputId,
   means = [],
   bars = true,
+  compact = false,
 }: {
   rows: Record<string, unknown>[];
   outputId: string;
   means?: Record<string, unknown>[];
   bars?: boolean;
+  compact?: boolean;
 }) {
   const isAnnual = outputId === "reference-years";
   const isTI = outputId === "turbulence";
@@ -206,12 +209,12 @@ function CartesianPlot({
           : ["mean_speed", ...(!isAnnual ? ["power_density"] : [])];
   const used = keys.filter((key) => rows.some((r) => numeric(r[key])));
   if (!used.length || !rows.length) return null;
-  const w = 900,
-    h = 350,
-    left = 66,
-    right = 830,
-    top = 35,
-    bottom = 285;
+  const w = compact ? 480 : 900,
+    h = compact ? 280 : 350,
+    left = compact ? 48 : 66,
+    right = compact ? 462 : 830,
+    top = compact ? 18 : 35,
+    bottom = compact ? 222 : 285;
   const maxFor = (key: string) =>
     Math.max(
       1e-6,
@@ -235,9 +238,30 @@ function CartesianPlot({
         viewBox={`0 0 ${w} ${h}`}
         role="img"
         aria-label="真实计算结果图"
-        fontFamily="Microsoft YaHei, sans-serif"
+        fontFamily={EXCEL.font}
+        fontSize={EXCEL.tickSize}
       >
         <rect width={w} height={h} fill="white" />
+        <line x1={left} y1={top} x2={left} y2={bottom} stroke={EXCEL.axis} />
+        <line
+          x1={left}
+          y1={bottom}
+          x2={right}
+          y2={bottom}
+          stroke={EXCEL.axis}
+        />
+        {compact &&
+          dual &&
+          rows.map((_, i) => (
+            <line
+              key={`v-${i}`}
+              x1={x(i)}
+              x2={x(i)}
+              y1={top}
+              y2={bottom}
+              stroke={EXCEL.grid}
+            />
+          ))}
         {[0, 1, 2, 3, 4].map((n) => (
           <g key={n}>
             <line
@@ -245,14 +269,14 @@ function CartesianPlot({
               x2={right}
               y1={top + (n * (bottom - top)) / 4}
               y2={top + (n * (bottom - top)) / 4}
-              stroke="#e6ece8"
+              stroke={EXCEL.grid}
             />
             <text
               x={left - 8}
               y={top + (n * (bottom - top)) / 4 + 4}
               textAnchor="end"
-              fontSize="11"
-              fill="#78887f"
+              fontSize={EXCEL.tickSize}
+              fill={EXCEL.text}
             >
               {(
                 maxFor(used[0]) -
@@ -263,7 +287,7 @@ function CartesianPlot({
               <text
                 x={right + 8}
                 y={top + (n * (bottom - top)) / 4 + 4}
-                fontSize="11"
+                fontSize={compact ? 9 : EXCEL.tickSize}
                 fill={palette[1]}
               >
                 {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
@@ -308,7 +332,14 @@ function CartesianPlot({
                 <polyline
                   fill="none"
                   stroke={palette[k]}
-                  strokeWidth="2.3"
+                  strokeWidth={compact && dual ? 2.5 : EXCEL.lineWidth}
+                  strokeDasharray={
+                    dual && key === "power_density"
+                      ? compact
+                        ? "6 4"
+                        : "1 2"
+                      : undefined
+                  }
                   points={rows
                     .map((row, i) =>
                       numeric(row[key])
@@ -318,22 +349,48 @@ function CartesianPlot({
                     .filter(Boolean)
                     .join(" ")}
                 />
-                {rows.map(
-                  (row, i) =>
-                    numeric(row[key]) && (
-                      <circle
-                        key={i}
-                        cx={x(i)}
-                        cy={y(Number(row[key]), key)}
-                        r="2.5"
-                        fill={palette[k]}
-                      >
-                        <title>
-                          {label(row)} · {labels[key]}：{display(row[key])}
-                        </title>
-                      </circle>
-                    ),
-                )}
+                {rows.map((row, i) => {
+                  if (!numeric(row[key])) return null;
+                  const cx = x(i),
+                    cy = y(Number(row[key]), key);
+                  return compact && dual ? (
+                    <g key={i}>
+                      {k === 0 ? (
+                        <rect
+                          x={cx - 6}
+                          y={cy - 6}
+                          width="12"
+                          height="12"
+                          transform={`rotate(45 ${cx} ${cy})`}
+                          fill={palette[k]}
+                        />
+                      ) : (
+                        <rect
+                          x={cx - 5}
+                          y={cy - 5}
+                          width="10"
+                          height="10"
+                          fill={palette[k]}
+                        />
+                      )}
+                      <title>
+                        {label(row)} · {labels[key]}：{display(row[key])}
+                      </title>
+                    </g>
+                  ) : (
+                    <circle
+                      key={i}
+                      cx={cx}
+                      cy={cy}
+                      r={EXCEL.marker}
+                      fill={palette[k]}
+                    >
+                      <title>
+                        {label(row)} · {labels[key]}：{display(row[key])}
+                      </title>
+                    </circle>
+                  );
+                })}
               </>
             )}
           </g>
@@ -360,55 +417,84 @@ function CartesianPlot({
                 x={x(i)}
                 y={bottom + 20}
                 textAnchor="middle"
-                fill="#718278"
-                fontSize={isAnnual ? 9 : 11}
+                fill={EXCEL.text}
+                fontSize={EXCEL.tickSize}
               >
                 {isAnnual ? label(row).slice(0, 4) : label(row)}
               </text>
             ),
         )}
-        <text x={left} y="16" fontSize="11" fill={palette[0]}>
-          {labels[used[0]]}
-        </text>
-        {dual && (
-          <text
-            x={right}
-            y="16"
-            textAnchor="end"
-            fontSize="11"
-            fill={palette[1]}
-          >
-            右轴：风功率密度 W/m²
-          </text>
+        {!compact && (
+          <>
+            <text
+              x={(left + right) / 2}
+              y={h - 6}
+              textAnchor="middle"
+              fontSize={EXCEL.tickSize}
+              fill={EXCEL.text}
+            >
+              {outputId === "monthly" || outputId === "density"
+                ? "月份"
+                : outputId === "hourly" || outputId === "monthly-hourly"
+                  ? "时段"
+                  : outputId === "frequency"
+                    ? "风速区间"
+                    : outputId === "turbulence"
+                      ? "湍流强度"
+                      : isAnnual
+                        ? "年份"
+                        : ""}
+            </text>
+            {dual && (
+              <text
+                transform={`translate(${w - 6} ${(top + bottom) / 2}) rotate(90)`}
+                textAnchor="middle"
+                fontSize={EXCEL.tickSize}
+                fill={palette[1]}
+              >
+                风功率密度(W/m²)
+              </text>
+            )}
+            <text
+              transform={`translate(14 ${(top + bottom) / 2}) rotate(-90)`}
+              textAnchor="middle"
+              fontSize={EXCEL.tickSize}
+              fill={EXCEL.text}
+            >
+              {isAnnual ? "平均风速(m/s)" : labels[used[0]]}
+            </text>
+          </>
         )}
       </svg>
-      <div className="ww-plot-legend" aria-label="图例">
-        {isAnnual ? (
-          <>
-            <span>
-              <i className="box" style={{ background: palette[0] }} />
-              周年均值（绿柱）
-            </span>
-            <span>
-              <i className="box" style={{ background: "#e3b341" }} />
-              测风同期（黄柱）
-            </span>
-            {means.length > 0 && (
+      {!compact && (
+        <div className="ww-plot-legend" aria-label="图例">
+          {isAnnual ? (
+            <>
               <span>
-                <i style={{ borderColor: "#c0392b" }} />
-                中尺度均值线
+                <i className="box" style={{ background: palette[0] }} />
+                周年均值（绿柱）
               </span>
-            )}
-          </>
-        ) : (
-          used.map((key, i) => (
-            <span key={key}>
-              <i style={{ borderColor: palette[i % palette.length] }} />
-              {labels[key]}
-            </span>
-          ))
-        )}
-      </div>
+              <span>
+                <i className="box" style={{ background: "#e3b341" }} />
+                测风同期（黄柱）
+              </span>
+              {means.length > 0 && (
+                <span>
+                  <i style={{ borderColor: "#c0392b" }} />
+                  中尺度均值线
+                </span>
+              )}
+            </>
+          ) : (
+            used.map((key, i) => (
+              <span key={key}>
+                <i style={{ borderColor: palette[i % palette.length] }} />
+                {labels[key]}
+              </span>
+            ))
+          )}
+        </div>
+      )}
     </figure>
   );
 }
@@ -421,42 +507,64 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
         <p>没有同期有效样本</p>
       </div>
     );
-  const max = Math.max(1, ...points.flat()) * 1.1;
-  const x = (v: number) => 35 + (v / max) * 220,
-    y = (v: number) => 235 - (v / max) * 205;
+  const w = 640,
+    h = 430,
+    L = 70,
+    R = 610,
+    T = 30,
+    B = 370;
+  const max = Math.max(1, ...points.flat()) * 1.08;
+  const x = (v: number) => L + (v / max) * (R - L);
+  const y = (v: number) => B - (v / max) * (B - T);
   return (
     <svg
-      viewBox="0 0 280 280"
+      viewBox={`0 0 ${w} ${h}`}
       role="img"
       aria-label={`${row.label}扇区同期散点图`}
-      fontFamily="Microsoft YaHei, sans-serif"
+      fontFamily={EXCEL.font}
+      fontSize={EXCEL.tickSize}
     >
-      <rect width="280" height="280" fill="white" />
-      <path d="M35 25V235H260" fill="none" stroke="#acbbb2" />
+      <rect width={w} height={h} fill="white" />
+      <rect
+        x={L}
+        y={T}
+        width={R - L}
+        height={B - T}
+        fill="none"
+        stroke={EXCEL.axis}
+        strokeWidth="1"
+      />
       {[0.25, 0.5, 0.75, 1].map((f) => (
         <g key={f}>
           <line
-            x1="35"
-            x2="255"
+            x1={L}
+            x2={R}
             y1={y(f * max)}
             y2={y(f * max)}
-            stroke="#ecf0ed"
+            stroke={EXCEL.grid}
+          />
+          <line
+            x1={x(f * max)}
+            x2={x(f * max)}
+            y1={T}
+            y2={B}
+            stroke={EXCEL.grid}
           />
           <text
-            x="30"
+            x={L - 6}
             y={y(f * max) + 3}
-            fontSize="8"
+            fontSize={EXCEL.tickSize}
             textAnchor="end"
-            fill="#84968b"
+            fill={EXCEL.text}
           >
             {(f * max).toFixed(0)}
           </text>
           <text
             x={x(f * max)}
-            y="248"
-            fontSize="8"
+            y={B + 16}
+            fontSize={EXCEL.tickSize}
             textAnchor="middle"
-            fill="#84968b"
+            fill={EXCEL.text}
           >
             {(f * max).toFixed(0)}
           </text>
@@ -467,26 +575,57 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
           key={i}
           cx={x(a)}
           cy={y(b)}
-          r="1.6"
-          fill="#43856c"
-          opacity=".35"
+          r="2"
+          fill={EXCEL.series[0]}
+          opacity=".45"
         />
       ))}
       {numeric(row.slope) && (
-        <line
-          x1={x(Number(row.x_min))}
-          y1={y(Number(row.slope) * Number(row.x_min) + Number(row.intercept))}
-          x2={x(Number(row.x_max))}
-          y2={y(Number(row.slope) * Number(row.x_max) + Number(row.intercept))}
-          stroke="#d49343"
-          strokeWidth="1.8"
-        />
+        <>
+          <line
+            x1={x(Number(row.x_min))}
+            y1={y(
+              Number(row.slope) * Number(row.x_min) + Number(row.intercept),
+            )}
+            x2={x(Number(row.x_max))}
+            y2={y(
+              Number(row.slope) * Number(row.x_max) + Number(row.intercept),
+            )}
+            stroke={EXCEL.series[1]}
+            strokeWidth="2"
+            strokeDasharray="6 4"
+          />
+          <text
+            x={R - 4}
+            y={B - 10}
+            textAnchor="end"
+            fontSize={EXCEL.tickSize}
+            fill={EXCEL.text}
+          >
+            y = {Number(row.slope).toFixed(4)}x +{" "}
+            {Number(row.intercept).toFixed(4)}
+            {numeric(row.r_squared)
+              ? `  R² = ${Number(row.r_squared).toFixed(4)}`
+              : ""}
+          </text>
+        </>
       )}
-      <text x="145" y="269" fontSize="10" textAnchor="middle" fill="#657b6d">
-        X 参考风速 m/s
+      <text
+        x={(L + R) / 2}
+        y={h - 6}
+        textAnchor="middle"
+        fontSize={EXCEL.tickSize}
+        fill={EXCEL.text}
+      >
+        参考站风速(m/s)
       </text>
-      <text x="7" y="17" fontSize="10" fill="#657b6d">
-        Y 目标风速 m/s
+      <text
+        transform={`translate(16 ${(T + B) / 2}) rotate(-90)`}
+        textAnchor="middle"
+        fontSize={EXCEL.tickSize}
+        fill={EXCEL.text}
+      >
+        测风塔风速(m/s)
       </text>
     </svg>
   );
@@ -538,9 +677,19 @@ function ShearPlots({
         viewBox="0 0 900 350"
         role="img"
         aria-label="同支臂实测风廓线与幂律拟合"
-        fontFamily="Microsoft YaHei, sans-serif"
+        fontFamily={EXCEL.font}
+        fontSize={EXCEL.tickSize}
       >
         <rect width="900" height="350" fill="white" />
+        <rect
+          x="65"
+          y="30"
+          width="700"
+          height="255"
+          fill="none"
+          stroke={EXCEL.axis}
+          strokeWidth="1"
+        />
         {[0, 1, 2, 3, 4].map((n) => (
           <g key={n}>
             <line
@@ -548,14 +697,14 @@ function ShearPlots({
               x2="765"
               y1={y((n * maxH) / 4)}
               y2={y((n * maxH) / 4)}
-              stroke="#e4ebe6"
+              stroke={EXCEL.grid}
             />
             <text
               x="56"
               y={y((n * maxH) / 4) + 4}
               textAnchor="end"
-              fontSize="10"
-              fill="#7c9081"
+              fontSize={EXCEL.tickSize}
+              fill={EXCEL.text}
             >
               {((n * maxH) / 4).toFixed(0)}
             </text>
@@ -563,8 +712,8 @@ function ShearPlots({
               x={x((n * maxV) / 4)}
               y="306"
               textAnchor="middle"
-              fontSize="10"
-              fill="#7c9081"
+              fontSize={EXCEL.tickSize}
+              fill={EXCEL.text}
             >
               {((n * maxV) / 4).toFixed(1)}
             </text>
@@ -573,7 +722,7 @@ function ShearPlots({
         <polyline
           points={curve}
           fill="none"
-          stroke="#cf9a55"
+          stroke={EXCEL.series[1]}
           strokeDasharray="5 3"
           strokeWidth="2"
         />
@@ -583,17 +732,23 @@ function ShearPlots({
             cx={x(p.mean_speed)}
             cy={y(p.height)}
             r="5"
-            fill="#347a5b"
+            fill={EXCEL.series[0]}
           >
             <title>
               {p.height}m：{p.mean_speed.toFixed(4)}m/s
             </title>
           </circle>
         ))}
-        <text x="65" y="20" fontSize="11" fill="#789281">
+        <text x="65" y="20" fontSize="11" fill={EXCEL.text}>
           高度 m
         </text>
-        <text x="450" y="333" fontSize="11" textAnchor="middle" fill="#789281">
+        <text
+          x="450"
+          y="333"
+          fontSize="11"
+          textAnchor="middle"
+          fill={EXCEL.text}
+        >
           风速 m/s · 实测同期均值（绿点） / 幂律拟合（虚线）
         </text>
       </svg>
@@ -878,24 +1033,37 @@ export function BaseResultView({
             }
           >
             {outputId === "monthly-hourly" ? (
-              <div className="ww-month-grid">
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                  <article key={m}>
-                    <h3>{m}月 · 日内风况</h3>
-                    <CartesianPlot
-                      outputId="hourly"
-                      rows={rows
-                        .filter(
-                          (r) => Number(String(r.period).slice(0, 2)) === m,
-                        )
-                        .map((r) => ({
-                          ...r,
-                          period: String(r.period).slice(3),
-                        }))}
-                    />
-                  </article>
-                ))}
-              </div>
+              <>
+                <div className="ww-plot-legend is-dual" aria-label="小图图例">
+                  <span>
+                    <i className="diamond" style={{ background: palette[0] }} />
+                    风速
+                  </span>
+                  <span>
+                    <i className="square" style={{ background: palette[1] }} />
+                    风功率密度
+                  </span>
+                </div>
+                <div className="ww-month-grid">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <article key={m}>
+                      <h3>{m}月 · 日内风况</h3>
+                      <CartesianPlot
+                        outputId="hourly"
+                        compact
+                        rows={rows
+                          .filter(
+                            (r) => Number(String(r.period).slice(0, 2)) === m,
+                          )
+                          .map((r) => ({
+                            ...r,
+                            period: String(r.period).slice(3),
+                          }))}
+                      />
+                    </article>
+                  ))}
+                </div>
+              </>
             ) : outputId === "shear" ? (
               <ShearPlots rows={rows} summary={output.summary} />
             ) : isRose ? (

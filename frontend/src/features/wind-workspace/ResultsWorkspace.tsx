@@ -3,6 +3,8 @@ import { activateTower } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
 import type { SourceKind, WorkspaceTab, WorkspaceViewProps } from "./model";
 import { ResultView } from "./ResultView";
+import WorkspaceReportExport from "./WorkspaceReportExport";
+import TowerComparison from "./TowerComparison";
 import "./workspace.css";
 
 interface ResultsProps extends WorkspaceViewProps {
@@ -18,6 +20,7 @@ export function ResultsWorkspace({
   );
   const [activeId, setActiveId] = useState("");
   const [pairIndex, setPairIndex] = useState(0);
+  const [compare, setCompare] = useState(false);
   const selected = OUTPUTS.filter((o) => state.selectedOutputs.includes(o.id));
   const filtered = selected.filter(
     (o) => filter === "all" || o.kind === filter,
@@ -41,6 +44,8 @@ export function ResultsWorkspace({
     state.correlationJobs[0];
   const pairRun =
     job?.runs?.[Math.min(pairIndex, (job?.runs?.length ?? 1) - 1)];
+  if (compare)
+    return <TowerComparison state={state} onBack={() => setCompare(false)} />;
   return (
     <div className="ww-results">
       <section className="ww-results-hero">
@@ -90,6 +95,9 @@ export function ResultsWorkspace({
           ))}
         </div>
         <div className="ww-gallery-tools">
+          <button type="button" onClick={() => setCompare(true)}>
+            多塔对比
+          </button>
           <span className="ww-gallery-count">共 {filtered.length} 组</span>
           <label>
             测风塔
@@ -226,6 +234,7 @@ export function ResultsWorkspace({
                   output={output}
                   outputId={active.id}
                   run={run}
+                  towerName={tower.name}
                 />
               ) : (
                 <div className="ww-simple-empty">
@@ -258,14 +267,19 @@ export function ResultsWorkspace({
 
 export function ReportOutline({
   state,
+  onChange,
+  projectName,
+  onAnalyze,
 }: {
   state: WorkspaceViewProps["state"];
+  onChange: WorkspaceViewProps["onChange"];
+  projectName: string;
+  onAnalyze: () => void;
 }) {
   const [chapter, setChapter] = useState<2 | 5>(2);
   return (
     <div className="ww-report-layout">
       <aside className="ww-panel ww-report-navigation">
-        <span className="ww-overline">REPORT SECTIONS</span>
         <h2>章节与模板</h2>
         <button
           aria-pressed={chapter === 2}
@@ -274,7 +288,7 @@ export function ReportOutline({
         >
           <b>02</b>
           <span>
-            风资源分析<small>图表、表格与固定描述</small>
+            风资源分析<small>计算图表与 Word 模板</small>
           </span>
         </button>
         <button
@@ -284,55 +298,46 @@ export function ReportOutline({
         >
           <b>05</b>
           <span>
-            第五章模板<small>固定表格与套话，待提供</small>
+            第五章模板<small>待提供</small>
           </span>
         </button>
-        <p>报告格式和描述方式以你后续提供的模板为准。</p>
       </aside>
       <section className="ww-panel ww-report-paper">
-        <span className="ww-overline">TEMPLATE CONNECTION</span>
         <h2>{chapter === 2 ? "第二章 · 风资源分析" : "第五章 · 固定模板"}</h2>
-        <div className="ww-report-notice">
-          模板尚未提供 · 当前展示内容组织与成果关联
-        </div>
         {chapter === 2 ? (
           <>
-            <p className="ww-report-intro">
-              原始资料、质控统计、结果风况和长期参考分别关联到报告内容，保持图、表和描述的数据来源一致。
-            </p>
-            <div className="ww-template-slots">
-              {SOURCE_TYPES.map((source) => (
-                <article key={source.id}>
-                  <span>{source.number}</span>
-                  <div>
-                    <h3>{source.outputs}</h3>
-                    <p>来源：{source.shortLabel}</p>
-                    <small>
-                      已选{" "}
-                      {
-                        OUTPUTS.filter(
-                          (output) =>
-                            output.kind === source.id &&
-                            state.selectedOutputs.includes(output.id),
-                        ).length
-                      }{" "}
-                      组成果 · 等待真实计算与模板
-                    </small>
-                  </div>
-                  <b>待关联</b>
-                </article>
-              ))}
-            </div>
-            <div className="ww-callout">
-              固定描述将由确认后的表格和计算结果填充，当前不生成未经计算的结论。
-            </div>
+            <label className="ww-report-tower">
+              测风塔
+              <select
+                value={state.activeTowerId}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  onChange((current) => activateTower(current, id));
+                }}
+              >
+                {state.towers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <WorkspaceReportExport
+              key={state.activeTowerId}
+              state={state}
+              projectName={projectName}
+            />
+            {!state.analysisRuns[state.activeTowerId] && (
+              <button className="ww-button" onClick={onAnalyze}>
+                前往风资源分析
+              </button>
+            )}
           </>
         ) : (
           <div className="ww-simple-empty">
             <span className="ww-empty-plot-icon">▤</span>
             <h3>等待第五章模板</h3>
             <p>接入你提供的表格形式和描述方式后，再确定填充字段与引用关系。</p>
-            <span className="ww-quiet-tag">本轮预留位置，不展开第五章计算</span>
           </div>
         )}
       </section>

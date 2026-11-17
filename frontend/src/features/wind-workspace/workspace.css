@@ -978,7 +978,7 @@
   width: 100%;
 }
 .ww-month-grid svg text {
-  font-size: 19px;
+  font-size: 10px;
 }
 .ww-rose-pair {
   display: grid;
@@ -1811,13 +1811,20 @@
 }
 .ww-plot-figure {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ww-plot-scroll {
+  display: flex;
+  flex-direction: column;
 }
 .ww-plot-legend {
+  order: -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 20px;
-  margin: 10px 2px 0;
+  margin: 0 2px 8px;
   font-size: 12px;
   color: #4f6759;
 }
@@ -1840,6 +1847,20 @@
   height: 12px;
   border: 0;
   border-radius: 3px;
+}
+.ww-plot-legend.is-dual {
+  justify-content: center;
+  font-size: 13px;
+}
+.ww-plot-legend i.diamond,
+.ww-plot-legend i.square {
+  width: 10px;
+  height: 10px;
+  border: 0;
+  border-radius: 1px;
+}
+.ww-plot-legend i.diamond {
+  transform: rotate(45deg);
 }
 .ww-rose-stack {
   display: grid;
@@ -1864,4 +1885,57 @@
 .ww-chart-stage svg {
   max-width: 100%;
   height: auto;
+}
+
+.ww-report-controls {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+.ww-report-controls legend {
+  padding: 0;
+  font-weight: 600;
+}
+.ww-report-controls .ww-output-grid label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ww-report-controls .ww-output-grid input {
+  flex: none;
+  accent-color: #2c7055;
+}
+.ww-report-template,
+.ww-report-actions,
+.ww-saved-report {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ww-report-template {
+  border-top: 1px solid #dae6de;
+  padding-top: 14px;
+}
+.ww-report-template input[type="file"] {
+  max-width: 100%;
+}
+.ww-report-template small {
+  flex-basis: 100%;
+}
+.ww-report-actions span,
+.ww-saved-report button {
+  color: #526c5c;
+  font-size: 12px;
+}
+.ww-saved-report button {
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+  cursor: pointer;
 }

@@ -17,6 +17,7 @@ from wind_platform.services.store import LocalStore
 
 
 class AnalysisOptions(BaseModel):
+    tower_name: str | None = Field(default=None, max_length=240)
     rose_all_directions: bool = False
     weibull_method: str = "mle"
     annual_days: int = Field(default=365, ge=365, le=366)
@@ -792,6 +793,7 @@ def run_correlation(store, config):
 
 
 class LongTermOptions(BaseModel):
+    tower_name: str | None = Field(default=None, max_length=240)
     reference_id: str
     result_id: str
     speed_channel: str

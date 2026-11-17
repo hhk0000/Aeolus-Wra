@@ -26,6 +26,7 @@ from wind_platform.services.analysis import (
     run_correlation,
     run_long_term,
 )
+from wind_platform.services.comparison import ComparisonOptions, compare_towers
 from wind_platform.services.processing import ProcessingOptions, process
 from wind_platform.services.review import ReviewOptions, review
 
@@ -160,6 +161,11 @@ def analyze(config: AnalysisOptions, request: Request):
 @router.post("/correlations")
 def correlate(config: CorrelationOptions, request: Request):
     return run_correlation(store(request), config)
+
+
+@router.post("/tower-comparisons")
+def tower_comparison(config: ComparisonOptions, request: Request):
+    return compare_towers(store(request), config)
 
 
 @router.post("/long-term")

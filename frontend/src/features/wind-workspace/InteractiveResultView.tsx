@@ -1,23 +1,18 @@
-import { useEffect, useState } from "react";
-import { api, downloadJson } from "./api";
+﻿import { useEffect, useState } from "react";
+import { api, downloadJson, runTowerName } from "./api";
 import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
+import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { addReportChart } from "./chartReports";
+import { reportSnapshot } from "./reportSnapshot";
 
 type Row = Record<string, unknown>;
-const colors = [
-  "#2c7a63",
-  "#d49a46",
-  "#657fbd",
-  "#bb6777",
-  "#825dac",
-  "#3a9ca2",
-];
+const colors = EXCEL.series;
 const names: Record<string, string> = {
-  mean_speed: "WS",
-  power_density: "WPD",
+  mean_speed: "风速",
+  power_density: "风功率密度",
   density: "空气密度",
   frequency: "风速频率",
   energy_frequency: "风能频率",
@@ -36,6 +31,7 @@ function Plot({
   rose = "",
   energy = false,
   zoom = "1",
+  outputId = "",
 }: {
   rows: Row[];
   fields: string[];
@@ -44,14 +40,16 @@ function Plot({
   rose?: string;
   energy?: boolean;
   zoom?: string;
+  outputId?: string;
 }) {
   const [hover, setHover] = useState("");
-  const w = rose ? 900 : 800,
-    h = rose ? 640 : 330,
-    L = 65,
-    R = 725,
-    T = 35,
-    B = 270;
+  const dualAxis = fields.includes("power_density");
+  const w = rose ? 900 : dualAxis ? 900 : 800,
+    h = rose ? 680 : dualAxis ? 540 : 340,
+    L = dualAxis ? 90 : 65,
+    R = dualAxis ? 810 : 725,
+    T = dualAxis ? 40 : 35,
+    B = dualAxis ? 440 : 275;
   const cx = rose ? 450 : 400,
     cy = rose ? 310 : 165;
   const base = 80,
@@ -91,14 +89,16 @@ function Plot({
           viewBox={`0 0 ${w} ${h}`}
           role="img"
           aria-label={title}
+          fontFamily={EXCEL.font}
+          fontSize={EXCEL.tickSize}
           style={{
             width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
             minWidth: rose ? 560 : 480,
             background: "white",
           }}
         >
-          <text x="65" y="20" fontSize="12">
-            {hover || title}
+          <text x="65" y="20" fontSize={EXCEL.tickSize} fill={EXCEL.text}>
+            {hover}
           </text>
           {rose ? (
             <>
@@ -182,6 +182,27 @@ function Plot({
             </>
           ) : (
             <>
+              <rect
+                x={L}
+                y={T}
+                width={R - L}
+                height={B - T}
+                fill="none"
+                stroke={EXCEL.axis}
+                strokeWidth="1"
+              />
+              {dualAxis &&
+                rows.map((_, i) => (
+                  <line
+                    key={`v-${i}`}
+                    x1={x(i)}
+                    x2={x(i)}
+                    y1={T}
+                    y2={B}
+                    stroke={EXCEL.grid}
+                    strokeWidth="1"
+                  />
+                ))}
               {[0, 1, 2, 3, 4].map((i) => (
                 <g key={i}>
                   <line
@@ -189,69 +210,112 @@ function Plot({
                     x2={R}
                     y1={T + (i * (B - T)) / 4}
                     y2={T + (i * (B - T)) / 4}
-                    stroke="#e4ebe6"
+                    stroke={EXCEL.grid}
+                    strokeWidth="1"
                   />
-                  {fields.slice(0, 2).map((f, j) => {
-                    const [lo, hi] = limits(f);
-                    return (
-                      <text
-                        key={f}
-                        x={j ? R + 6 : L - 6}
-                        y={T + (i * (B - T)) / 4}
-                        textAnchor={j ? "start" : "end"}
-                        fill={colors[j]}
-                        fontSize="10"
-                      >
-                        {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
-                      </text>
-                    );
-                  })}
+                  {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
+                    (f, j) => {
+                      const [lo, hi] = limits(f);
+                      return (
+                        <text
+                          key={f}
+                          x={j ? R + 6 : L - 6}
+                          y={T + (i * (B - T)) / 4}
+                          textAnchor={j ? "start" : "end"}
+                          fill={colors[j]}
+                          fontSize={dualAxis ? 12 : EXCEL.tickSize}
+                        >
+                          {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
+                        </text>
+                      );
+                    },
+                  )}
                 </g>
               ))}
               {fields.map((f, j) => (
                 <g key={f}>
                   {["frequency", "energy_frequency"].includes(f) &&
-                    rows.map((r, i) => (
-                      <rect
-                        key={`bar-${i}`}
-                        x={x(i) - 6 + j * 5}
-                        y={y(Number(r[f]), f)}
-                        width="5"
-                        height={B - y(Number(r[f]), f)}
-                        fill={colors[j % colors.length]}
-                      >
-                        <title>{Number(r[f]).toFixed(3)}%</title>
-                      </rect>
-                    ))}
-                  <polyline
-                    points={rows
-                      .map((r, i) =>
-                        r[f] != null ? `${x(i)},${y(Number(r[f]), f)}` : "",
-                      )
-                      .filter(Boolean)
-                      .join(" ")}
-                    fill="none"
-                    stroke={colors[j % colors.length]}
-                    strokeWidth="2"
-                  />
-                  {rows.map(
-                    (r, i) =>
-                      r[f] != null && (
-                        <circle
-                          key={i}
-                          cx={x(i)}
-                          cy={y(Number(r[f]), f)}
-                          r="3"
-                          fill={colors[j % colors.length]}
-                          onMouseEnter={() =>
-                            setHover(
-                              `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
-                            )
-                          }
+                    rows.map((r, i) => {
+                      const barW = ((R - L) / Math.max(1, rows.length)) * 0.34;
+                      return (
+                        <rect
+                          key={`bar-${i}`}
+                          x={x(i) - barW + j * barW}
+                          y={y(Number(r[f]), f)}
+                          width={barW * 0.9}
+                          height={B - y(Number(r[f]), f)}
+                          fill={j === 0 ? colors[0] : colors[1]}
                         >
-                          <title>{Number(r[f]).toFixed(4)}</title>
-                        </circle>
-                      ),
+                          <title>{Number(r[f]).toFixed(3)}%</title>
+                        </rect>
+                      );
+                    })}
+                  {!["frequency", "energy_frequency"].includes(f) && (
+                    <>
+                      <polyline
+                        points={rows
+                          .map((r, i) =>
+                            r[f] != null ? `${x(i)},${y(Number(r[f]), f)}` : "",
+                          )
+                          .filter(Boolean)
+                          .join(" ")}
+                        fill="none"
+                        stroke={colors[j % colors.length]}
+                        strokeWidth={dualAxis ? 3 : EXCEL.lineWidth}
+                        strokeDasharray={
+                          dualAxis && j === 1 ? "6 4" : undefined
+                        }
+                      />
+                      {rows.map(
+                        (r, i) =>
+                          r[f] != null &&
+                          (dualAxis ? (
+                            <g
+                              key={i}
+                              onMouseEnter={() =>
+                                setHover(
+                                  `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
+                                )
+                              }
+                            >
+                              {j === 0 ? (
+                                <rect
+                                  x={x(i) - 7}
+                                  y={y(Number(r[f]), f) - 7}
+                                  width="14"
+                                  height="14"
+                                  transform={`rotate(45 ${x(i)} ${y(Number(r[f]), f)})`}
+                                  fill={colors[j % colors.length]}
+                                />
+                              ) : (
+                                <rect
+                                  x={x(i) - 5}
+                                  y={y(Number(r[f]), f) - 5}
+                                  width="10"
+                                  height="10"
+                                  fill={colors[j % colors.length]}
+                                />
+                              )}
+                              <title>{Number(r[f]).toFixed(4)}</title>
+                            </g>
+                          ) : (
+                            <circle
+                              key={i}
+                              cx={x(i)}
+                              cy={y(Number(r[f]), f)}
+                              r={EXCEL.marker}
+                              fill={colors[j % colors.length]}
+                              onMouseEnter={() =>
+                                setHover(
+                                  `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
+                                )
+                              }
+                            >
+                              <title>{Number(r[f]).toFixed(4)}</title>
+                            </circle>
+                          )),
+                      )}
+                    </>
                   )}
                 </g>
               ))}
@@ -261,31 +325,79 @@ function Plot({
                     <text
                       key={i}
                       x={x(i)}
-                      y="292"
+                      y={B + 22}
                       textAnchor="middle"
-                      fontSize="9"
+                      fontSize={EXCEL.tickSize + (dualAxis ? 2 : 0)}
                     >
                       {String(r.period ?? r.bin ?? r.label ?? "")}
+                      {outputId === "monthly" ? "月" : ""}
                     </text>
                   ),
               )}
             </>
           )}
+          {!rose && (
+            <>
+              <text
+                x={(L + R) / 2}
+                y={h - 4}
+                textAnchor="middle"
+                fontSize={EXCEL.tickSize}
+                fill={EXCEL.text}
+              >
+                {outputId === "monthly" || outputId === "density"
+                  ? "月份"
+                  : outputId === "hourly" || outputId === "monthly-hourly"
+                    ? "时段"
+                    : outputId === "frequency"
+                      ? "风速区间"
+                      : outputId === "turbulence"
+                        ? "湍流强度"
+                        : outputId === "weibull"
+                          ? "风速(m/s)"
+                          : ""}
+              </text>
+              <text
+                transform={`translate(16 ${(T + B) / 2}) rotate(-90)`}
+                textAnchor="middle"
+                fontSize={EXCEL.tickSize}
+                fill={EXCEL.text}
+              >
+                {fields.includes("power_density")
+                  ? "风速(m/s)"
+                  : (names[fields[0]] ?? "")}
+              </text>
+              {fields.includes("power_density") && (
+                <text
+                  transform={`translate(${w - 8} ${(T + B) / 2}) rotate(90)`}
+                  textAnchor="middle"
+                  fontSize={EXCEL.tickSize}
+                  fill={colors[1]}
+                >
+                  风功率密度(W/m²)
+                </text>
+              )}
+            </>
+          )}
         </svg>
         {fields.length > 0 && (
-          <div className="ww-plot-legend" aria-label="图例">
+          <div
+            className={`ww-plot-legend${dualAxis ? " is-dual" : ""}`}
+            aria-label="图例"
+          >
             {fields.map((f, j) => {
               const box = [
                 "frequency",
                 "energy_frequency",
                 "fitted_frequency",
               ].includes(f);
+              const shape = dualAxis ? (j === 0 ? "diamond" : "square") : box;
               return (
                 <span key={f}>
                   <i
-                    className={box ? "box" : ""}
+                    className={shape ? String(shape) : ""}
                     style={
-                      box
+                      box || dualAxis
                         ? { background: colors[j % colors.length] }
                         : { borderColor: colors[j % colors.length] }
                     }
@@ -305,11 +417,13 @@ export function InteractiveResultView({
   run: original,
   output: initial,
   outputId,
+  towerName,
   exportMode = false,
 }: {
   run: Run;
   output: RunOutput;
   outputId: string;
+  towerName?: string;
   exportMode?: boolean;
 }) {
   const turbulence = outputId === "turbulence";
@@ -371,6 +485,7 @@ export function InteractiveResultView({
   const [run, setRun] = useState(original),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [reportNotice, setReportNotice] = useState("");
   const [all, setAll] = useState(exportMode),
     [channel, setChannel] = useState("");
   const [hidden, setHidden] = useState<string[]>(() =>
@@ -401,7 +516,7 @@ export function InteractiveResultView({
     (typeof preferred === "string" ? preferred : channels[0]) ||
     "";
   const isRose = outputId.includes("rose"),
-    completeness = ["raw-records", "completeness"].includes(outputId);
+    completeness = outputId === "completeness";
   const fields = turbulence
     ? ["mean", "std", "characteristic", "representative"]
     : outputId === "density"
@@ -454,6 +569,7 @@ export function InteractiveResultView({
     low,
     high,
     runId: run.id,
+    sourceRunId: original.id,
   };
   function exportReport() {
     const charts = document
@@ -492,49 +608,49 @@ export function InteractiveResultView({
       });
   }
   function addToReport() {
-    const html = Array.from(
-      document
-        .getElementById(`interactive-${outputId}`)
-        ?.querySelectorAll("svg") ?? [],
-    )
-      .filter((s) => s.getBoundingClientRect().height > 0)
-      .map((s) => s.outerHTML)
-      .join("");
-    addReportChart(
-      `${output.title} · ${method} · ${sectors}扇区`,
-      html,
-      config,
-    );
-  }
-  if (completeness) {
-    const basis = 365 * 144;
-    const data = (run.outputs.completeness?.rows ?? rows)
-      .filter((r) => r.quantity === "speed" || r.raw_records !== undefined)
-      .filter(
-        (r) =>
-          !r.channel ||
-          String(r.channel).includes("Avg") ||
-          !String(r.channel).includes("_"),
+    const root = document.getElementById(`interactive-${outputId}`);
+    if (!root) return;
+    const title = [
+      output.title,
+      outputId === "weibull" && method,
+      (outputId === "correlation" || isRose) && `${sectors}扇区`,
+      isRose &&
+        outputId !== "reference-rose" &&
+        (rose === "line" ? "折线" : "填充"),
+      outputId === "monthly-rose" && `${month}月`,
+      all ? "全部高度" : custom && selected,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    try {
+      addReportChart(title, reportSnapshot(root, output.title), config);
+      setReportNotice("已加入报告，可在“报告导出配置”中选择。");
+    } catch {
+      setReportNotice("");
+      setError(
+        "浏览器未能保存图表配置，请在报告导出配置中移除不用的图表，或缩小当前图表选择后重试。",
       );
-    const towerId = String(
-      run.sources?.qc?.tower_id ?? run.sources?.raw?.tower_id ?? "",
-    );
+    }
+  }
+  if (completeness && output.status === "ready") {
+    const data = rows.filter((r) => r.raw_records !== undefined);
+    const towerId = runTowerName(run, towerName);
+    const annualDays = Number(run.config.annual_days ?? 365);
     const tables = [
       {
         title: "实测数据完整率",
-        valid: (r: Row) => Number(r.raw_valid ?? r.valid_count ?? 0),
-        expected: (r: Row) => Number(r.expected ?? r.expected_count ?? basis),
+        valid: (r: Row) => r.raw_valid,
+        expected: (r: Row) => r.expected,
       },
       {
         title: "实测有效数据完整率",
-        valid: (r: Row) => Number(r.qc_valid ?? r.valid_count ?? 0),
-        expected: (r: Row) => Number(r.raw_records ?? r.record_count ?? basis),
+        valid: (r: Row) => r.qc_valid,
+        expected: (r: Row) => r.raw_records,
       },
       {
-        title: "完整年有效数据完整率（365天基准）",
-        valid: (r: Row) =>
-          Number(r.annual_valid ?? r.qc_valid ?? r.valid_count ?? 0),
-        expected: (r: Row) => Number(r.annual_expected ?? basis),
+        title: `完整年有效数据完整率（${annualDays}天基准）`,
+        valid: (r: Row) => r.annual_valid,
+        expected: (r: Row) => r.annual_expected,
       },
     ];
     return (
@@ -551,15 +667,25 @@ export function InteractiveResultView({
                   通道: r.channel,
                   应测数据: expected,
                   实测数据: valid,
-                  缺失数据: Math.max(0, expected - valid),
-                  完整率: `${((100 * valid) / expected).toFixed(2)}%`,
+                  缺失数据:
+                    typeof expected === "number" && typeof valid === "number"
+                      ? Math.max(0, expected - valid)
+                      : null,
+                  完整率:
+                    typeof expected === "number" &&
+                    expected > 0 &&
+                    typeof valid === "number"
+                      ? `${((100 * valid) / expected).toFixed(2)}%`
+                      : null,
                 };
               })}
             />
           </section>
         ))}
         <p>
-          同一模块并列三张表：实测按原始有效数/应测数；实测有效按质控有效数/同期原始记录数；完整年按365天、每日144条基准，超出基准的记录保留，完整率可超过100%。
+          实测完整率使用原始有效数和应测数，实测有效完整率使用质控有效数和同期原始记录数。完整年按{" "}
+          {annualDays} 天及数据步长计数，10 分钟数据每天 144
+          条。缺少分析时段或有效分母的单元格显示为“—”。
         </p>
       </div>
     );
@@ -578,10 +704,11 @@ export function InteractiveResultView({
     <div id={`interactive-${outputId}`}>
       {!exportMode && (
         <ReportExport
-          run={run}
-          renderOutput={(id, entry) => (
+          runs={[{ run: original }]}
+          renderOutput={(reportRun, id, entry) => (
             <InteractiveResultView
-              run={run}
+              run={reportRun}
+              towerName={towerName}
               output={entry}
               outputId={id}
               exportMode
@@ -590,9 +717,14 @@ export function InteractiveResultView({
         />
       )}
       <div className="ww-panel">
-        <button className="ww-button" onClick={addToReport}>
+        <button
+          className="ww-button"
+          disabled={busy || output.status !== "ready"}
+          onClick={addToReport}
+        >
           加入报告（保留当前算法与显示配置）
         </button>
+        {reportNotice && <p role="status">{reportNotice}</p>}
         {isRose && (
           <label>
             风向高度
@@ -970,6 +1102,7 @@ export function InteractiveResultView({
                         : []),
                     ]}
                     title={`${fields.includes("mean_speed") ? `WS-${height}m / WPD-${height}m` : output.title}`}
+                    outputId={outputId}
                     density={outputId === "density"}
                   />
                 )}

@@ -55,6 +55,7 @@ export default function CalculationPanel({
       if (!raw && !qc && !result)
         throw new Error("请先拖入测风数据，导入完成后即可分析。");
       const response = await api<Run>("/analysis", {
+        tower_name: tower.name,
         raw_id: raw?.id,
         qc_id: qc?.id,
         result_id: result?.id,

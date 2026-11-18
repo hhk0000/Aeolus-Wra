@@ -23,24 +23,24 @@ export function readCharts(): SavedChart[] {
     return [];
   }
 }
-export function addReportChart(
-  title: string,
-  html: string,
-  config: Record<string, unknown>,
-) {
-  const id = crypto.randomUUID();
-  localStorage.setItem(
-    key,
-    JSON.stringify([...readCharts(), { id, title, html, config }]),
-  );
+export function addReportCharts(entries: Omit<SavedChart, "id">[]) {
+  const charts = entries.map((entry) => ({
+    ...entry,
+    id: crypto.randomUUID(),
+  }));
+  localStorage.setItem(key, JSON.stringify([...readCharts(), ...charts]));
   window.dispatchEvent(new Event("aeolus-report-change"));
-  return id;
+  return charts.map((chart) => chart.id);
 }
 
 export function removeReportChart(id: string) {
+  removeReportCharts([id]);
+}
+
+export function removeReportCharts(ids: string[]) {
   localStorage.setItem(
     key,
-    JSON.stringify(readCharts().filter((chart) => chart.id !== id)),
+    JSON.stringify(readCharts().filter((chart) => !ids.includes(chart.id))),
   );
   window.dispatchEvent(new Event("aeolus-report-change"));
 }

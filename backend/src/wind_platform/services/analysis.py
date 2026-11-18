@@ -811,6 +811,46 @@ def shift_year(stamp, year_offset):
     return stamp.replace(year=year, day=day)
 
 
+def monthly_reference_rows(data, speed, direction, mask, timezone):
+    zone = ZoneInfo(timezone)
+    months = np.fromiter(
+        (
+            datetime.fromisoformat(stamp).astimezone(zone).month
+            for stamp, included in zip(data["timestamps"], mask, strict=True)
+            if included
+        ),
+        dtype=int,
+    )
+    wind_speed, wind_direction = values(speed, mask), values(direction, mask)
+    rows = []
+    for month in range(1, 13):
+        selection = months == month
+        try:
+            rose = calc.rose(wind_speed[selection], wind_direction[selection])
+        except calc.CalculationError:
+            continue
+        rows.extend(dict(row, month=month) for row in rose["rows"])
+    return rows
+
+
+def reference_monthly_rose(store, id_, window):
+    run = store.get("runs", id_)
+    output = run.get("outputs", {}).get("reference-rose", {})
+    if run["kind"] != "long-term" or not any(
+        row["window"] == window for row in output.get("summary", {}).get("windows", [])
+    ):
+        raise calc.CalculationError("该长期风向窗口没有可用成果。")
+    config = LongTermOptions.model_validate(run["config"])
+    data = store.get("datasets", config.reference_id)
+    zone = ZoneInfo(config.timezone)
+    a = parse_timestamp(config.start, config.timezone, "auto").astimezone(zone)
+    b = parse_timestamp(config.end, config.timezone, "auto").astimezone(zone)
+    _, _, mask = period(data, shift_year(a, 1 - window).isoformat(), b.isoformat())
+    speed = channel(data, config.speed_channel, "speed", "mean")
+    direction = channel(data, config.direction_channel, "direction", "mean")
+    return monthly_reference_rows(data, speed, direction, mask, config.timezone)
+
+
 def run_long_term(store, config):
     data = store.get("datasets", config.reference_id)
     result = store.get("datasets", config.result_id)

@@ -7,8 +7,8 @@
  */
 export const EXCEL = {
   series: ["#4F81BD", "#C0504D", "#9BBB59", "#8064A2", "#4BACC6", "#F79646"],
-  font: 'SimSun, "宋体", "Microsoft YaHei", serif',
-  tickSize: 10,
+  font: '"Times New Roman", SimSun, "宋体", serif',
+  tickSize: 11,
   text: "#404040",
   grid: "#D9D9D9",
   axis: "#808080",
@@ -21,6 +21,7 @@ export function excelSvgProps() {
   return {
     fontFamily: EXCEL.font,
     fontSize: EXCEL.tickSize,
+    fontWeight: 700,
     fill: EXCEL.text,
   } as const;
 }

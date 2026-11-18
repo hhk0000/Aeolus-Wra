@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { activateTower } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
@@ -13,6 +14,30 @@ import TowerComparison from "./TowerComparison";
 import { ChartTextScale } from "./chartText";
 import "./workspace.css";
 
+const readingKey = "aeolus.chartReading";
+const readingDefault = { chart: 100, axis: 125, table: 110 };
+type ReadingSettings = typeof readingDefault;
+const readingControls = [
+  ["chart", "图幅", 60, 160],
+  ["axis", "坐标轴与图内字号", 75, 220],
+  ["table", "表格字号", 80, 175],
+] as const;
+
+function loadReadingSettings(): ReadingSettings {
+  const settings = { ...readingDefault };
+  try {
+    const saved = JSON.parse(localStorage.getItem(readingKey) ?? "{}");
+    for (const [key, , min, max] of readingControls) {
+      const value = saved?.[key];
+      if (typeof value === "number" && Number.isFinite(value))
+        settings[key] = Math.min(max, Math.max(min, value));
+    }
+  } catch {
+    return settings;
+  }
+  return settings;
+}
+
 interface ResultsProps extends WorkspaceViewProps {
   onConfigure: (tab: WorkspaceTab) => void;
 }
@@ -27,7 +52,18 @@ export function ResultsWorkspace({
   const [activeId, setActiveId] = useState("");
   const [pairIndex, setPairIndex] = useState(0);
   const [compare, setCompare] = useState(false);
-  const [textScale, setTextScale] = useState("1");
+  const [reading, setReading] = useState(loadReadingSettings);
+  useEffect(() => {
+    try {
+      localStorage.setItem(readingKey, JSON.stringify(reading));
+    } catch {
+      // Reading controls still apply for this visit.
+    }
+  }, [reading]);
+  const styles = {
+    "--ww-plot-scale": reading.chart / 100,
+    "--ww-table-scale": reading.table / 100,
+  } as CSSProperties;
   const selected = OUTPUTS.filter((o) => state.selectedOutputs.includes(o.id));
   const filtered = selected.flatMap<OutputSpec>((o) => {
     if (o.id === "completeness" && filter === "raw")
@@ -96,15 +132,16 @@ export function ResultsWorkspace({
     job?.runs?.[Math.min(pairIndex, (job?.runs?.length ?? 1) - 1)];
   if (compare)
     return (
-      <ChartTextScale.Provider value={Number(textScale)}>
-        <TowerComparison state={state} onBack={() => setCompare(false)} />
+      <ChartTextScale.Provider value={reading.axis / 100}>
+        <div className="ww-comparison-reading" style={styles}>
+          <TowerComparison state={state} onBack={() => setCompare(false)} />
+        </div>
       </ChartTextScale.Provider>
     );
   return (
-    <div className="ww-results" ref={gallery}>
+    <div className="ww-results" ref={gallery} style={styles}>
       <section className="ww-results-hero">
         <div className="ww-results-hero-copy">
-          <span className="ww-overline">CHART & TABLE COLLECTION</span>
           <h2>风资源计算成果</h2>
           <p>图、表与运行快照引用同一组数据与参数；修改配置后请重新计算。</p>
         </div>
@@ -154,17 +191,34 @@ export function ResultsWorkspace({
             多塔对比
           </button>
           <span className="ww-gallery-count">共 {filtered.length} 组</span>
-          <label>
-            坐标字号
-            <select
-              value={textScale}
-              onChange={(event) => setTextScale(event.target.value)}
-            >
-              <option value="0.85">小</option>
-              <option value="1">标准</option>
-              <option value="1.25">大</option>
-            </select>
-          </label>
+          <details className="ww-reading-settings">
+            <summary>图幅与字号</summary>
+            <div className="ww-reading-drawer">
+              {readingControls.map(([key, label, min, max]) => (
+                <label key={key}>
+                  <span>{label}</span>
+                  <output>{reading[key]}%</output>
+                  <input
+                    aria-label={label}
+                    type="range"
+                    min={min}
+                    max={max}
+                    step="1"
+                    value={reading[key]}
+                    onChange={(event) =>
+                      setReading({
+                        ...reading,
+                        [key]: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+              ))}
+              <button type="button" onClick={() => setReading(readingDefault)}>
+                恢复默认
+              </button>
+            </div>
+          </details>
           <label>
             测风塔
             <select
@@ -222,7 +276,7 @@ export function ResultsWorkspace({
                 </button>
               ))}
         </aside>
-        <ChartTextScale.Provider value={Number(textScale)}>
+        <ChartTextScale.Provider value={reading.axis / 100}>
           <section className="ww-panel ww-chart-stage" ref={stage}>
             {filter === "correlation" ? (
               job ? (

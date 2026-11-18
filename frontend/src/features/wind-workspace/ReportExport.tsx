@@ -128,6 +128,22 @@ export default function ReportExport({
             output,
             outputId === "monthly-rose" ? "全年及各月风能分布" : "全年风能分布",
           );
+        } else if (outputId === "reference-rose" && output.rows?.[0]?.window) {
+          const monthlyRows = await api<Record<string, unknown>[]>(
+            "/runs/" +
+              run.id +
+              "/reference-monthly-rose?window=" +
+              output.rows[0].window,
+          );
+          append(
+            run,
+            outputId,
+            {
+              ...output,
+              summary: { ...output.summary, monthly_rose_rows: monthlyRows },
+            },
+            sectionTitle,
+          );
         } else {
           append(run, outputId, output, sectionTitle);
         }

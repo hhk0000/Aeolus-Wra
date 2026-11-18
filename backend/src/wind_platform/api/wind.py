@@ -22,6 +22,7 @@ from wind_platform.services.analysis import (
     AnalysisOptions,
     CorrelationOptions,
     LongTermOptions,
+    reference_monthly_rose,
     run_analysis,
     run_correlation,
     run_long_term,
@@ -241,6 +242,11 @@ class MeasuredDirectionOptions(BaseModel):
 @router.post("/runs/{id_}/measured-direction")
 def measured_direction(id_: str, config: MeasuredDirectionOptions, request: Request):
     return run_measured_direction(store(request), id_, config.sectors)
+
+
+@router.get("/runs/{id_}/reference-monthly-rose")
+def get_reference_monthly_rose(id_: str, request: Request, window: int):
+    return reference_monthly_rose(store(request), id_, window)
 
 
 @router.get("/runs/{id_}/tables/{output_id}.csv")

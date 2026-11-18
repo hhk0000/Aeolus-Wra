@@ -23,7 +23,7 @@ export function downloadHtml(title: string, sections: ReportSection[]) {
   charset.setAttribute("charset", "utf-8");
   const style = page.createElement("style");
   style.textContent =
-    "body{max-width:1100px;margin:32px auto;padding:0 24px;color:#243e30;font:15px/1.5 Microsoft YaHei,sans-serif}figure{margin:1em 0;break-inside:avoid}svg{width:100%;max-height:650px}table{border-collapse:collapse;width:100%;margin:1em 0;font-size:11px}td,th{border:1px solid #ccd7d0;padding:5px}caption,figcaption{text-align:left;font-weight:bold}section+section{break-before:page}small{overflow-wrap:anywhere}";
+    "body{max-width:1100px;margin:32px auto;padding:0 24px;color:#243e30;font:15px/1.5 'Times New Roman',SimSun,'宋体',serif}figure{margin:1em 0;break-inside:avoid}svg{width:100%;max-height:650px}table{border-collapse:collapse;width:100%;margin:1em 0;font-size:11px}td,th{border:1px solid #ccd7d0;padding:5px}caption,figcaption{text-align:left;font-weight:bold}section+section{break-before:page}small{overflow-wrap:anywhere}";
   page.head.prepend(charset, style);
   const heading = page.createElement("h1");
   heading.textContent = title;

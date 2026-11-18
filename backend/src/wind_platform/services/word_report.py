@@ -67,7 +67,7 @@ def _open_document(template):
         for style_name in ("Normal", "Title", "Heading 1", "Heading 2", "Caption"):
             style = document.styles[style_name]
             style.font.color.rgb = RGBColor.from_string("172F28")
-            style.font.name = "宋体"
+            style.font.name = "Times New Roman"
             style.element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
         title_style = document.styles["Title"]
         title_style.font.color.rgb = RGBColor.from_string("000000")

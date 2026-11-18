@@ -15,6 +15,7 @@ export function RoseChart({
   rose = "line",
   zoom = "1",
   compact = false,
+  radialMax,
 }: {
   rows: Row[];
   title: string;
@@ -22,6 +23,7 @@ export function RoseChart({
   rose?: string;
   zoom?: string;
   compact?: boolean;
+  radialMax?: number;
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
@@ -34,7 +36,7 @@ export function RoseChart({
   const key = energy ? "energy_frequency" : "frequency";
   const color = EXCEL.series[energy ? 1 : 0];
   const rawMax = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0));
-  const max = Math.max(1, Math.ceil(rawMax / 5) * 5);
+  const max = Math.max(1, Math.ceil(Math.max(rawMax, radialMax ?? 0) / 5) * 5);
   const point = (a: number, r: number): [number, number] => [
     cx + Math.sin((a * Math.PI) / 180) * r,
     cy - Math.cos((a * Math.PI) / 180) * r,
@@ -63,9 +65,10 @@ export function RoseChart({
           role="img"
           aria-label={title}
           fontFamily={EXCEL.font}
+          fontWeight="700"
           fontSize={textSize(compact ? 30 : 17)}
           style={{
-            width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
+            width: `calc(${Math.max(1, Number(zoom) || 1) * 100}% * var(--ww-plot-scale, 1))`,
             background: "white",
           }}
         >

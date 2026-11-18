@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { downloadJson } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
@@ -89,18 +89,28 @@ const numeric = (value: unknown): value is number =>
 export function DataTable({
   rows,
   footer,
+  continuous = false,
 }: {
   rows: Record<string, unknown>[];
   footer?: Record<string, unknown>;
+  continuous?: boolean;
 }) {
   const [page, setPage] = useState(0);
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter(
     (key) => key !== "points" && key !== "through_origin",
   );
   const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / 60) - 1));
+  const visibleRows = continuous
+    ? rows
+    : rows.slice(safePage * 60, (safePage + 1) * 60);
   return (
     <>
-      <div className="ww-table-scroll">
+      <div
+        className={`ww-table-scroll${continuous ? " ww-continuous-table" : ""}`}
+        tabIndex={continuous ? 0 : undefined}
+        role={continuous ? "region" : undefined}
+        aria-label={continuous ? "季度统计明细" : undefined}
+      >
         <table className="ww-result-table">
           <thead>
             <tr>
@@ -110,7 +120,7 @@ export function DataTable({
             </tr>
           </thead>
           <tbody>
-            {rows.slice(safePage * 60, (safePage + 1) * 60).map((row, i) => (
+            {visibleRows.map((row, i) => (
               <tr
                 key={i}
                 className={
@@ -137,7 +147,7 @@ export function DataTable({
           <p className="ww-inline-note">该筛选下没有数据记录。</p>
         )}
       </div>
-      {rows.length > 60 && (
+      {!continuous && rows.length > 60 && (
         <div className="ww-table-pages">
           <span>
             {rows.length}行 · 第{safePage + 1}/{Math.ceil(rows.length / 60)}页
@@ -250,6 +260,7 @@ function CartesianPlot({
         role="img"
         aria-label="真实计算结果图"
         fontFamily={EXCEL.font}
+        fontWeight="700"
         fontSize={textSize(tickSize)}
       >
         <rect width={w} height={h} fill="white" />
@@ -524,8 +535,8 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
     h = 430,
     L = 70,
     R = 610,
-    T = 72,
-    B = 370;
+    T = Math.max(78, textSize(68) + 8),
+    B = 366;
   const max = Math.max(1, ...points.flat()) * 1.08;
   const x = (v: number) => L + (v / max) * (R - L);
   const y = (v: number) => B - (v / max) * (B - T);
@@ -535,6 +546,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
       role="img"
       aria-label={`${row.label}扇区同期散点图`}
       fontFamily={EXCEL.font}
+      fontWeight="700"
       fontSize={textSize(13)}
     >
       <rect width={w} height={h} fill="white" />
@@ -608,14 +620,27 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
             strokeWidth="4"
             strokeDasharray="6 4"
           />
-          <text x={L} y={26} fontSize="23" fontWeight="600" fill={EXCEL.text}>
+          <text
+            x={L}
+            y={textSize(23) + 3}
+            fontSize={textSize(23)}
+            fontWeight="700"
+            fill={EXCEL.text}
+          >
             y = {display(row.slope)}x {Number(row.intercept) < 0 ? "−" : "+"}{" "}
             {display(Math.abs(Number(row.intercept)))}
           </text>
-          <text x={L} y={54} fontSize="19" fill={EXCEL.text}>
+          <text
+            x={L}
+            y={textSize(45) + 5}
+            fontSize={textSize(16)}
+            fill={EXCEL.text}
+          >
             <tspan>r = {display(row.r)}</tspan>
             <tspan dx="20">R² = {display(row.r_squared)}</tspan>
-            <tspan dx="20">p = {display(row.p_value)}</tspan>
+            <tspan x={L} dy={textSize(19)}>
+              p = {display(row.p_value)}
+            </tspan>
             <tspan dx="20">n = {display(row.count)}</tspan>
           </text>
         </>
@@ -689,6 +714,7 @@ function ShearPlots({
         role="img"
         aria-label="同支臂实测风廓线与幂律拟合"
         fontFamily={EXCEL.font}
+        fontWeight="700"
         fontSize={textSize(13)}
       >
         <rect width="900" height="350" fill="white" />
@@ -801,7 +827,7 @@ export function BaseResultView({
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
   const [ltLine, setLtLine] = useState(true);
-  const [monthScope, setMonthScope] = useState("all");
+  const [monthScope, setMonthScope] = useState("q1");
   const [monthPage, setMonthPage] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const allRows = output.rows ?? [];
@@ -821,6 +847,39 @@ export function BaseResultView({
   ].map(String);
   const monthFilter = months.includes(month) ? month : months[0];
   const windowFilter = windows.includes(windowValue) ? windowValue : windows[0];
+  const monthlyKey =
+    outputId === "reference-rose" && windowFilter
+      ? "/runs/" + run.id + "/reference-monthly-rose?window=" + windowFilter
+      : "";
+  const [monthlyRose, setMonthlyRose] = useState<{
+    key: string;
+    rows?: Record<string, unknown>[];
+    error?: string;
+  }>();
+  useEffect(() => {
+    if (!monthlyKey || exportMode) return;
+    const controller = new AbortController();
+    void api<Record<string, unknown>[]>(
+      monthlyKey,
+      undefined,
+      controller.signal,
+    )
+      .then((rows) => {
+        if (!controller.signal.aborted)
+          setMonthlyRose({ key: monthlyKey, rows });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setMonthlyRose({ key: monthlyKey, error: String(error) });
+      });
+    return () => controller.abort();
+  }, [exportMode, monthlyKey]);
+  const currentMonthlyRose =
+    monthlyRose?.key === monthlyKey ? monthlyRose : undefined;
+  const monthlyRows =
+    currentMonthlyRose?.rows ??
+    (output.summary?.monthly_rose_rows as
+      Record<string, unknown>[] | undefined);
   const rows = allRows.filter(
     (r) =>
       (!channel || r.channel === channel) &&
@@ -865,8 +924,12 @@ export function BaseResultView({
       monthScope === `q${Math.ceil(m / 3)}`,
   );
   const displayedMonth = tableMonths[monthPage] ?? tableMonths[0];
+  const quarterly = monthScope.startsWith("q");
   const rowsForMonth = (m: number) =>
     rows.filter((row) => Number(String(row.period).slice(0, 2)) === m);
+  const monthRanges = exportMode
+    ? [1, 2, 3, 4].map((q) => monthNumbers.slice((q - 1) * 3, q * 3))
+    : [quarterly ? tableMonths : [displayedMonth]];
   const activeWindow = means.some((m) => String(m.years) === ltWindow)
     ? ltWindow
     : String(means[0]?.years ?? 30);
@@ -1114,13 +1177,49 @@ export function BaseResultView({
             ) : outputId === "shear" ? (
               <ShearPlots rows={rows} summary={output.summary} />
             ) : isRose ? (
-              <RosePlot
-                rows={rows}
-                energy={roseKind === "wpd"}
-                rose={roseStyle}
-                zoom={roseZoom}
-                title={`长期累计${roseKind === "wpd" ? "风能" : "风向"} · ${roseStyle === "filled" ? "填充" : "折线"}`}
-              />
+              <>
+                <RosePlot
+                  rows={rows}
+                  energy={roseKind === "wpd"}
+                  rose={roseStyle}
+                  zoom={roseZoom}
+                  title={`长期累计${roseKind === "wpd" ? "风能" : "风向"} · ${roseStyle === "filled" ? "填充" : "折线"}`}
+                />
+                {monthlyKey && (
+                  <section className="ww-reference-months">
+                    <h3>
+                      {windowFilter}年各月累计
+                      {roseKind === "wpd" ? "风能" : "风向"}
+                    </h3>
+                    {monthlyRows ? (
+                      <div className="ww-rose-month-grid">
+                        {monthNumbers.map((m) => (
+                          <article key={m}>
+                            <RoseChart
+                              compact
+                              rows={monthlyRows.filter(
+                                (row) => row.month === m,
+                              )}
+                              title={
+                                m +
+                                "月累计" +
+                                (roseKind === "wpd" ? "风能" : "风向")
+                              }
+                              rose={roseStyle}
+                              energy={roseKind === "wpd"}
+                              zoom={roseZoom}
+                            />
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p role="status">
+                        {currentMonthlyRose?.error ?? "正在统计各月分布…"}
+                      </p>
+                    )}
+                  </section>
+                )}
+              </>
             ) : isScatter ? (
               rows.map((row, i) => (
                 <article key={i}>
@@ -1212,7 +1311,7 @@ export function BaseResultView({
           {outputId === "monthly-hourly" ? (
             <>
               {!exportMode && (
-                <div className="ww-month-controls" aria-label="月度表格翻页">
+                <div className="ww-month-controls" aria-label="日内统计范围">
                   <label>
                     表格月份{" "}
                     <select
@@ -1235,31 +1334,47 @@ export function BaseResultView({
                       ))}
                     </select>
                   </label>
-                  <button
-                    className="ww-button"
-                    disabled={monthPage === 0}
-                    onClick={() => setMonthPage(monthPage - 1)}
-                  >
-                    上一月
-                  </button>
-                  <span aria-live="polite">
-                    第 {monthPage + 1} / {tableMonths.length} 张
-                  </span>
-                  <button
-                    className="ww-button"
-                    disabled={monthPage + 1 >= tableMonths.length}
-                    onClick={() => setMonthPage(monthPage + 1)}
-                  >
-                    下一月
-                  </button>
+                  {monthScope === "all" && (
+                    <>
+                      <button
+                        className="ww-button"
+                        disabled={monthPage === 0}
+                        onClick={() => setMonthPage(monthPage - 1)}
+                      >
+                        上一月
+                      </button>
+                      <span aria-live="polite">
+                        第 {monthPage + 1} / {tableMonths.length} 张
+                      </span>
+                      <button
+                        className="ww-button"
+                        disabled={monthPage + 1 >= tableMonths.length}
+                        onClick={() => setMonthPage(monthPage + 1)}
+                      >
+                        下一月
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
-              {(exportMode ? monthNumbers : [displayedMonth]).map((m) => (
-                <section key={m}>
-                  <h3>{m}月日内统计</h3>
-                  <DataTable rows={rowsForMonth(m)} />
-                </section>
-              ))}
+              {monthRanges.map((months) => {
+                const first = months[0];
+                const last = months.at(-1);
+                const reportRows = months.flatMap(rowsForMonth);
+                return (
+                  <section className="ww-statistics-period" key={first}>
+                    <h3>
+                      {first === last
+                        ? `${first}月日内统计`
+                        : `第${Math.ceil(first / 3)}季度日内统计（${first}–${last}月）`}
+                    </h3>
+                    <DataTable
+                      rows={reportRows}
+                      continuous={months.length > 1}
+                    />
+                  </section>
+                );
+              })}
             </>
           ) : (
             <DataTable

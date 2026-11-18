@@ -6,7 +6,7 @@ import ReportExport from "./ReportExport";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
-import { addReportChart, removeReportChart } from "./chartReports";
+import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 
 type Row = Record<string, unknown>;
@@ -47,6 +47,7 @@ function Plot({
   energy = false,
   zoom = "1",
   outputId = "",
+  fit,
 }: {
   rows: Row[];
   fields: string[];
@@ -56,6 +57,7 @@ function Plot({
   energy?: boolean;
   zoom?: string;
   outputId?: string;
+  fit?: Row;
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
@@ -65,7 +67,7 @@ function Plot({
     h = rose ? 680 : dualAxis ? 540 : 340,
     L = dualAxis ? 90 : 65,
     R = dualAxis ? 810 : 725,
-    T = dualAxis ? 40 : 35,
+    T = fit ? 54 : dualAxis ? 40 : 35,
     B = dualAxis ? 440 : 275;
   const cx = rose ? 450 : 400,
     cy = rose ? 310 : 165;
@@ -107,15 +109,27 @@ function Plot({
           role="img"
           aria-label={title}
           fontFamily={EXCEL.font}
+          fontWeight="700"
           fontSize={textSize(13)}
           style={{
-            width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
+            width: `calc(${Math.max(1, Number(zoom) || 1) * 100}% * var(--ww-plot-scale, 1))`,
             background: "white",
           }}
         >
           <text x="65" y="20" fontSize={textSize(13)} fill={EXCEL.text}>
             {hover}
           </text>
+          {fit && typeof fit.k === "number" && typeof fit.c === "number" && (
+            <text
+              x={R}
+              y={textSize(17) + 5}
+              textAnchor="end"
+              fontSize={textSize(17)}
+              fill={EXCEL.text}
+            >
+              k = {fit.k.toFixed(4)} · A = {fit.c.toFixed(4)} m/s
+            </text>
+          )}
           {rose ? (
             <>
               {[0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -134,7 +148,12 @@ function Plot({
                       stroke="#dce5df"
                       strokeDasharray="3 3"
                     />
-                    <text x={tick[0]} y={tick[1]} fontSize="10" fill="#7f9487">
+                    <text
+                      x={tick[0]}
+                      y={tick[1]}
+                      fontSize={textSize(10)}
+                      fill="#52665b"
+                    >
                       {(max * t).toFixed(1)}%
                     </text>
                   </g>
@@ -510,7 +529,7 @@ export function InteractiveResultView({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [reportNotice, setReportNotice] = useState("");
-  const [addedReportId, setAddedReportId] = useState("");
+  const [addedReportIds, setAddedReportIds] = useState<string[]>([]);
   const [all, setAll] = useState(exportMode && outputId !== "monthly-rose"),
     [channel, setChannel] = useState("");
   const [seriesVisibility, setSeriesVisibility] = useState<
@@ -525,10 +544,15 @@ export function InteractiveResultView({
     [sectors, setSectors] = useState(Number(run.config.sectors ?? 16));
   const measurementSnapshot = original.kind === "measured-direction";
   const localRose = ["annual-rose", "monthly-rose"].includes(outputId);
-  const [roseMetric, setRoseMetric] = useState<"direction" | "energy">(
-    !exportMode || measurementSnapshot ? "direction" : "energy",
+  const [roseMetric, setRoseMetric] = useState<"direction" | "energy" | "both">(
+    !exportMode && outputId === "annual-rose"
+      ? "both"
+      : !exportMode || measurementSnapshot
+        ? "direction"
+        : "energy",
   );
-  const measured = localRose && roseMetric === "direction";
+  const compareRose = localRose && roseMetric === "both";
+  const measured = localRose && roseMetric !== "energy";
   const [measuredResponse, setMeasuredResponse] = useState<{
     sectors: number;
     run?: Run;
@@ -559,7 +583,7 @@ export function InteractiveResultView({
         : undefined
       : run;
   const output =
-    chartRun?.outputs[outputId] ??
+    (exportMode ? initial : chartRun?.outputs[outputId]) ??
     (measured
       ? {
           title: "实测风向频率",
@@ -585,6 +609,40 @@ export function InteractiveResultView({
     (channels.includes(channelChoice) ? channelChoice : "") ||
     (typeof preferred === "string" ? preferred : channels[0]) ||
     "";
+  const energyRows = run.outputs["annual-rose"]?.rows ?? [];
+  const measuredHeight = rows.find((row) => row.channel === selected)?.height;
+  const pairedEnergy = energyRows.reduce<Row | undefined>((best, row) => {
+    if (!best) return row;
+    const score = (item: Row) =>
+      item.direction_height === measuredHeight ? 1 : 0;
+    return score(row) > score(best) ||
+      (score(row) === score(best) && Number(row.height) > Number(best.height))
+      ? row
+      : best;
+  }, undefined);
+  const peerRows =
+    compareRose && pairedEnergy && Number(run.config.sectors ?? 16) === sectors
+      ? energyRows.filter(
+          (row) =>
+            row.channel === pairedEnergy.channel &&
+            row.direction_height === pairedEnergy.direction_height &&
+            row.direction_channel === pairedEnergy.direction_channel,
+        )
+      : [];
+  const energyTitle = pairedEnergy
+    ? "风能 · WPD-" +
+      pairedEnergy.height +
+      "m / WD-" +
+      pairedEnergy.direction_height +
+      "m"
+    : "风能";
+  const maxRose = Math.max(
+    0,
+    ...rows
+      .filter((row) => row.channel === selected)
+      .map((row) => Number(row.frequency) || 0),
+    ...peerRows.map((row) => Number(row.energy_frequency) || 0),
+  );
   const isRose = outputId.includes("rose"),
     rawCompleteness = outputId === "raw-records",
     completeness = rawCompleteness || outputId === "completeness";
@@ -648,7 +706,7 @@ export function InteractiveResultView({
     const charts = document
       .getElementById(`interactive-${outputId}`)
       ?.querySelectorAll("svg");
-    const html = `<!doctype html><meta charset="utf-8"><title>风资源图表报告</title><style>body{font-family:Microsoft YaHei;margin:32px}svg{max-width:100%;page-break-inside:avoid}pre{white-space:pre-wrap}</style><h1>风资源图表报告</h1><p>当前配置；未调整选项使用默认值。统计基准365天/52560个十分钟格，实际日历时段另列。</p><pre>${JSON.stringify(config, null, 2).replaceAll("<", "&lt;")}</pre>${Array.from(
+    const html = `<!doctype html><meta charset="utf-8"><title>风资源图表报告</title><style>body{font-family:${EXCEL.font};margin:32px}svg{max-width:100%;page-break-inside:avoid}pre{white-space:pre-wrap}</style><h1>风资源图表报告</h1><p>当前配置；未调整选项使用默认值。统计基准365天/52560个十分钟格，实际日历时段另列。</p><pre>${JSON.stringify(config, null, 2).replaceAll("<", "&lt;")}</pre>${Array.from(
       charts ?? [],
     )
       .filter((s) => s.getBoundingClientRect().height > 0)
@@ -681,9 +739,22 @@ export function InteractiveResultView({
       .filter(Boolean)
       .join(" · ");
     try {
-      setAddedReportId(
-        addReportChart(title, reportSnapshot(root, output.title), config),
-      );
+      const peer = root.querySelector("[data-rose-energy-peer]");
+      const entries = [
+        {
+          title,
+          html: reportSnapshot(root, output.title, "[data-rose-energy-peer]"),
+          config: compareRose ? { ...config, roseMetric: "direction" } : config,
+        },
+      ];
+      if (peer && peerRows.length) {
+        entries.push({
+          title: energyTitle,
+          html: reportSnapshot(peer, energyTitle),
+          config: { ...config, roseMetric: "energy", runId: run.id },
+        });
+      }
+      setAddedReportIds(addReportCharts(entries));
       setReportNotice("已加入报告，可在“报告导出配置”中选择。");
     } catch {
       setReportNotice("");
@@ -797,13 +868,13 @@ export function InteractiveResultView({
           >
             加入报告
           </button>
-          {addedReportId && (
+          {addedReportIds.length > 0 && (
             <button
               className="ww-button"
               onClick={() => {
                 try {
-                  removeReportChart(addedReportId);
-                  setAddedReportId("");
+                  removeReportCharts(addedReportIds);
+                  setAddedReportIds([]);
                   setReportNotice("已撤销加入报告。");
                 } catch {
                   setError("未能撤销，请在报告导出配置中重试。");
@@ -837,15 +908,19 @@ export function InteractiveResultView({
                 <select
                   value={roseMetric}
                   onChange={(event) => {
-                    const metric = event.target.value as "direction" | "energy";
+                    const metric = event.target.value as typeof roseMetric;
                     setRoseMetric(metric);
+                    if (metric === "both") setAll(false);
                     if (
-                      metric === "energy" &&
+                      metric !== "direction" &&
                       sectors !== Number(run.config.sectors ?? 16)
                     )
                       void recalculate({ sectors });
                   }}
                 >
+                  {outputId === "annual-rose" && (
+                    <option value="both">风向与风能对照</option>
+                  )}
                   <option value="direction">实测风向</option>
                   <option value="energy">风能分布</option>
                 </select>
@@ -898,7 +973,7 @@ export function InteractiveResultView({
                 </select>
               </label>
             )}
-            {custom && outputId !== "density" && (
+            {custom && outputId !== "density" && !compareRose && (
               <label>
                 <input
                   type="checkbox"
@@ -952,7 +1027,7 @@ export function InteractiveResultView({
                   disabled={busy}
                   onChange={(e) => {
                     setSectors(Number(e.target.value));
-                    if (!measured)
+                    if (!measured || compareRose)
                       void recalculate({ sectors: Number(e.target.value) });
                   }}
                 >
@@ -1156,23 +1231,6 @@ export function InteractiveResultView({
                     ? String(subset[0]?.direction_name ?? output.title)
                     : c || output.title}
                 </h3>
-                {outputId === "weibull" && (
-                  <p>
-                    拟合方法：{method} · k=
-                    {Number(
-                      ((output.summary?.channels ?? []) as Row[]).find(
-                        (v) => v.channel === c,
-                      )?.k,
-                    ).toFixed(4)}{" "}
-                    · c=
-                    {Number(
-                      ((output.summary?.channels ?? []) as Row[]).find(
-                        (v) => v.channel === c,
-                      )?.c,
-                    ).toFixed(4)}{" "}
-                    m/s
-                  </p>
-                )}
                 <div
                   className={
                     all && !showRoseYear ? "ww-chart-table-pair" : undefined
@@ -1180,14 +1238,39 @@ export function InteractiveResultView({
                 >
                   <div>
                     {isRose ? (
-                      <div className="ww-rose-stack">
+                      <div
+                        className={
+                          compareRose ? "ww-rose-comparison" : "ww-rose-stack"
+                        }
+                      >
                         <RoseChart
                           rows={showRoseYear ? yearRoseRows : subset}
                           title={showRoseYear ? `全年${roseLabel}` : roseLabel}
                           rose={rose}
                           zoom={zoom}
                           energy={!measured}
+                          radialMax={compareRose ? maxRose : undefined}
                         />
+                        {compareRose && (
+                          <div data-rose-energy-peer>
+                            {peerRows.length ? (
+                              <RoseChart
+                                rows={peerRows}
+                                title={energyTitle}
+                                rose={rose}
+                                zoom={zoom}
+                                energy
+                                radialMax={maxRose}
+                              />
+                            ) : (
+                              <p>
+                                {busy
+                                  ? "正在更新风能分布…"
+                                  : "本次计算没有可用的风能分布。"}
+                              </p>
+                            )}
+                          </div>
+                        )}
                         {showRoseYear && (
                           <div className="ww-rose-month-grid">
                             {Array.from(
@@ -1244,6 +1327,13 @@ export function InteractiveResultView({
                           }
                           outputId={outputId}
                           density={outputId === "density"}
+                          fit={
+                            outputId === "weibull"
+                              ? (
+                                  (output.summary?.channels ?? []) as Row[]
+                                ).find((v) => v.channel === c)
+                              : undefined
+                          }
                         />
                       </>
                     )}

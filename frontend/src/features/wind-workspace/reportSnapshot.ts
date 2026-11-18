@@ -1,3 +1,5 @@
+import { EXCEL } from "./chartTheme";
+
 export interface ReportTable {
   caption: string;
   headers: string[];
@@ -28,7 +30,7 @@ function copyFigure(svg: SVGSVGElement, title: string) {
   caption.textContent = chartCaption(svg, title);
   const copy = svg.cloneNode(true) as SVGSVGElement;
   copy.removeAttribute("style");
-  copy.setAttribute("font-family", "Microsoft YaHei, sans-serif");
+  copy.setAttribute("font-family", EXCEL.font);
   const box = copy.viewBox.baseVal;
   const legend = svg
     .closest("figure")
@@ -38,7 +40,7 @@ function copyFigure(svg: SVGSVGElement, title: string) {
     let x = 32;
     let y = base + 16;
     const measure = document.createElement("canvas").getContext("2d");
-    if (measure) measure.font = "15px Microsoft YaHei, sans-serif";
+    if (measure) measure.font = `15px ${EXCEL.font}`;
     for (const item of legend) {
       const label = item.textContent?.trim() ?? "";
       const width =
@@ -74,10 +76,15 @@ function copyFigure(svg: SVGSVGElement, title: string) {
   return figure;
 }
 
-export function reportSnapshot(root: ParentNode, title: string): string {
+export function reportSnapshot(
+  root: ParentNode,
+  title: string,
+  excluded?: string,
+): string {
   const snapshot = document.createElement("div");
   for (const item of root.querySelectorAll("svg,table")) {
-    if (item.closest("details")) continue;
+    if (item.closest("details") || (excluded && item.closest(excluded)))
+      continue;
     if (item instanceof SVGSVGElement) {
       snapshot.append(copyFigure(item, title));
       continue;

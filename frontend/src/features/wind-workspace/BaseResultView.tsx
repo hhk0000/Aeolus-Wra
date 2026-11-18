@@ -1,12 +1,16 @@
 import { useRef, useState } from "react";
 import { downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
+import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 
 const palette = EXCEL.series;
 const labels: Record<string, string> = {
   channel: "通道",
+  direction_name: "实测风向通道",
+  direction_height: "风向高度 m",
+  source_stage: "实测来源",
   height: "高度 m",
   period: "时段",
   count: "样本数",
@@ -79,7 +83,7 @@ function display(value: unknown): string {
         : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
-const numeric = (value: unknown) =>
+const numeric = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 export function DataTable({
@@ -107,7 +111,12 @@ export function DataTable({
           </thead>
           <tbody>
             {rows.slice(safePage * 60, (safePage + 1) * 60).map((row, i) => (
-              <tr key={i}>
+              <tr
+                key={i}
+                className={
+                  row.concurrent === true ? "ww-concurrent-row" : undefined
+                }
+              >
                 {keys.map((key) => (
                   <td key={key} title={display(row[key])}>
                     {display(row[key])}
@@ -190,6 +199,7 @@ function CartesianPlot({
   bars?: boolean;
   compact?: boolean;
 }) {
+  const textSize = useChartTextSize();
   const isAnnual = outputId === "reference-years";
   const isTI = outputId === "turbulence";
   const isFrequency = outputId === "frequency" || outputId === "weibull";
@@ -209,12 +219,13 @@ function CartesianPlot({
           : ["mean_speed", ...(!isAnnual ? ["power_density"] : [])];
   const used = keys.filter((key) => rows.some((r) => numeric(r[key])));
   if (!used.length || !rows.length) return null;
+  const tickSize = compact ? 17 : 13;
   const w = compact ? 480 : 900,
-    h = compact ? 280 : 350,
+    h = compact ? 250 : 350,
     left = compact ? 48 : 66,
-    right = compact ? 462 : 830,
+    right = compact ? 433 : 830,
     top = compact ? 18 : 35,
-    bottom = compact ? 222 : 285;
+    bottom = compact ? 215 : 285;
   const maxFor = (key: string) =>
     Math.max(
       1e-6,
@@ -239,7 +250,7 @@ function CartesianPlot({
         role="img"
         aria-label="真实计算结果图"
         fontFamily={EXCEL.font}
-        fontSize={EXCEL.tickSize}
+        fontSize={textSize(tickSize)}
       >
         <rect width={w} height={h} fill="white" />
         <line x1={left} y1={top} x2={left} y2={bottom} stroke={EXCEL.axis} />
@@ -275,7 +286,7 @@ function CartesianPlot({
               x={left - 8}
               y={top + (n * (bottom - top)) / 4 + 4}
               textAnchor="end"
-              fontSize={EXCEL.tickSize}
+              fontSize={textSize(tickSize)}
               fill={EXCEL.text}
             >
               {(
@@ -287,7 +298,7 @@ function CartesianPlot({
               <text
                 x={right + 8}
                 y={top + (n * (bottom - top)) / 4 + 4}
-                fontSize={compact ? 9 : EXCEL.tickSize}
+                fontSize={textSize(tickSize)}
                 fill={palette[1]}
               >
                 {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
@@ -411,14 +422,15 @@ function CartesianPlot({
           ))}
         {rows.map(
           (row, i) =>
-            i % Math.max(1, Math.ceil(rows.length / 13)) === 0 && (
+            i % Math.max(1, Math.ceil(rows.length / (compact ? 8 : 13))) ===
+              0 && (
               <text
                 key={i}
                 x={x(i)}
                 y={bottom + 20}
                 textAnchor="middle"
                 fill={EXCEL.text}
-                fontSize={EXCEL.tickSize}
+                fontSize={textSize(tickSize)}
               >
                 {isAnnual ? label(row).slice(0, 4) : label(row)}
               </text>
@@ -430,7 +442,7 @@ function CartesianPlot({
               x={(left + right) / 2}
               y={h - 6}
               textAnchor="middle"
-              fontSize={EXCEL.tickSize}
+              fontSize={textSize(tickSize)}
               fill={EXCEL.text}
             >
               {outputId === "monthly" || outputId === "density"
@@ -449,7 +461,7 @@ function CartesianPlot({
               <text
                 transform={`translate(${w - 6} ${(top + bottom) / 2}) rotate(90)`}
                 textAnchor="middle"
-                fontSize={EXCEL.tickSize}
+                fontSize={textSize(tickSize)}
                 fill={palette[1]}
               >
                 风功率密度(W/m²)
@@ -458,7 +470,7 @@ function CartesianPlot({
             <text
               transform={`translate(14 ${(top + bottom) / 2}) rotate(-90)`}
               textAnchor="middle"
-              fontSize={EXCEL.tickSize}
+              fontSize={textSize(tickSize)}
               fill={EXCEL.text}
             >
               {isAnnual ? "平均风速(m/s)" : labels[used[0]]}
@@ -472,7 +484,7 @@ function CartesianPlot({
             <>
               <span>
                 <i className="box" style={{ background: palette[0] }} />
-                周年均值（绿柱）
+                周年均值（蓝柱）
               </span>
               <span>
                 <i className="box" style={{ background: "#e3b341" }} />
@@ -500,6 +512,7 @@ function CartesianPlot({
 }
 
 export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
+  const textSize = useChartTextSize();
   const points = (row.points ?? []) as number[][];
   if (!points.length)
     return (
@@ -511,7 +524,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
     h = 430,
     L = 70,
     R = 610,
-    T = 30,
+    T = 72,
     B = 370;
   const max = Math.max(1, ...points.flat()) * 1.08;
   const x = (v: number) => L + (v / max) * (R - L);
@@ -522,7 +535,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
       role="img"
       aria-label={`${row.label}扇区同期散点图`}
       fontFamily={EXCEL.font}
-      fontSize={EXCEL.tickSize}
+      fontSize={textSize(13)}
     >
       <rect width={w} height={h} fill="white" />
       <rect
@@ -553,7 +566,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
           <text
             x={L - 6}
             y={y(f * max) + 3}
-            fontSize={EXCEL.tickSize}
+            fontSize={textSize(13)}
             textAnchor="end"
             fill={EXCEL.text}
           >
@@ -562,7 +575,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
           <text
             x={x(f * max)}
             y={B + 16}
-            fontSize={EXCEL.tickSize}
+            fontSize={textSize(13)}
             textAnchor="middle"
             fill={EXCEL.text}
           >
@@ -592,21 +605,18 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
               Number(row.slope) * Number(row.x_max) + Number(row.intercept),
             )}
             stroke={EXCEL.series[1]}
-            strokeWidth="2"
+            strokeWidth="4"
             strokeDasharray="6 4"
           />
-          <text
-            x={R - 4}
-            y={B - 10}
-            textAnchor="end"
-            fontSize={EXCEL.tickSize}
-            fill={EXCEL.text}
-          >
-            y = {Number(row.slope).toFixed(4)}x +{" "}
-            {Number(row.intercept).toFixed(4)}
-            {numeric(row.r_squared)
-              ? `  R² = ${Number(row.r_squared).toFixed(4)}`
-              : ""}
+          <text x={L} y={26} fontSize="23" fontWeight="600" fill={EXCEL.text}>
+            y = {display(row.slope)}x {Number(row.intercept) < 0 ? "−" : "+"}{" "}
+            {display(Math.abs(Number(row.intercept)))}
+          </text>
+          <text x={L} y={54} fontSize="19" fill={EXCEL.text}>
+            <tspan>r = {display(row.r)}</tspan>
+            <tspan dx="20">R² = {display(row.r_squared)}</tspan>
+            <tspan dx="20">p = {display(row.p_value)}</tspan>
+            <tspan dx="20">n = {display(row.count)}</tspan>
           </text>
         </>
       )}
@@ -614,7 +624,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
         x={(L + R) / 2}
         y={h - 6}
         textAnchor="middle"
-        fontSize={EXCEL.tickSize}
+        fontSize={textSize(13)}
         fill={EXCEL.text}
       >
         参考站风速(m/s)
@@ -622,7 +632,7 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
       <text
         transform={`translate(16 ${(T + B) / 2}) rotate(-90)`}
         textAnchor="middle"
-        fontSize={EXCEL.tickSize}
+        fontSize={textSize(13)}
         fill={EXCEL.text}
       >
         测风塔风速(m/s)
@@ -653,6 +663,7 @@ function ShearPlots({
   rows: Record<string, unknown>[];
   summary?: Record<string, unknown>;
 }) {
+  const textSize = useChartTextSize();
   const profile = (summary?.profile ?? []) as {
     height: number;
     mean_speed: number;
@@ -678,7 +689,7 @@ function ShearPlots({
         role="img"
         aria-label="同支臂实测风廓线与幂律拟合"
         fontFamily={EXCEL.font}
-        fontSize={EXCEL.tickSize}
+        fontSize={textSize(13)}
       >
         <rect width="900" height="350" fill="white" />
         <rect
@@ -703,7 +714,7 @@ function ShearPlots({
               x="56"
               y={y((n * maxH) / 4) + 4}
               textAnchor="end"
-              fontSize={EXCEL.tickSize}
+              fontSize={textSize(13)}
               fill={EXCEL.text}
             >
               {((n * maxH) / 4).toFixed(0)}
@@ -712,7 +723,7 @@ function ShearPlots({
               x={x((n * maxV) / 4)}
               y="306"
               textAnchor="middle"
-              fontSize={EXCEL.tickSize}
+              fontSize={textSize(13)}
               fill={EXCEL.text}
             >
               {((n * maxV) / 4).toFixed(1)}
@@ -739,13 +750,13 @@ function ShearPlots({
             </title>
           </circle>
         ))}
-        <text x="65" y="20" fontSize="11" fill={EXCEL.text}>
+        <text x="65" y="20" fontSize={textSize(13)} fill={EXCEL.text}>
           高度 m
         </text>
         <text
           x="450"
           y="333"
-          fontSize="11"
+          fontSize={textSize(13)}
           textAnchor="middle"
           fill={EXCEL.text}
         >
@@ -773,10 +784,12 @@ export function BaseResultView({
   run,
   output,
   outputId,
+  exportMode = false,
 }: {
   run: Run;
   output: RunOutput;
   outputId: string;
+  exportMode?: boolean;
 }) {
   const [selectedChannel, setSelectedChannel] = useState("");
   const [month, setMonth] = useState("");
@@ -788,6 +801,8 @@ export function BaseResultView({
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
   const [ltLine, setLtLine] = useState(true);
+  const [monthScope, setMonthScope] = useState("all");
+  const [monthPage, setMonthPage] = useState(0);
   const container = useRef<HTMLDivElement>(null);
   const allRows = output.rows ?? [];
   const channels = [
@@ -842,13 +857,49 @@ export function BaseResultView({
     .filter((m) => !hiddenMeans.includes(String(m.years)))
     .map((m) => ({ ...m, color: meanColor() }));
   const isAnnual = outputId === "reference-years";
+  const monthNumbers = Array.from({ length: 12 }, (_, index) => index + 1);
+  const tableMonths = monthNumbers.filter(
+    (m) =>
+      monthScope === "all" ||
+      Number(monthScope) === m ||
+      monthScope === `q${Math.ceil(m / 3)}`,
+  );
+  const displayedMonth = tableMonths[monthPage] ?? tableMonths[0];
+  const rowsForMonth = (m: number) =>
+    rows.filter((row) => Number(String(row.period).slice(0, 2)) === m);
+  const activeWindow = means.some((m) => String(m.years) === ltWindow)
+    ? ltWindow
+    : String(means[0]?.years ?? 30);
   const annualRows = isAnnual
-    ? rows.slice(-Math.max(1, Number(ltWindow) || 30))
+    ? rows.slice(-Math.max(1, Number(activeWindow) || 30))
+    : rows;
+  const baseline = means.find(
+    (m) => String(m.years) === activeWindow,
+  )?.mean_speed;
+  const annualTable = isAnnual
+    ? annualRows.map((row) => {
+        const speed = row.mean_speed;
+        const classified =
+          row.complete === true &&
+          numeric(baseline) &&
+          baseline > 0 &&
+          numeric(speed);
+        return {
+          ...row,
+          风年类型: !classified
+            ? "—"
+            : speed > baseline * 1.02
+              ? "大风年"
+              : speed < baseline * 0.98
+                ? "小风年"
+                : "平风年",
+        };
+      })
     : rows;
   const chartMeans: Record<string, unknown>[] = isAnnual
     ? ltLine
       ? means
-          .filter((m) => String(m.years) === ltWindow)
+          .filter((m) => String(m.years) === activeWindow)
           .map((m) => ({ ...m, color: meanColor() }))
       : []
     : visibleMeans;
@@ -966,7 +1017,7 @@ export function BaseResultView({
                   <button
                     type="button"
                     key={String(m.years)}
-                    className={ltWindow === String(m.years) ? "active" : ""}
+                    className={activeWindow === String(m.years) ? "active" : ""}
                     onClick={() => setLtWindow(String(m.years))}
                   >
                     {String(m.years)} 年
@@ -1044,21 +1095,17 @@ export function BaseResultView({
                     风功率密度
                   </span>
                 </div>
-                <div className="ww-month-grid">
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <div className="ww-month-grid ww-quarter-grid">
+                  {monthNumbers.map((m) => (
                     <article key={m}>
                       <h3>{m}月 · 日内风况</h3>
                       <CartesianPlot
                         outputId="hourly"
                         compact
-                        rows={rows
-                          .filter(
-                            (r) => Number(String(r.period).slice(0, 2)) === m,
-                          )
-                          .map((r) => ({
-                            ...r,
-                            period: String(r.period).slice(3),
-                          }))}
+                        rows={rowsForMonth(m).map((r) => ({
+                          ...r,
+                          period: String(r.period).slice(3),
+                        }))}
                       />
                     </article>
                   ))}
@@ -1081,10 +1128,6 @@ export function BaseResultView({
                     {String(row.label)} · n={display(row.count)}
                   </strong>
                   <ScatterPlot row={row} />
-                  <small>
-                    r {display(row.r)} · R² {display(row.r_squared)} · p{" "}
-                    {display(row.p_value)}
-                  </small>
                   {row.reason ? (
                     <p className="ww-inline-note">{String(row.reason)}</p>
                   ) : (
@@ -1128,25 +1171,27 @@ export function BaseResultView({
               风向与风能使用同期有效配对；静风频率和未配对数量详见参数记录，扇区加静风频率为100%。
             </p>
           )}
-          <div className="ww-result-toolbar">
-            <span>图表显示当前筛选；CSV导出本项全部通道和时段。</span>
-            <div>
-              <button className="ww-button" onClick={exportPlots}>
-                导出当前SVG
-              </button>
-              <a
-                className="ww-button"
-                href={`/api/v1/runs/${run.id}/tables/${outputId}.csv`}
-              >
-                导出CSV
-              </a>
-              <button
-                className="ww-button"
-                onClick={() => downloadJson(run, `run_${run.id}.json`)}
-              >
-                运行快照JSON
-              </button>
-            </div>
+          <div className="ww-chart-actions">
+            <a
+              className="ww-button"
+              href={`/api/v1/runs/${run.id}/tables/${outputId}.csv`}
+            >
+              下载完整数据（CSV）
+            </a>
+            <details className="ww-details">
+              <summary>更多下载</summary>
+              <div className="ww-chart-actions">
+                <button className="ww-button" onClick={exportPlots}>
+                  下载矢量图（SVG）
+                </button>
+                <button
+                  className="ww-button"
+                  onClick={() => downloadJson(run, `run_${run.id}.json`)}
+                >
+                  备份计算参数与结果（JSON）
+                </button>
+              </div>
+            </details>
           </div>
           {means.map(
             (m) =>
@@ -1156,10 +1201,72 @@ export function BaseResultView({
                 </p>
               ),
           )}
-          <DataTable
-            rows={isAnnual ? annualRows : rows}
-            footer={densityFooter}
-          />
+          {isAnnual && (
+            <div className="ww-month-controls">
+              <span>
+                以所选 {activeWindow} 年中尺度均值为基准。偏差超过 +2%
+                为大风年，低于 −2% 为小风年，其余为平风年。资料不足时显示“—”。
+              </span>
+            </div>
+          )}
+          {outputId === "monthly-hourly" ? (
+            <>
+              {!exportMode && (
+                <div className="ww-month-controls" aria-label="月度表格翻页">
+                  <label>
+                    表格月份{" "}
+                    <select
+                      value={monthScope}
+                      onChange={(event) => {
+                        setMonthScope(event.target.value);
+                        setMonthPage(0);
+                      }}
+                    >
+                      <option value="all">全部月份（12 张表）</option>
+                      {[1, 2, 3, 4].map((q) => (
+                        <option key={q} value={`q${q}`}>
+                          第{q}季度
+                        </option>
+                      ))}
+                      {monthNumbers.map((m) => (
+                        <option key={m} value={m}>
+                          {m}月
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="ww-button"
+                    disabled={monthPage === 0}
+                    onClick={() => setMonthPage(monthPage - 1)}
+                  >
+                    上一月
+                  </button>
+                  <span aria-live="polite">
+                    第 {monthPage + 1} / {tableMonths.length} 张
+                  </span>
+                  <button
+                    className="ww-button"
+                    disabled={monthPage + 1 >= tableMonths.length}
+                    onClick={() => setMonthPage(monthPage + 1)}
+                  >
+                    下一月
+                  </button>
+                </div>
+              )}
+              {(exportMode ? monthNumbers : [displayedMonth]).map((m) => (
+                <section key={m}>
+                  <h3>{m}月日内统计</h3>
+                  <DataTable rows={rowsForMonth(m)} />
+                </section>
+              ))}
+            </>
+          ) : (
+            <DataTable
+              rows={isAnnual ? annualTable : rows}
+              footer={densityFooter}
+            />
+          )}
         </>
       )}
       <details className="ww-details">

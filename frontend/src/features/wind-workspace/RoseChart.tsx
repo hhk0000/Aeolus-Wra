@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 
 type Row = Record<string, unknown>;
@@ -13,13 +14,16 @@ export function RoseChart({
   energy = false,
   rose = "line",
   zoom = "1",
+  compact = false,
 }: {
   rows: Row[];
   title: string;
   energy?: boolean;
   rose?: string;
   zoom?: string;
+  compact?: boolean;
 }) {
+  const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
   const w = 900,
     h = 680,
@@ -28,6 +32,7 @@ export function RoseChart({
     maxR = 280,
     labelR = maxR + 36;
   const key = energy ? "energy_frequency" : "frequency";
+  const color = EXCEL.series[energy ? 1 : 0];
   const rawMax = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0));
   const max = Math.max(1, Math.ceil(rawMax / 5) * 5);
   const point = (a: number, r: number): [number, number] => [
@@ -50,7 +55,7 @@ export function RoseChart({
       .map((r) => point(angleOf(r), (value / max) * maxR).join(","))
       .join(" ");
   return (
-    <figure style={{ margin: 0 }}>
+    <figure className={`ww-rose-figure${compact ? " ww-rose-compact" : ""}`}>
       <figcaption>{title}</figcaption>
       <div className="ww-plot-scroll">
         <svg
@@ -58,10 +63,9 @@ export function RoseChart({
           role="img"
           aria-label={title}
           fontFamily={EXCEL.font}
-          fontSize={EXCEL.tickSize}
+          fontSize={textSize(compact ? 30 : 17)}
           style={{
             width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
-            minWidth: 560,
             background: "white",
           }}
         >
@@ -76,7 +80,7 @@ export function RoseChart({
               <text
                 x={cx + 6}
                 y={cy - (value / max) * maxR + 4}
-                fontSize={EXCEL.tickSize}
+                fontSize={textSize(compact ? 30 : 17)}
                 fill={EXCEL.text}
               >
                 {value.toFixed(0)}%
@@ -107,7 +111,7 @@ export function RoseChart({
                 x={label[0]}
                 y={label[1]}
                 textAnchor="middle"
-                fontSize={EXCEL.tickSize + 1}
+                fontSize={textSize(compact ? 34 : 18)}
                 fill={EXCEL.text}
               >
                 {String(r.label ?? a)}
@@ -120,9 +124,9 @@ export function RoseChart({
                 point(angleOf(r), (Number(r[key]) / max) * maxR).join(","),
               )
               .join(" ")}
-            fill={rose === "filled" ? EXCEL.series[0] : "none"}
+            fill={rose === "filled" ? color : "none"}
             fillOpacity={rose === "filled" ? 0.25 : 0}
-            stroke={EXCEL.series[0]}
+            stroke={color}
             strokeWidth="2"
           />
           {rows.map((r, i) => {
@@ -134,7 +138,7 @@ export function RoseChart({
                 cx={p[0]}
                 cy={p[1]}
                 r={3}
-                fill={EXCEL.series[0]}
+                fill={color}
               />
             );
           })}

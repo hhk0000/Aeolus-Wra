@@ -27,6 +27,7 @@ from wind_platform.services.analysis import (
     run_long_term,
 )
 from wind_platform.services.comparison import ComparisonOptions, compare_towers
+from wind_platform.services.measured_direction import run_measured_direction
 from wind_platform.services.processing import ProcessingOptions, process
 from wind_platform.services.review import ReviewOptions, review
 
@@ -231,6 +232,15 @@ def extremes(config: ExtremeOptions, request: Request):
 @router.get("/runs/{id_}")
 def get_run(id_: str, request: Request):
     return store(request).get("runs", id_)
+
+
+class MeasuredDirectionOptions(BaseModel):
+    sectors: int = Field(default=16, ge=1, le=36)
+
+
+@router.post("/runs/{id_}/measured-direction")
+def measured_direction(id_: str, config: MeasuredDirectionOptions, request: Request):
+    return run_measured_direction(store(request), id_, config.sectors)
 
 
 @router.get("/runs/{id_}/tables/{output_id}.csv")

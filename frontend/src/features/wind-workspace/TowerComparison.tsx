@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, means } from "./api";
+import { useChartTextSize } from "./chartText";
 import { localInput } from "./autoSetup";
 import type { WorkspaceState } from "./model";
 import "./towerComparison.css";
@@ -40,6 +41,7 @@ function ComparisonResult({
   period: Period;
   metric: string;
 }) {
+  const textSize = useChartTextSize();
   const chart = useRef<SVGSVGElement>(null);
   const table = useRef<HTMLTableElement>(null);
   const { rows, sources } = result;
@@ -143,7 +145,7 @@ function ComparisonResult({
               x="54"
               y={y((i * max) / 4) + 4}
               textAnchor="end"
-              fontSize="10"
+              fontSize={textSize(12)}
             >
               {((i * max) / 4).toFixed(2)}
             </text>
@@ -186,12 +188,18 @@ function ComparisonResult({
         {rows.map(
           (r, i) =>
             i % step === 0 && (
-              <text key={i} x={x(i)} y="281" textAnchor="middle" fontSize="10">
+              <text
+                key={i}
+                x={x(i)}
+                y="281"
+                textAnchor="middle"
+                fontSize={textSize(12)}
+              >
                 {r.period}
               </text>
             ),
         )}
-        <text x="415" y="297" textAnchor="middle" fontSize="11">
+        <text x="415" y="297" textAnchor="middle" fontSize={textSize(12)}>
           {axis}
         </text>
       </svg>

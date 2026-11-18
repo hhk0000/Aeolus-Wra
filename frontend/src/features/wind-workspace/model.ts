@@ -255,7 +255,14 @@ export const OUTPUTS = [
   },
 ] as const;
 
-export type OutputSpec = (typeof OUTPUTS)[number];
+export interface OutputSpec {
+  id: string;
+  title: string;
+  description: string;
+  kind: SourceKind;
+  required: readonly SourceKind[];
+  form: string;
+}
 
 export function newTower(id: string, number: number): Tower {
   return {
@@ -367,53 +374,74 @@ export function heightPairs(draft: CorrelationDraft): [number, number][] {
   return left.flatMap((h) => right.map((r): [number, number] => [h, r]));
 }
 
-export function correlationErrors(state: WorkspaceState): string[] {
+export function correlationErrors(state: WorkspaceState) {
   const draft = state.correlation;
   const left = state.files.find((f) => f.id === draft.leftFileId);
   const right = state.files.find((f) => f.id === draft.rightFileId);
-  const errors: string[] = [];
+  const errors: { field: keyof CorrelationDraft; message: string }[] = [];
+  const add = (field: keyof CorrelationDraft, message: string) =>
+    errors.push({ field, message });
   if (!left || left.kind === "reference")
-    errors.push("请选择目标测风塔数据文件。");
-  if (draft.mode !== "same-tower" && !right)
-    errors.push("请选择对比数据文件。");
-  if (
-    draft.mode === "cross-tower" &&
-    right &&
-    (right.kind === "reference" || right.towerId === left?.towerId)
-  )
-    errors.push("跨塔分析需要另一座测风塔的数据。");
-  if (draft.mode === "reference" && right?.kind !== "reference")
-    errors.push("塔与中尺度分析需要中尺度对比文件。");
+    add("leftFileId", "请选择目标测风塔数据文件。");
+  else if (!left.dataset) add("leftFileId", "请先在数据资料中解析目标文件。");
+  else if (!state.towers.find((t) => t.id === left.towerId)?.timezone)
+    add("leftFileId", "请先在数据资料中确认目标测风塔的时间基准。");
+  if (draft.mode !== "same-tower") {
+    if (!right) add("rightFileId", "请选择对比数据文件。");
+    else if (!right.dataset)
+      add("rightFileId", "请先在数据资料中解析对比文件。");
+    else if (
+      draft.mode === "cross-tower" &&
+      (right.kind === "reference" || right.towerId === left?.towerId)
+    )
+      add("rightFileId", "跨塔分析需要另一座测风塔的数据。");
+    else if (draft.mode === "reference" && right.kind !== "reference")
+      add("rightFileId", "塔与中尺度分析需要中尺度对比文件。");
+    else if (
+      right.kind !== "reference" &&
+      !state.towers.find((t) => t.id === right.towerId)?.timezone
+    )
+      add("rightFileId", "请先在数据资料中确认对比测风塔的时间基准。");
+  }
   const leftHeights = parseHeights(draft.leftHeights);
   if (
     !leftHeights.length ||
     (draft.mode === "same-tower" && leftHeights.length < 2)
   )
-    errors.push(
+    add(
+      "leftHeights",
       draft.mode === "same-tower"
         ? "同塔分析请填写至少两个不同高度。"
         : "请填写有效的目标高度。",
     );
   if (draft.mode !== "same-tower" && !parseHeights(draft.rightHeights).length)
-    errors.push("请填写有效的对比高度。");
-  if (!draft.start || !draft.end || draft.start >= draft.end)
-    errors.push("请设置起点早于终点的相关性分析时段。");
+    add("rightHeights", "请填写有效的对比高度。");
+  if (!draft.start) add("start", "请设置相关性开始时间。");
+  if (!draft.end || (draft.start && draft.start >= draft.end))
+    add("end", "请设置晚于起点的相关性结束时间。");
   if (draft.sectors > 1) {
-    const directionFile = state.files.find(
+    const direction = state.files.find(
       (f) => f.id === draft.directionFileId,
-    );
-    if (!directionFile) errors.push("分扇区分析需要选择风向数据来源。");
-    if (parseHeights(draft.directionHeight).length !== 1)
-      errors.push("请指定一个有效的风向参考高度。");
+    )?.dataset;
+    if (!direction)
+      add("directionFileId", "分扇区分析需要选择已解析的风向数据来源。");
+    const height = parseHeights(draft.directionHeight);
+    if (height.length !== 1)
+      add("directionHeight", "请指定一个有效的风向参考高度。");
+    else if (
+      direction &&
+      direction.channels.filter(
+        (c) =>
+          c.quantity === "direction" &&
+          c.statistic === "mean" &&
+          c.height === height[0],
+      ).length !== 1
+    )
+      add(
+        "directionHeight",
+        "所选文件在该高度未唯一匹配到平均风向通道，请核对高度或来源。",
+      );
   }
-  if (!state.towers.find((t) => t.id === left?.towerId)?.timezone)
-    errors.push("请先确认目标测风塔的时间基准。");
-  if (
-    right &&
-    right.kind !== "reference" &&
-    !state.towers.find((t) => t.id === right.towerId)?.timezone
-  )
-    errors.push("请先确认对比测风塔的时间基准。");
   return errors;
 }
 

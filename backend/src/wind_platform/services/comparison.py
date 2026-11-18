@@ -115,14 +115,18 @@ def compare_towers(store, config: ComparisonOptions):
             if (v < 0).any():
                 raise CalculationError("所选通道存在负风速，请核对缺测标记。")
             vals.append(
-                float(v.mean()) if config.metric == "mean_speed"
+                float(v.mean())
+                if config.metric == "mean_speed"
                 else wind_statistics(v, density, 60)["power_density"]
             )
         rows.append({"period": p, "count": len(stamps), "values": vals})
     if first is None:
         raise CalculationError("各塔同一周年的统计窗口没有共同有效小时。")
     return {
-        "sources": sources, "rows": rows, "paired_count": paired_count,
-        "timezone": str(axis_zone), "start": first.isoformat(),
+        "sources": sources,
+        "rows": rows,
+        "paired_count": paired_count,
+        "timezone": str(axis_zone),
+        "start": first.isoformat(),
         "end_exclusive": (last + timedelta(hours=1)).isoformat(),
     }

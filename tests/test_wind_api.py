@@ -88,6 +88,43 @@ def test_stage_enforcement_and_timestamp_duplicates(client):
     assert client.get("/api/v1/datasets/../../secrets").status_code == 404
 
 
+def test_measured_direction_uses_observed_heights_without_wind_speed(client):
+    stamps = ("2024-01-31 23:50", "2024-02-01 00:00")
+    raw = f"Date,WD100m,WD10m\n{stamps[0]},180,90\n{stamps[1]},180,270"
+    qc = f"Date,WD100m\n{stamps[0]},0\n{stamps[1]},90"
+
+    def direction(index, height):
+        return {"index": index, "quantity": "direction", "height": height, "unit": "deg"}
+
+    _, raw_data = import_csv(client, "raw", raw.encode(), [direction(1, 100), direction(2, 10)])
+    _, qc_data = import_csv(client, "qc", qc.encode(), [direction(1, 100)])
+    analysis = client.post(
+        "/api/v1/analysis", json={"raw_id": raw_data["id"], "qc_id": qc_data["id"]}
+    )
+    assert analysis.status_code == 200, analysis.text
+    run_id = analysis.json()["id"]
+    response = client.post(f"/api/v1/runs/{run_id}/measured-direction", json={"sectors": 8})
+    assert response.status_code == 200, response.text
+    snapshot = response.json()
+    annual = snapshot["outputs"]["annual-rose"]["rows"]
+    nonzero = {
+        (r["height"], r["source_stage"], r["degrees"]): r["frequency"] for r in annual if r["count"]
+    }
+    assert nonzero == {
+        (100, "qc", 0): 50,
+        (100, "qc", 90): 50,
+        (10, "raw", 90): 50,
+        (10, "raw", 270): 50,
+    }
+    monthly = snapshot["outputs"]["monthly-rose"]["rows"]
+    assert {(r["height"], r["month"], r["degrees"]) for r in monthly if r["count"]} == {
+        (100, 1, 0),
+        (100, 2, 90),
+        (10, 1, 90),
+        (10, 2, 270),
+    }
+
+
 def test_all_missing_wind_is_an_unavailable_output_not_a_successful_empty_chart(client):
     _, result = import_csv(client, "result", b"Date,WS\n2024-01-01 00:00,-9999")
     response = client.post(

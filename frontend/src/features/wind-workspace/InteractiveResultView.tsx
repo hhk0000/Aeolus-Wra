@@ -3,13 +3,28 @@ import { api, downloadJson, runTowerName } from "./api";
 import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
+import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
-import { addReportChart } from "./chartReports";
+import { addReportChart, removeReportChart } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 
 type Row = Record<string, unknown>;
 const colors = EXCEL.series;
+const iecFields = ["IEC_A", "IEC_B", "IEC_C"];
+function seriesColor(field: string, index: number) {
+  if (["power_density", "energy_frequency"].includes(field)) return colors[1];
+  if (["mean_speed", "frequency"].includes(field)) return colors[0];
+  const tiIndex = [
+    "representative",
+    ...iecFields,
+    "mean",
+    "std",
+    "characteristic",
+  ].indexOf(field);
+  if (tiIndex === 6) return "#595959";
+  return colors[(tiIndex < 0 ? index : tiIndex) % colors.length];
+}
 const names: Record<string, string> = {
   mean_speed: "风速",
   power_density: "风功率密度",
@@ -42,8 +57,10 @@ function Plot({
   zoom?: string;
   outputId?: string;
 }) {
+  const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
-  const dualAxis = fields.includes("power_density");
+  const dualAxis =
+    fields.includes("power_density") && fields.includes("mean_speed");
   const w = rose ? 900 : dualAxis ? 900 : 800,
     h = rose ? 680 : dualAxis ? 540 : 340,
     L = dualAxis ? 90 : 65,
@@ -82,7 +99,7 @@ function Plot({
     return B - ((v - lo) / (hi - lo || 1)) * (B - T);
   };
   return (
-    <figure style={{ margin: 0 }}>
+    <figure className="ww-interactive-plot">
       <figcaption>{title}</figcaption>
       <div className="ww-plot-scroll">
         <svg
@@ -90,14 +107,13 @@ function Plot({
           role="img"
           aria-label={title}
           fontFamily={EXCEL.font}
-          fontSize={EXCEL.tickSize}
+          fontSize={textSize(13)}
           style={{
             width: `${Math.max(1, Number(zoom) || 1) * 100}%`,
-            minWidth: rose ? 560 : 480,
             background: "white",
           }}
         >
-          <text x="65" y="20" fontSize={EXCEL.tickSize} fill={EXCEL.text}>
+          <text x="65" y="20" fontSize={textSize(13)} fill={EXCEL.text}>
             {hover}
           </text>
           {rose ? (
@@ -222,8 +238,8 @@ function Plot({
                           x={j ? R + 6 : L - 6}
                           y={T + (i * (B - T)) / 4}
                           textAnchor={j ? "start" : "end"}
-                          fill={colors[j]}
-                          fontSize={dualAxis ? 12 : EXCEL.tickSize}
+                          fill={seriesColor(f, j)}
+                          fontSize={textSize(13)}
                         >
                           {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
                         </text>
@@ -240,11 +256,13 @@ function Plot({
                       return (
                         <rect
                           key={`bar-${i}`}
-                          x={x(i) - barW + j * barW}
+                          x={
+                            x(i) - barW + (f === "energy_frequency" ? barW : 0)
+                          }
                           y={y(Number(r[f]), f)}
                           width={barW * 0.9}
                           height={B - y(Number(r[f]), f)}
-                          fill={j === 0 ? colors[0] : colors[1]}
+                          fill={seriesColor(f, j)}
                         >
                           <title>{Number(r[f]).toFixed(3)}%</title>
                         </rect>
@@ -260,10 +278,10 @@ function Plot({
                           .filter(Boolean)
                           .join(" ")}
                         fill="none"
-                        stroke={colors[j % colors.length]}
+                        stroke={seriesColor(f, j)}
                         strokeWidth={dualAxis ? 3 : EXCEL.lineWidth}
                         strokeDasharray={
-                          dualAxis && j === 1 ? "6 4" : undefined
+                          f === "power_density" ? "6 4" : undefined
                         }
                       />
                       {rows.map(
@@ -285,7 +303,7 @@ function Plot({
                                   width="14"
                                   height="14"
                                   transform={`rotate(45 ${x(i)} ${y(Number(r[f]), f)})`}
-                                  fill={colors[j % colors.length]}
+                                  fill={seriesColor(f, j)}
                                 />
                               ) : (
                                 <rect
@@ -293,7 +311,7 @@ function Plot({
                                   y={y(Number(r[f]), f) - 5}
                                   width="10"
                                   height="10"
-                                  fill={colors[j % colors.length]}
+                                  fill={seriesColor(f, j)}
                                 />
                               )}
                               <title>{Number(r[f]).toFixed(4)}</title>
@@ -304,7 +322,7 @@ function Plot({
                               cx={x(i)}
                               cy={y(Number(r[f]), f)}
                               r={EXCEL.marker}
-                              fill={colors[j % colors.length]}
+                              fill={seriesColor(f, j)}
                               onMouseEnter={() =>
                                 setHover(
                                   `${r.period ?? r.bin ?? r.label}: ${names[f] ?? f}=${Number(r[f]).toFixed(4)}`,
@@ -327,7 +345,7 @@ function Plot({
                       x={x(i)}
                       y={B + 22}
                       textAnchor="middle"
-                      fontSize={EXCEL.tickSize + (dualAxis ? 2 : 0)}
+                      fontSize={textSize(13)}
                     >
                       {String(r.period ?? r.bin ?? r.label ?? "")}
                       {outputId === "monthly" ? "月" : ""}
@@ -342,7 +360,7 @@ function Plot({
                 x={(L + R) / 2}
                 y={h - 4}
                 textAnchor="middle"
-                fontSize={EXCEL.tickSize}
+                fontSize={textSize(13)}
                 fill={EXCEL.text}
               >
                 {outputId === "monthly" || outputId === "density"
@@ -352,7 +370,7 @@ function Plot({
                     : outputId === "frequency"
                       ? "风速区间"
                       : outputId === "turbulence"
-                        ? "湍流强度"
+                        ? "风速 (m/s)"
                         : outputId === "weibull"
                           ? "风速(m/s)"
                           : ""}
@@ -360,18 +378,22 @@ function Plot({
               <text
                 transform={`translate(16 ${(T + B) / 2}) rotate(-90)`}
                 textAnchor="middle"
-                fontSize={EXCEL.tickSize}
+                fontSize={textSize(13)}
                 fill={EXCEL.text}
               >
-                {fields.includes("power_density")
-                  ? "风速(m/s)"
-                  : (names[fields[0]] ?? "")}
+                {outputId === "turbulence"
+                  ? "湍流强度"
+                  : fields[0] === "mean_speed"
+                    ? "风速 (m/s)"
+                    : fields[0] === "power_density"
+                      ? "风功率密度 (W/m²)"
+                      : (names[fields[0]] ?? "")}
               </text>
-              {fields.includes("power_density") && (
+              {dualAxis && (
                 <text
                   transform={`translate(${w - 8} ${(T + B) / 2}) rotate(90)`}
                   textAnchor="middle"
-                  fontSize={EXCEL.tickSize}
+                  fontSize={textSize(13)}
                   fill={colors[1]}
                 >
                   风功率密度(W/m²)
@@ -398,8 +420,8 @@ function Plot({
                     className={shape ? String(shape) : ""}
                     style={
                       box || dualAxis
-                        ? { background: colors[j % colors.length] }
-                        : { borderColor: colors[j % colors.length] }
+                        ? { background: seriesColor(f, j) }
+                        : { borderColor: seriesColor(f, j) }
                     }
                   />
                   {names[f] ?? f}
@@ -418,12 +440,14 @@ export function InteractiveResultView({
   output: initial,
   outputId,
   towerName,
+  qcCompletenessOnly = false,
   exportMode = false,
 }: {
   run: Run;
   output: RunOutput;
   outputId: string;
   towerName?: string;
+  qcCompletenessOnly?: boolean;
   exportMode?: boolean;
 }) {
   const turbulence = outputId === "turbulence";
@@ -486,22 +510,67 @@ export function InteractiveResultView({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [reportNotice, setReportNotice] = useState("");
-  const [all, setAll] = useState(exportMode),
+  const [addedReportId, setAddedReportId] = useState("");
+  const [all, setAll] = useState(exportMode && outputId !== "monthly-rose"),
     [channel, setChannel] = useState("");
-  const [hidden, setHidden] = useState<string[]>(() =>
-      turbulence ? ["mean", "std", "characteristic"] : [],
-    ),
+  const [seriesVisibility, setSeriesVisibility] = useState<
+      Record<string, boolean>
+    >({}),
     [rose, setRose] = useState("line"),
     [zoom, setZoom] = useState("1"),
-    [month, setMonth] = useState("1");
+    [month, setMonth] = useState("all");
   const [method, setMethod] = useState(
       String(run.config.weibull_method ?? "mle"),
     ),
     [sectors, setSectors] = useState(Number(run.config.sectors ?? 16));
-  const [iec, setIec] = useState(true),
-    [low, setLow] = useState(""),
+  const measurementSnapshot = original.kind === "measured-direction";
+  const localRose = ["annual-rose", "monthly-rose"].includes(outputId);
+  const [roseMetric, setRoseMetric] = useState<"direction" | "energy">(
+    !exportMode || measurementSnapshot ? "direction" : "energy",
+  );
+  const measured = localRose && roseMetric === "direction";
+  const [measuredResponse, setMeasuredResponse] = useState<{
+    sectors: number;
+    run?: Run;
+    error?: string;
+  }>();
+  const [measuredChannel, setMeasuredChannel] = useState("");
+  useEffect(() => {
+    if (!measured || measurementSnapshot || exportMode) return;
+    const controller = new AbortController();
+    api<Run>(
+      `/runs/${original.id}/measured-direction`,
+      { sectors },
+      controller.signal,
+    )
+      .then((result) => setMeasuredResponse({ sectors, run: result }))
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted)
+          setMeasuredResponse({ sectors, error: cause.message });
+      });
+    return () => controller.abort();
+  }, [measured, measurementSnapshot, exportMode, original.id, sectors]);
+  const [low, setLow] = useState(""),
     [high, setHigh] = useState("");
-  const output = run.outputs[outputId] ?? initial;
+  const chartRun =
+    measured && !measurementSnapshot
+      ? measuredResponse?.sectors === sectors
+        ? measuredResponse.run
+        : undefined
+      : run;
+  const output =
+    chartRun?.outputs[outputId] ??
+    (measured
+      ? {
+          title: "实测风向频率",
+          method: "measured-direction-frequency",
+          status: "unavailable" as const,
+          reason:
+            measuredResponse?.sectors === sectors
+              ? measuredResponse.error
+              : "正在统计实测风向…",
+        }
+      : initial);
   const rows = output.rows ?? [];
   const channels = [
     ...new Set(rows.map((r) => String(r.channel ?? "")).filter(Boolean)),
@@ -511,14 +580,16 @@ export function InteractiveResultView({
       Number(row.height ?? 0) > Number(best.height ?? 0) ? row : best,
     rows[0] ?? {},
   ).channel;
+  const channelChoice = measured ? measuredChannel : channel;
   const selected =
-    (channels.includes(channel) ? channel : "") ||
+    (channels.includes(channelChoice) ? channelChoice : "") ||
     (typeof preferred === "string" ? preferred : channels[0]) ||
     "";
   const isRose = outputId.includes("rose"),
-    completeness = outputId === "completeness";
+    rawCompleteness = outputId === "raw-records",
+    completeness = rawCompleteness || outputId === "completeness";
   const fields = turbulence
-    ? ["mean", "std", "characteristic", "representative"]
+    ? ["mean", "std", "characteristic", "representative", ...iecFields]
     : outputId === "density"
       ? ["density"]
       : ["frequency", "weibull"].includes(outputId)
@@ -528,8 +599,10 @@ export function InteractiveResultView({
             ...(outputId === "weibull" ? ["fitted_frequency"] : []),
           ]
         : ["mean_speed", "power_density"];
-  const toggle = (f: string) =>
-    setHidden((v) => (v.includes(f) ? v.filter((x) => x !== f) : [...v, f]));
+  const seriesKey = (c: string, f: string) => JSON.stringify([c, f]);
+  const isVisible = (c: string, f: string) =>
+    seriesVisibility[seriesKey(c, f)] ??
+    (!turbulence || !["mean", "std", "characteristic"].includes(f));
   async function recalculate(changes: Record<string, unknown>) {
     setBusy(true);
     setError("");
@@ -560,15 +633,15 @@ export function InteractiveResultView({
     outputId,
     all,
     channel: selected,
-    hidden,
+    seriesVisibility,
     rose,
     month,
     weibullMethod: method,
     sectors,
-    iec,
     low,
     high,
-    runId: run.id,
+    roseMetric,
+    runId: chartRun?.id ?? run.id,
     sourceRunId: original.id,
   };
   function exportReport() {
@@ -591,22 +664,6 @@ export function InteractiveResultView({
     a.click();
     URL.revokeObjectURL(a.href);
   }
-  function exportImages() {
-    document
-      .getElementById(`interactive-${outputId}`)
-      ?.querySelectorAll("svg")
-      .forEach((svg, i) => {
-        if (!svg.getBoundingClientRect().height) return;
-        const url = URL.createObjectURL(
-          new Blob([svg.outerHTML], { type: "image/svg+xml;charset=utf-8" }),
-        );
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${outputId}-${method}-${sectors}-${i + 1}.svg`;
-        a.click();
-        URL.revokeObjectURL(url);
-      });
-  }
   function addToReport() {
     const root = document.getElementById(`interactive-${outputId}`);
     if (!root) return;
@@ -617,13 +674,16 @@ export function InteractiveResultView({
       isRose &&
         outputId !== "reference-rose" &&
         (rose === "line" ? "折线" : "填充"),
-      outputId === "monthly-rose" && `${month}月`,
+      outputId === "monthly-rose" &&
+        (month === "all" ? "全年和各月" : `${month}月`),
       all ? "全部高度" : custom && selected,
     ]
       .filter(Boolean)
       .join(" · ");
     try {
-      addReportChart(title, reportSnapshot(root, output.title), config);
+      setAddedReportId(
+        addReportChart(title, reportSnapshot(root, output.title), config),
+      );
       setReportNotice("已加入报告，可在“报告导出配置”中选择。");
     } catch {
       setReportNotice("");
@@ -633,14 +693,16 @@ export function InteractiveResultView({
     }
   }
   if (completeness && output.status === "ready") {
-    const data = rows.filter((r) => r.raw_records !== undefined);
+    const data = rawCompleteness
+      ? rows
+      : rows.filter((r) => r.raw_records !== undefined);
     const towerId = runTowerName(run, towerName);
     const annualDays = Number(run.config.annual_days ?? 365);
     const tables = [
       {
         title: "实测数据完整率",
-        valid: (r: Row) => r.raw_valid,
-        expected: (r: Row) => r.expected,
+        valid: (r: Row) => (rawCompleteness ? r.valid_count : r.raw_valid),
+        expected: (r: Row) => (rawCompleteness ? r.expected_count : r.expected),
       },
       {
         title: "实测有效数据完整率",
@@ -655,7 +717,12 @@ export function InteractiveResultView({
     ];
     return (
       <div>
-        {tables.map((t) => (
+        {(rawCompleteness
+          ? tables.slice(0, 1)
+          : qcCompletenessOnly
+            ? tables.slice(1, 2)
+            : tables
+        ).map((t) => (
           <section key={t.title}>
             <h3>{t.title}</h3>
             <DataTable
@@ -682,11 +749,13 @@ export function InteractiveResultView({
             />
           </section>
         ))}
-        <p>
-          实测完整率使用原始有效数和应测数，实测有效完整率使用质控有效数和同期原始记录数。完整年按{" "}
-          {annualDays} 天及数据步长计数，10 分钟数据每天 144
-          条。缺少分析时段或有效分母的单元格显示为“—”。
-        </p>
+        {!rawCompleteness && !qcCompletenessOnly && (
+          <p>
+            实测完整率使用原始有效数和应测数，实测有效完整率使用质控有效数和同期原始记录数。完整年按{" "}
+            {annualDays} 天及数据步长计数，10 分钟数据每天 144
+            条。缺少分析时段或有效分母的单元格显示为“—”。
+          </p>
+        )}
       </div>
     );
   }
@@ -700,6 +769,9 @@ export function InteractiveResultView({
     "annual-rose",
     "monthly-rose",
   ].includes(outputId);
+  const hasChartSettings =
+    (custom && outputId !== "density") ||
+    ["correlation", "shear"].includes(outputId);
   return (
     <div id={`interactive-${outputId}`}>
       {!exportMode && (
@@ -716,279 +788,311 @@ export function InteractiveResultView({
           )}
         />
       )}
-      <div className="ww-panel">
-        <button
-          className="ww-button"
-          disabled={busy || output.status !== "ready"}
-          onClick={addToReport}
-        >
-          加入报告（保留当前算法与显示配置）
-        </button>
-        {reportNotice && <p role="status">{reportNotice}</p>}
-        {isRose && (
-          <label>
-            风向高度
-            <select
-              disabled={busy}
-              value={String(run.config.direction_channel ?? "")}
-              onChange={(e) =>
-                void recalculate({ direction_channel: e.target.value })
-              }
-            >
-              {directions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  WD-{c.height}m · {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button className="ww-button" onClick={exportImages}>
-          导出当前交互图SVG
-        </button>
-        <div className="ww-fields ww-fields-three">
-          {channels.length > 0 && (
-            <label>
-              通道
-              <select
-                value={selected}
-                onChange={(e) => setChannel(e.target.value)}
-              >
-                {channels.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          {custom && (
-            <label>
-              <input
-                type="checkbox"
-                checked={all}
-                disabled={busy}
-                onChange={(e) => {
-                  setAll(e.target.checked);
-                  if (isRose && run.kind === "analysis") {
-                    void recalculate({
-                      result_channels: [],
-                      rose_all_directions: e.target.checked,
-                    });
-                    return;
-                  }
-                  if (
-                    e.target.checked &&
-                    run.kind === "analysis" &&
-                    Array.isArray(run.config.result_channels) &&
-                    run.config.result_channels.length > 0
-                  )
-                    void recalculate({ result_channels: [] });
-                }}
-              />
-              全部高度分图
-            </label>
-          )}
-          {run.kind === "analysis" && (
+      <div className="ww-panel ww-chart-controls">
+        <div className="ww-chart-actions">
+          <button
+            className="ww-button"
+            disabled={busy || output.status !== "ready"}
+            onClick={addToReport}
+          >
+            加入报告
+          </button>
+          {addedReportId && (
             <button
               className="ww-button"
-              disabled={busy}
-              onClick={() => void recalculate({ result_channels: [] })}
+              onClick={() => {
+                try {
+                  removeReportChart(addedReportId);
+                  setAddedReportId("");
+                  setReportNotice("已撤销加入报告。");
+                } catch {
+                  setError("未能撤销，请在报告导出配置中重试。");
+                }
+              }}
             >
-              载入全部高度并重算
+              撤销加入
             </button>
           )}
-          {outputId === "weibull" && (
-            <label>
-              拟合算法
-              <select
-                disabled={busy}
-                value={method}
-                onChange={(e) => {
-                  setMethod(e.target.value);
-                  void recalculate({ weibull_method: e.target.value });
-                }}
+          <details className="ww-details">
+            <summary>更多导出</summary>
+            <div className="ww-chart-actions">
+              <button className="ww-button" onClick={exportReport}>
+                本图报告（HTML）
+              </button>
+              <button
+                className="ww-button"
+                onClick={() => downloadJson(config, `chart-${outputId}.json`)}
               >
-                <option value="mle">最大似然 MLE（默认）</option>
-                <option value="least-squares">累计概率线性最小二乘</option>
-                <option value="moments">矩估计</option>
-                <option value="energy">均速与能量匹配</option>
-              </select>
-            </label>
-          )}
-          {(outputId === "correlation" || isRose) && (
-            <label>
-              方位扇区
-              <select
-                value={sectors}
-                disabled={busy}
-                onChange={(e) => {
-                  setSectors(Number(e.target.value));
-                  void recalculate({ sectors: Number(e.target.value) });
-                }}
-              >
-                {[1, 8, 12, 16, 36]
-                  .filter((n) => !isRose || n > 1)
-                  .map((n) => (
-                    <option key={n}>{n}</option>
+                图表设置备份（JSON）
+              </button>
+            </div>
+          </details>
+        </div>
+        {reportNotice && <p role="status">{reportNotice}</p>}
+        {hasChartSettings && (
+          <div className="ww-fields ww-fields-three">
+            {localRose && (
+              <label>
+                显示内容
+                <select
+                  value={roseMetric}
+                  onChange={(event) => {
+                    const metric = event.target.value as "direction" | "energy";
+                    setRoseMetric(metric);
+                    if (
+                      metric === "energy" &&
+                      sectors !== Number(run.config.sectors ?? 16)
+                    )
+                      void recalculate({ sectors });
+                  }}
+                >
+                  <option value="direction">实测风向</option>
+                  <option value="energy">风能分布</option>
+                </select>
+              </label>
+            )}
+            {localRose && !measured && (
+              <label>
+                风向高度
+                <select
+                  disabled={busy}
+                  value={String(run.config.direction_channel ?? "")}
+                  onChange={(e) =>
+                    void recalculate({ direction_channel: e.target.value })
+                  }
+                >
+                  {directions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      WD-{c.height}m · {c.name}
+                    </option>
                   ))}
-              </select>
-            </label>
-          )}
-          {isRose && (
-            <>
-              {custom && (
-                <>
+                </select>
+              </label>
+            )}
+            {custom && channels.length > 1 && (
+              <label>
+                {measured
+                  ? "实测风向高度"
+                  : localRose
+                    ? "风能计算风速通道"
+                    : "通道"}
+                <select
+                  value={selected}
+                  disabled={all}
+                  onChange={(e) =>
+                    (measured ? setMeasuredChannel : setChannel)(e.target.value)
+                  }
+                >
+                  {channels.map((c) => (
+                    <option key={c} value={c}>
+                      {measured
+                        ? (() => {
+                            const row = rows.find(
+                              (entry) => entry.channel === c,
+                            );
+                            return `WD-${row?.height}m · ${row?.direction_name}`;
+                          })()
+                        : c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {custom && outputId !== "density" && (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={all}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setAll(e.target.checked);
+                    if (measured) return;
+                    if (isRose && run.kind === "analysis") {
+                      void recalculate({
+                        result_channels: [],
+                        rose_all_directions: e.target.checked,
+                      });
+                      return;
+                    }
+                    if (
+                      e.target.checked &&
+                      run.kind === "analysis" &&
+                      Array.isArray(run.config.result_channels) &&
+                      run.config.result_channels.length > 0
+                    )
+                      void recalculate({ result_channels: [] });
+                  }}
+                />
+                {measured ? "全部实测风向高度" : "全部高度分图"}
+              </label>
+            )}
+            {outputId === "weibull" && (
+              <label>
+                拟合算法
+                <select
+                  disabled={busy}
+                  value={method}
+                  onChange={(e) => {
+                    setMethod(e.target.value);
+                    void recalculate({ weibull_method: e.target.value });
+                  }}
+                >
+                  <option value="mle">最大似然 MLE（默认）</option>
+                  <option value="least-squares">累计概率线性最小二乘</option>
+                  <option value="moments">矩估计</option>
+                  <option value="energy">均速与能量匹配</option>
+                </select>
+              </label>
+            )}
+            {(outputId === "correlation" || (isRose && custom)) && (
+              <label>
+                方位扇区
+                <select
+                  value={sectors}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setSectors(Number(e.target.value));
+                    if (!measured)
+                      void recalculate({ sectors: Number(e.target.value) });
+                  }}
+                >
+                  {[1, 8, 12, 16, 36]
+                    .filter((n) => !isRose || n > 1)
+                    .map((n) => (
+                      <option key={n}>{n}</option>
+                    ))}
+                </select>
+              </label>
+            )}
+            {isRose && (
+              <>
+                {custom && (
+                  <>
+                    <label>
+                      玫瑰图样式
+                      <select
+                        value={rose}
+                        onChange={(e) => setRose(e.target.value)}
+                      >
+                        <option value="line">雷达折线</option>
+                        <option value="filled">填充雷达</option>
+                      </select>
+                    </label>
+                    <label>
+                      图表缩放
+                      <select
+                        value={zoom}
+                        onChange={(e) => setZoom(e.target.value)}
+                      >
+                        <option value="1">100%</option>
+                        <option value="1.25">125%</option>
+                        <option value="1.5">150%</option>
+                        <option value="2">200%</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+                {outputId === "monthly-rose" && (
                   <label>
-                    玫瑰图样式
+                    月份
                     <select
-                      value={rose}
-                      onChange={(e) => setRose(e.target.value)}
+                      value={month}
+                      onChange={(e) => setMonth(e.target.value)}
                     >
-                      <option value="line">中心留白折线</option>
-                      <option value="filled">中心留白填充扇环</option>
+                      <option value="all">全年及各月</option>
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <option key={i} value={i + 1}>
+                          {i + 1}月
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <label>
-                    图表缩放
-                    <select
-                      value={zoom}
-                      onChange={(e) => setZoom(e.target.value)}
-                    >
-                      <option value="1">100%</option>
-                      <option value="1.25">125%</option>
-                      <option value="1.5">150%</option>
-                      <option value="2">200%</option>
-                    </select>
-                  </label>
-                </>
-              )}
-              {outputId === "monthly-rose" && (
+                )}
+              </>
+            )}
+            {outputId === "shear" && (
+              <>
                 <label>
-                  月份
+                  低层m
                   <select
-                    value={month}
-                    onChange={(e) => setMonth(e.target.value)}
+                    disabled={busy}
+                    value={low}
+                    aria-label="低层m"
+                    onChange={(e) => {
+                      setLow(e.target.value);
+                      void choosePair(e.target.value, high);
+                    }}
                   >
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <option key={i}>{i + 1}</option>
+                    <option value="">请选择高度</option>
+                    {layers.map((c) => (
+                      <option key={c.id} value={c.height}>
+                        {c.height}m
+                      </option>
                     ))}
                   </select>
                 </label>
-              )}
-            </>
-          )}
-          {turbulence && (
-            <label>
-              <input
-                type="checkbox"
-                checked={iec}
-                onChange={(e) => setIec(e.target.checked)}
-              />
-              IEC 61400-1 第3版 A/B/C 参考曲线
-            </label>
-          )}
-          {outputId === "shear" && (
-            <>
-              <label>
-                低层m
-                <select
-                  disabled={busy}
-                  value={low}
-                  aria-label="低层m"
-                  onChange={(e) => {
-                    setLow(e.target.value);
-                    void choosePair(e.target.value, high);
+                <label>
+                  高层m
+                  <select
+                    disabled={busy}
+                    value={high}
+                    aria-label="高层m"
+                    onChange={(e) => {
+                      setHigh(e.target.value);
+                      void choosePair(low, e.target.value);
+                    }}
+                  >
+                    <option value="">请选择高度</option>
+                    {layers.map((c) => (
+                      <option key={c.id} value={c.height}>
+                        {c.height}m
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="ww-button"
+                  onClick={async () => {
+                    try {
+                      const d = await api<{
+                        channels: {
+                          id: string;
+                          height: number;
+                          quantity: string;
+                          statistic: string;
+                        }[];
+                      }>(`/datasets/${run.config.qc_id}`);
+                      const ids = [Number(low), Number(high)].map((h) =>
+                        d.channels.filter(
+                          (c) =>
+                            c.height === h &&
+                            c.quantity === "speed" &&
+                            c.statistic === "mean",
+                        ),
+                      );
+                      if (
+                        Number(low) >= Number(high) ||
+                        ids.some((c) => c.length !== 1)
+                      )
+                        throw new Error(
+                          "请选择两个不同高度且通道唯一的实测层。",
+                        );
+                      await recalculate({
+                        shear_channels: ids.map((c) => c[0].id),
+                      });
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
                   }}
                 >
-                  <option value="">请选择高度</option>
-                  {layers.map((c) => (
-                    <option key={c.id} value={c.height}>
-                      {c.height}m
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                高层m
-                <select
-                  disabled={busy}
-                  value={high}
-                  aria-label="高层m"
-                  onChange={(e) => {
-                    setHigh(e.target.value);
-                    void choosePair(low, e.target.value);
-                  }}
-                >
-                  <option value="">请选择高度</option>
-                  {layers.map((c) => (
-                    <option key={c.id} value={c.height}>
-                      {c.height}m
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="ww-button"
-                onClick={async () => {
-                  try {
-                    const d = await api<{
-                      channels: {
-                        id: string;
-                        height: number;
-                        quantity: string;
-                        statistic: string;
-                      }[];
-                    }>(`/datasets/${run.config.qc_id}`);
-                    const ids = [Number(low), Number(high)].map((h) =>
-                      d.channels.filter(
-                        (c) =>
-                          c.height === h &&
-                          c.quantity === "speed" &&
-                          c.statistic === "mean",
-                      ),
-                    );
-                    if (
-                      Number(low) >= Number(high) ||
-                      ids.some((c) => c.length !== 1)
-                    )
-                      throw new Error("请选择两个不同高度且通道唯一的实测层。");
-                    await recalculate({
-                      shear_channels: ids.map((c) => c[0].id),
-                    });
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
-                }}
-              >
-                选择高度对并重算
-              </button>
-            </>
-          )}
-        </div>
-        {custom && (
-          <div className="ww-result-toolbar">
-            {fields.map((f) => (
-              <label key={f}>
-                <input
-                  type="checkbox"
-                  checked={!hidden.includes(f)}
-                  onChange={() => toggle(f)}
-                />
-                {names[f]}
-              </label>
-            ))}
+                  选择高度对并重算
+                </button>
+              </>
+            )}
           </div>
         )}
         {busy && <p role="status">正在计算，完成后更新图表…</p>}
         {error && <p role="alert">{error}</p>}
-        <button
-          className="ww-button"
-          onClick={() => downloadJson(config, `chart-${outputId}.json`)}
-        >
-          导出当前图表配置
-        </button>{" "}
-        <button className="ww-button" onClick={exportReport}>
-          导出本图报告（HTML）
-        </button>
       </div>
       {custom && output.status === "ready" ? (
         <>
@@ -998,10 +1102,21 @@ export function InteractiveResultView({
                 (!c || r.channel === c) &&
                 (!isRose ||
                   outputId !== "monthly-rose" ||
+                  month === "all" ||
                   Number(r.month) === Number(month)),
             );
             const height = subset[0]?.height ?? "";
-            if (turbulence && iec) {
+            const roseLabel = measured
+              ? `风向 · WD-${height}m`
+              : `风能 · WPD-${height}m`;
+            const showRoseYear = outputId === "monthly-rose" && month === "all";
+            const yearRoseRows = showRoseYear
+              ? (chartRun?.outputs["annual-rose"]?.rows?.filter(
+                  (row) => row.channel === c,
+                ) ?? [])
+              : [];
+
+            if (turbulence) {
               subset = subset.map((r) => {
                 const v = Number(r.bin);
                 return {
@@ -1035,8 +1150,12 @@ export function InteractiveResultView({
                   }
                 : undefined;
             return (
-              <section className="ww-panel" key={c}>
-                <h3>{c || output.title}</h3>
+              <section className="ww-panel ww-tier-chart" key={c}>
+                <h3>
+                  {measured
+                    ? String(subset[0]?.direction_name ?? output.title)
+                    : c || output.title}
+                </h3>
                 {outputId === "weibull" && (
                   <p>
                     拟合方法：{method} · k=
@@ -1054,88 +1173,119 @@ export function InteractiveResultView({
                     m/s
                   </p>
                 )}
-                {!isRose && (
-                  <div className="ww-result-toolbar">
-                    {fields.map((f) => (
-                      <label key={f}>
-                        <input
-                          type="checkbox"
-                          checked={!hidden.includes(c + f)}
-                          onChange={() => toggle(c + f)}
-                        />
-                        {names[f]}-{String(height)}m
-                      </label>
-                    ))}
-                  </div>
-                )}
-                {isRose ? (
-                  (rose === "both" ? ["line", "filled"] : [rose]).map(
-                    (style) => (
-                      <div className="ww-rose-stack" key={style}>
+                <div
+                  className={
+                    all && !showRoseYear ? "ww-chart-table-pair" : undefined
+                  }
+                >
+                  <div>
+                    {isRose ? (
+                      <div className="ww-rose-stack">
                         <RoseChart
-                          rows={subset}
-                          title={`WD-${String(subset[0]?.direction_height ?? output.summary?.direction_height ?? height)}m · ${style}`}
-                          rose={style}
+                          rows={showRoseYear ? yearRoseRows : subset}
+                          title={showRoseYear ? `全年${roseLabel}` : roseLabel}
+                          rose={rose}
                           zoom={zoom}
+                          energy={!measured}
                         />
-                        <RoseChart
-                          rows={subset}
-                          title={`WPD-${height}m · ${style}`}
-                          rose={style}
-                          energy
-                          zoom={zoom}
-                        />
+                        {showRoseYear && (
+                          <div className="ww-rose-month-grid">
+                            {Array.from(
+                              { length: 12 },
+                              (_, index) => index + 1,
+                            ).map((m) => (
+                              <RoseChart
+                                compact
+                                key={m}
+                                rows={subset.filter(
+                                  (row) => Number(row.month) === m,
+                                )}
+                                title={`${m}月 · ${roseLabel}`}
+                                rose={rose}
+                                energy={!measured}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ),
-                  )
-                ) : (
-                  <Plot
-                    rows={subset}
-                    fields={[
-                      ...fields.filter(
-                        (f) => !hidden.includes(f) && !hidden.includes(c + f),
-                      ),
-                      ...(turbulence && iec
-                        ? ["IEC_A", "IEC_B", "IEC_C"].filter(
-                            (f) => !hidden.includes(f),
-                          )
-                        : []),
-                    ]}
-                    title={`${fields.includes("mean_speed") ? `WS-${height}m / WPD-${height}m` : output.title}`}
-                    outputId={outputId}
-                    density={outputId === "density"}
-                  />
-                )}
-                <DataTable rows={subset} footer={densityFooter} />
+                    ) : (
+                      <>
+                        {!exportMode && fields.length > 1 && (
+                          <div
+                            className="ww-result-toolbar ww-series-options"
+                            role="group"
+                            aria-label="图上线条"
+                          >
+                            {fields.map((f) => (
+                              <label key={f}>
+                                <input
+                                  type="checkbox"
+                                  checked={isVisible(c, f)}
+                                  onChange={(event) => {
+                                    const checked = event.target.checked;
+                                    setSeriesVisibility((previous) => ({
+                                      ...previous,
+                                      [seriesKey(c, f)]: checked,
+                                    }));
+                                  }}
+                                />
+                                {names[f] ?? f.replace("_", " ")}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        <Plot
+                          rows={subset}
+                          fields={fields.filter((f) => isVisible(c, f))}
+                          title={
+                            fields.includes("mean_speed")
+                              ? `WS-${height}m / WPD-${height}m`
+                              : output.title
+                          }
+                          outputId={outputId}
+                          density={outputId === "density"}
+                        />
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <DataTable rows={subset} footer={densityFooter} />
+                  </div>
+                </div>
               </section>
             );
           })}
-          {turbulence && iec && (
-            <p className="ww-inline-note">
-              IEC参考为代表湍流曲线 Iref·(0.75+5.6/V)，A/B/C的Iref为
-              0.16/0.14/0.12；S类按项目要求暂不显示。默认显示代表TI，可在上方勾选平均、特征或标准差湍流。
-              {["IEC_A", "IEC_B", "IEC_C"].map((f) => (
-                <label key={f}>
-                  <input
-                    type="checkbox"
-                    checked={!hidden.includes(f)}
-                    onChange={() => toggle(f)}
-                  />
-                  {f}
-                </label>
-              ))}
-            </p>
-          )}
         </>
       ) : (
-        <BaseResultView run={run} output={output} outputId={outputId} />
+        <BaseResultView
+          run={chartRun ?? run}
+          output={output}
+          outputId={outputId}
+          exportMode={exportMode}
+        />
       )}
-      {custom && (
-        <details>
-          <summary>原始统计表、参数与SVG/CSV导出</summary>
-          <BaseResultView run={run} output={output} outputId={outputId} />
-        </details>
-      )}
+      {custom &&
+        (!localRose ? (
+          <details>
+            <summary>原始统计表、参数与SVG/CSV导出</summary>
+            <BaseResultView
+              run={chartRun ?? run}
+              output={output}
+              outputId={outputId}
+            />
+          </details>
+        ) : (
+          chartRun &&
+          output.status === "ready" &&
+          !exportMode && (
+            <a
+              className="ww-button"
+              href={`/api/v1/runs/${chartRun.id}/tables/${outputId}.csv`}
+            >
+              下载完整数据（CSV）
+            </a>
+          )
+        ))}
     </div>
   );
 }

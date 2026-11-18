@@ -1,6 +1,8 @@
-import { useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import type { Run, RunOutput } from "./api";
+import { api } from "./api";
+import { ChartTextScale } from "./chartText";
 import { readCharts, removeReportChart } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 import type { ReportSection } from "./reportSnapshot";
@@ -29,6 +31,7 @@ export default function ReportExport({
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [allSaved, setAllSaved] = useState(readCharts);
+  const textScale = useContext(ChartTextScale);
   const controlId = useId();
   const entries = runs.flatMap(({ run, label }) =>
     Object.entries(run.outputs)
@@ -84,10 +87,18 @@ export default function ReportExport({
       setStatus("正在整理选定成果…");
       const { renderToStaticMarkup } = await import("react-dom/server");
       const sections: ReportSection[] = [];
-      for (const { run, outputId, output, title: sectionTitle } of chosen) {
+      const directionRuns = new Map<string, Run>();
+      function append(
+        run: Run,
+        outputId: string,
+        output: RunOutput,
+        sectionTitle: string,
+      ) {
         const fragment = document.createElement("template");
         fragment.innerHTML = renderToStaticMarkup(
-          renderOutput(run, outputId, output),
+          <ChartTextScale.Provider value={textScale}>
+            {renderOutput(run, outputId, output)}
+          </ChartTextScale.Provider>,
         );
         sections.push({
           run_id: run.id,
@@ -95,6 +106,31 @@ export default function ReportExport({
           title: sectionTitle,
           html: reportSnapshot(fragment.content, sectionTitle),
         });
+      }
+      for (const { run, outputId, output, title: sectionTitle } of chosen) {
+        if (
+          run.kind === "analysis" &&
+          ["annual-rose", "monthly-rose"].includes(outputId)
+        ) {
+          let measured = directionRuns.get(run.id);
+          if (!measured) {
+            measured = await api<Run>(`/runs/${run.id}/measured-direction`, {
+              sectors: run.config.sectors ?? 16,
+            });
+            directionRuns.set(run.id, measured);
+          }
+          const direction = measured.outputs[outputId];
+          if (direction?.status === "ready")
+            append(measured, outputId, direction, direction.title);
+          append(
+            run,
+            outputId,
+            output,
+            outputId === "monthly-rose" ? "全年及各月风能分布" : "全年风能分布",
+          );
+        } else {
+          append(run, outputId, output, sectionTitle);
+        }
       }
       for (const chart of chosenSaved) {
         sections.push({

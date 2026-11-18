@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { localInput, useErrorFocus } from "./autoSetup";
 import { correlationErrors, heightPairs, sourceLabel } from "./model";
 import type { CorrelationDraft, WorkspaceViewProps } from "./model";
@@ -36,8 +36,38 @@ export default function CorrelationSetup({
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
-  const draft = state.correlation;
-  const left = state.files.find((f) => f.id === draft.leftFileId);
+  const savedDraft = state.correlation;
+  const left = state.files.find((f) => f.id === savedDraft.leftFileId);
+  const measured =
+    left?.kind === "result"
+      ? (state.files.find(
+          (f) => f.towerId === left.towerId && f.kind === "qc" && f.dataset,
+        ) ??
+        state.files.find(
+          (f) => f.towerId === left.towerId && f.kind === "raw" && f.dataset,
+        ))
+      : left;
+  const directionSource = state.files.find(
+    (f) => f.id === savedDraft.directionFileId,
+  )?.dataset;
+  const measuredHeight = Math.max(
+    0,
+    ...means(measured?.dataset).map((c) => c.height),
+  );
+  const availableDirectionHeights = means(directionSource, "direction").map(
+    (c) => c.height,
+  );
+  const defaultHeight =
+    measuredHeight &&
+    (!directionSource || availableDirectionHeights.includes(measuredHeight))
+      ? measuredHeight
+      : Math.max(0, ...availableDirectionHeights);
+  const draft = {
+    ...savedDraft,
+    directionHeight:
+      savedDraft.directionHeight ||
+      (defaultHeight ? String(defaultHeight) : ""),
+  };
   const targets = state.files.filter((f) => f.kind !== "reference");
   const comparisons = state.files.filter((f) =>
     draft.mode === "reference"
@@ -45,10 +75,29 @@ export default function CorrelationSetup({
       : f.kind !== "reference" && f.towerId !== left?.towerId,
   );
   const pairs = heightPairs(draft);
-  const errors = correlationErrors(state);
-  const errorsRef = useErrorFocus<HTMLUListElement>(
-    showErrors && errors.length ? errors.join("；") : "",
-  );
+  const errors = correlationErrors({ ...state, correlation: draft });
+  const formId = useId();
+  function fieldProps(field: keyof CorrelationDraft) {
+    const invalid = showErrors && errors.some((error) => error.field === field);
+    return {
+      id: `${formId}-${field}`,
+      "aria-invalid": invalid || undefined,
+      "aria-describedby": invalid ? `${formId}-${field}-error` : undefined,
+    };
+  }
+  function fieldError(field: keyof CorrelationDraft) {
+    const message =
+      showErrors && errors.find((error) => error.field === field)?.message;
+    return message ? (
+      <span
+        className="ww-field-error"
+        role="alert"
+        id={`${formId}-${field}-error`}
+      >
+        {message}
+      </span>
+    ) : null;
+  }
   const apiErrorRef = useErrorFocus<HTMLParagraphElement>(apiError);
   const alignment = alignedPeriod(
     state.files,
@@ -102,7 +151,12 @@ export default function CorrelationSetup({
   }
   async function save() {
     setShowErrors(true);
-    if (errors.length) return;
+    if (errors.length) {
+      const control = document.getElementById(`${formId}-${errors[0].field}`);
+      control?.focus({ preventScroll: true });
+      control?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     setBusy(true);
     setApiError("");
     try {
@@ -252,6 +306,7 @@ export default function CorrelationSetup({
             <label className="ww-wide">
               目标数据（Y）
               <select
+                {...fieldProps("leftFileId")}
                 value={draft.leftFileId}
                 onChange={(e) => selectFile("leftFileId", e.target.value)}
               >
@@ -262,11 +317,13 @@ export default function CorrelationSetup({
                   </option>
                 ))}
               </select>
+              {fieldError("leftFileId")}
             </label>
             {draft.mode !== "same-tower" && (
               <label className="ww-wide">
                 对比数据（X）
                 <select
+                  {...fieldProps("rightFileId")}
                   value={draft.rightFileId}
                   onChange={(e) => selectFile("rightFileId", e.target.value)}
                 >
@@ -281,6 +338,7 @@ export default function CorrelationSetup({
                     </option>
                   ))}
                 </select>
+                {fieldError("rightFileId")}
               </label>
             )}
             <label className={draft.mode === "same-tower" ? "ww-wide" : ""}>
@@ -288,6 +346,7 @@ export default function CorrelationSetup({
                 ? "参与配对的风速高度（m）"
                 : "目标风速高度（m）"}
               <input
+                {...fieldProps("leftHeights")}
                 value={draft.leftHeights}
                 onChange={(e) => change("leftHeights", e.target.value)}
                 placeholder="例如 50, 70, 100, 120"
@@ -297,32 +356,39 @@ export default function CorrelationSetup({
                   ? "两两组合，每个高度对生成一组图。"
                   : "多高度将与对比高度逐一配对。"}
               </small>
+              {fieldError("leftHeights")}
             </label>
             {draft.mode !== "same-tower" && (
               <label>
                 对比风速高度（m）
                 <input
+                  {...fieldProps("rightHeights")}
                   value={draft.rightHeights}
                   onChange={(e) => change("rightHeights", e.target.value)}
                   placeholder="例如 100"
                 />
+                {fieldError("rightHeights")}
               </label>
             )}
             <label>
               相关性开始时间
               <input
                 type="datetime-local"
+                {...fieldProps("start")}
                 value={draft.start}
                 onChange={(e) => change("start", e.target.value)}
               />
+              {fieldError("start")}
             </label>
             <label>
               相关性结束时间
               <input
                 type="datetime-local"
+                {...fieldProps("end")}
                 value={draft.end}
                 onChange={(e) => change("end", e.target.value)}
               />
+              {fieldError("end")}
             </label>
             <div className="ww-align-hint">
               <small>
@@ -386,6 +452,7 @@ export default function CorrelationSetup({
                 <label>
                   划分扇区的风向来源
                   <select
+                    {...fieldProps("directionFileId")}
                     value={draft.directionFileId}
                     onChange={(e) => change("directionFileId", e.target.value)}
                   >
@@ -396,16 +463,27 @@ export default function CorrelationSetup({
                       </option>
                     ))}
                   </select>
+                  {fieldError("directionFileId")}
                 </label>
                 <label>
                   风向参考高度（m）
                   <input
                     type="number"
                     min="1"
+                    {...fieldProps("directionHeight")}
                     value={draft.directionHeight}
                     placeholder="例如 120"
                     onChange={(e) => change("directionHeight", e.target.value)}
                   />
+                  {!savedDraft.directionHeight &&
+                    measuredHeight > 0 &&
+                    defaultHeight !== measuredHeight && (
+                      <small>
+                        最高实测风速为 {measuredHeight}
+                        m，所选文件无同高风向，已优先使用最高可用风向层。
+                      </small>
+                    )}
+                  {fieldError("directionHeight")}
                 </label>
               </>
             )}
@@ -465,18 +543,6 @@ export default function CorrelationSetup({
             : "填写高度后可查看配对数量"}
         </p>
       </div>
-      {showErrors && errors.length > 0 && (
-        <ul
-          className="ww-error-list"
-          role="alert"
-          ref={errorsRef}
-          tabIndex={-1}
-        >
-          {errors.map((message) => (
-            <li key={message}>{message}</li>
-          ))}
-        </ul>
-      )}
       <section className="ww-panel">
         <h3>同期对齐与同高通道确认</h3>
         <div className="ww-fields ww-fields-three">

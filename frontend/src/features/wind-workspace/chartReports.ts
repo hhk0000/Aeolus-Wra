@@ -28,14 +28,13 @@ export function addReportChart(
   html: string,
   config: Record<string, unknown>,
 ) {
+  const id = crypto.randomUUID();
   localStorage.setItem(
     key,
-    JSON.stringify([
-      ...readCharts(),
-      { id: crypto.randomUUID(), title, html, config },
-    ]),
+    JSON.stringify([...readCharts(), { id, title, html, config }]),
   );
   window.dispatchEvent(new Event("aeolus-report-change"));
+  return id;
 }
 
 export function removeReportChart(id: string) {

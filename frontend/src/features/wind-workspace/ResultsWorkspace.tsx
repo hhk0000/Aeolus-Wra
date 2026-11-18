@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { activateTower } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
-import type { SourceKind, WorkspaceTab, WorkspaceViewProps } from "./model";
+import type {
+  OutputSpec,
+  SourceKind,
+  WorkspaceTab,
+  WorkspaceViewProps,
+} from "./model";
 import { ResultView } from "./ResultView";
 import WorkspaceReportExport from "./WorkspaceReportExport";
 import TowerComparison from "./TowerComparison";
+import { ChartTextScale } from "./chartText";
 import "./workspace.css";
 
 interface ResultsProps extends WorkspaceViewProps {
@@ -21,10 +27,54 @@ export function ResultsWorkspace({
   const [activeId, setActiveId] = useState("");
   const [pairIndex, setPairIndex] = useState(0);
   const [compare, setCompare] = useState(false);
+  const [textScale, setTextScale] = useState("1");
   const selected = OUTPUTS.filter((o) => state.selectedOutputs.includes(o.id));
-  const filtered = selected.filter(
-    (o) => filter === "all" || o.kind === filter,
-  );
+  const filtered = selected.flatMap<OutputSpec>((o) => {
+    if (o.id === "completeness" && filter === "raw")
+      return [
+        {
+          ...o,
+          id: "raw-records",
+          kind: "raw",
+          required: ["raw"],
+          title: "实测数据完整率",
+          description: "按原始有效记录数和应测数统计",
+        },
+      ];
+    if (o.id === "completeness" && filter === "qc")
+      return [
+        {
+          ...o,
+          title: "实测有效数据完整率",
+          description: "按质控有效记录数和同期原始记录数统计",
+        },
+      ];
+    return filter === "all" || o.kind === filter ? [o] : [];
+  });
+  const gallery = useRef<HTMLDivElement>(null);
+  const filterBar = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const bar = filterBar.current;
+    const root = gallery.current;
+    if (!bar || !root) return;
+    const update = () =>
+      root.style.setProperty("--ww-filter-height", `${bar.offsetHeight}px`);
+    const observer = new ResizeObserver(update);
+    observer.observe(bar);
+    update();
+    return () => observer.disconnect();
+  }, [compare]);
+  function showStage() {
+    const panel = stage.current;
+    const bar = filterBar.current;
+    if (!panel || !bar) return;
+    const navigationBottom = bar.getBoundingClientRect().bottom;
+    if (panel.getBoundingClientRect().top < navigationBottom)
+      window.scrollBy({
+        top: panel.getBoundingClientRect().top - navigationBottom - 12,
+      });
+  }
   const active = filtered.find((o) => o.id === activeId) ?? filtered[0];
   const tower = state.towers.find((t) => t.id === state.activeTowerId)!;
   const run =
@@ -45,9 +95,13 @@ export function ResultsWorkspace({
   const pairRun =
     job?.runs?.[Math.min(pairIndex, (job?.runs?.length ?? 1) - 1)];
   if (compare)
-    return <TowerComparison state={state} onBack={() => setCompare(false)} />;
+    return (
+      <ChartTextScale.Provider value={Number(textScale)}>
+        <TowerComparison state={state} onBack={() => setCompare(false)} />
+      </ChartTextScale.Provider>
+    );
   return (
-    <div className="ww-results">
+    <div className="ww-results" ref={gallery}>
       <section className="ww-results-hero">
         <div className="ww-results-hero-copy">
           <span className="ww-overline">CHART & TABLE COLLECTION</span>
@@ -71,7 +125,7 @@ export function ResultsWorkspace({
           </button>
         </div>
       </section>
-      <div className="ww-gallery-filter">
+      <div className="ww-gallery-filter" ref={filterBar}>
         <div role="group" aria-label="图表来源筛选">
           {(
             [
@@ -88,6 +142,7 @@ export function ResultsWorkspace({
                 setFilter(id);
                 setActiveId("");
                 setPairIndex(0);
+                showStage();
               }}
             >
               {label}
@@ -99,6 +154,17 @@ export function ResultsWorkspace({
             多塔对比
           </button>
           <span className="ww-gallery-count">共 {filtered.length} 组</span>
+          <label>
+            坐标字号
+            <select
+              value={textScale}
+              onChange={(event) => setTextScale(event.target.value)}
+            >
+              <option value="0.85">小</option>
+              <option value="1">标准</option>
+              <option value="1.25">大</option>
+            </select>
+          </label>
           <label>
             测风塔
             <select
@@ -127,6 +193,7 @@ export function ResultsWorkspace({
                   onClick={() => {
                     setActiveId(j.id);
                     setPairIndex(0);
+                    showStage();
                   }}
                 >
                   <span>
@@ -141,7 +208,10 @@ export function ResultsWorkspace({
                 <button
                   key={o.id}
                   className={active?.id === o.id ? "active" : ""}
-                  onClick={() => setActiveId(o.id)}
+                  onClick={() => {
+                    setActiveId(o.id);
+                    showStage();
+                  }}
                 >
                   <span className={`ww-mini-source ${o.kind}`} />
                   <span>
@@ -152,114 +222,122 @@ export function ResultsWorkspace({
                 </button>
               ))}
         </aside>
-        <section className="ww-panel ww-chart-stage">
-          {filter === "correlation" ? (
-            job ? (
+        <ChartTextScale.Provider value={Number(textScale)}>
+          <section className="ww-panel ww-chart-stage" ref={stage}>
+            {filter === "correlation" ? (
+              job ? (
+                <>
+                  <div className="ww-section-heading">
+                    <div>
+                      <h2>同期相关性散点图组</h2>
+                      <p>{job.sourceLabels.join(" ↔ ")}</p>
+                    </div>
+                  </div>
+                  <div className="ww-correlation-caption">
+                    <label>
+                      高度对（Y ↔ X）
+                      <select
+                        value={Math.min(pairIndex, job.pairs.length - 1)}
+                        onChange={(e) => setPairIndex(Number(e.target.value))}
+                      >
+                        {job.pairs.map(([a, b], i) => (
+                          <option key={i} value={i}>
+                            {a}m ↔ {b}m
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span>
+                      {job.start} → {job.end}（终点不含）
+                    </span>
+                  </div>
+                  {pairRun ? (
+                    <ResultView
+                      key={pairRun.id}
+                      outputId="correlation"
+                      output={pairRun.outputs.correlation}
+                      run={pairRun}
+                    />
+                  ) : (
+                    <div className="ww-simple-empty">
+                      <p>此任务尚无拟合结果。</p>
+                      <button
+                        className="ww-button"
+                        onClick={() => onConfigure("correlation")}
+                      >
+                        执行相关性计算
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="ww-simple-empty">
+                  <h3>还没有相关性任务</h3>
+                  <button
+                    className="ww-button"
+                    onClick={() => onConfigure("correlation")}
+                  >
+                    配置并计算相关性 →
+                  </button>
+                </div>
+              )
+            ) : active ? (
               <>
                 <div className="ww-section-heading">
                   <div>
-                    <h2>同期相关性散点图组</h2>
-                    <p>{job.sourceLabels.join(" ↔ ")}</p>
+                    <span className={`ww-source-chip ${active.kind}`}>
+                      {
+                        SOURCE_TYPES.find((s) => s.id === active.kind)!
+                          .shortLabel
+                      }
+                    </span>
+                    <h2>{active.title}</h2>
+                    <p>
+                      {tower.name} · {active.description}
+                    </p>
                   </div>
                 </div>
-                <div className="ww-correlation-caption">
-                  <label>
-                    高度对（Y ↔ X）
-                    <select
-                      value={Math.min(pairIndex, job.pairs.length - 1)}
-                      onChange={(e) => setPairIndex(Number(e.target.value))}
-                    >
-                      {job.pairs.map(([a, b], i) => (
-                        <option key={i} value={i}>
-                          {a}m ↔ {b}m
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span>
-                    {job.start} → {job.end}（终点不含）
-                  </span>
-                </div>
-                {pairRun ? (
+                {run?.warnings?.map((warning, i) => (
+                  <p key={i} className="ww-callout">
+                    {warning}
+                  </p>
+                ))}
+                {output && run ? (
                   <ResultView
-                    key={pairRun.id}
-                    outputId="correlation"
-                    output={pairRun.outputs.correlation}
-                    run={pairRun}
+                    key={`${run.id}-${active.id}-${filter === "qc" ? "qc" : ""}`}
+                    output={output}
+                    outputId={active.id}
+                    run={run}
+                    towerName={tower.name}
+                    qcCompletenessOnly={filter === "qc"}
                   />
                 ) : (
                   <div className="ww-simple-empty">
-                    <p>此任务尚无拟合结果。</p>
+                    <span className="ww-empty-plot-icon">⌁</span>
+                    <h3>{outputStatus(active, state)}</h3>
+                    <p>解析数据并执行计算后显示真实图表。</p>
                     <button
                       className="ww-button"
-                      onClick={() => onConfigure("correlation")}
+                      onClick={() =>
+                        onConfigure(
+                          active.kind === "reference"
+                            ? "long-term"
+                            : "analysis",
+                        )
+                      }
                     >
-                      执行相关性计算
+                      前往配置与计算 →
                     </button>
                   </div>
                 )}
               </>
             ) : (
               <div className="ww-simple-empty">
-                <h3>还没有相关性任务</h3>
-                <button
-                  className="ww-button"
-                  onClick={() => onConfigure("correlation")}
-                >
-                  配置并计算相关性 →
-                </button>
+                <p>尚未选择此分类的图表。</p>
               </div>
-            )
-          ) : active ? (
-            <>
-              <div className="ww-section-heading">
-                <div>
-                  <span className={`ww-source-chip ${active.kind}`}>
-                    {SOURCE_TYPES.find((s) => s.id === active.kind)!.shortLabel}
-                  </span>
-                  <h2>{active.title}</h2>
-                  <p>
-                    {tower.name} · {active.description}
-                  </p>
-                </div>
-              </div>
-              {run?.warnings?.map((warning, i) => (
-                <p key={i} className="ww-callout">
-                  {warning}
-                </p>
-              ))}
-              {output && run ? (
-                <ResultView
-                  key={`${run.id}-${active.id}`}
-                  output={output}
-                  outputId={active.id}
-                  run={run}
-                  towerName={tower.name}
-                />
-              ) : (
-                <div className="ww-simple-empty">
-                  <span className="ww-empty-plot-icon">⌁</span>
-                  <h3>{outputStatus(active, state)}</h3>
-                  <p>解析数据并执行计算后显示真实图表。</p>
-                  <button
-                    className="ww-button"
-                    onClick={() =>
-                      onConfigure(
-                        active.kind === "reference" ? "long-term" : "analysis",
-                      )
-                    }
-                  >
-                    前往配置与计算 →
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="ww-simple-empty">
-              <p>尚未选择此分类的图表。</p>
-            </div>
-          )}
-        </section>
+            )}
+          </section>
+        </ChartTextScale.Provider>
       </div>
     </div>
   );

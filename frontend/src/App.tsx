@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getHealth } from "./api";
+import HeroFormulaCards from "./HeroFormulaCards";
 import SavedRunPreview from "./features/wind-workspace/SavedRunPreview";
 import AnalysisWorkspace from "./features/wind-workspace/AnalysisWorkspace";
 import {
@@ -583,6 +584,7 @@ function WorkspaceApp() {
                   </button>
                 </div>
                 <div className="hero-cover" aria-hidden="true" />
+                <HeroFormulaCards />
               </section>
               <div className="stats">
                 {[

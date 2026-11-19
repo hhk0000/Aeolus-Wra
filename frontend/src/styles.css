@@ -456,6 +456,93 @@ p {
   background-blend-mode: color, normal;
   mask-image: linear-gradient(90deg, transparent, #000 34%);
 }
+.hero-formulas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.hero-formula {
+  position: absolute;
+  width: clamp(142px, 14vw, 185px);
+  margin: 0;
+  padding: 9px 11px 6px;
+  border: 1px solid var(--ui-line);
+  border-radius: 11px;
+  background: var(--ui-glass-solid);
+  box-shadow: var(--ui-shadow-card);
+  pointer-events: auto;
+}
+.hero-formula-weibull {
+  top: 14%;
+  right: 32%;
+  rotate: -7deg;
+}
+.hero-formula-power {
+  right: 5%;
+  bottom: 11%;
+  rotate: 6deg;
+}
+.hero-formula figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+.hero-formula figcaption strong {
+  font-weight: 650;
+}
+.hero-formula figcaption span {
+  color: var(--ui-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.hero-equation {
+  margin: 4px 0;
+  color: var(--ui-ink);
+  font:
+    italic 13px/1.35 "Times New Roman",
+    SimSun,
+    serif;
+}
+.hero-equation sup {
+  line-height: 0;
+}
+.hero-equation span {
+  white-space: nowrap;
+}
+.hero-formula canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+@media (max-width: 800px) {
+  .hero:has(.hero-formulas) {
+    height: auto;
+    padding-bottom: 18px;
+  }
+  .hero-formulas {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    width: min(100%, 440px);
+    padding: 0 22px;
+  }
+  .hero-formula {
+    position: relative;
+    inset: auto;
+    width: auto;
+    min-width: 0;
+  }
+  .hero-formula-weibull {
+    rotate: -3deg;
+  }
+  .hero-formula-power {
+    rotate: 3deg;
+  }
+}
 .sun {
   width: 130px;
   height: 130px;

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import mimetypes
 import os
 import socket
 import sys
@@ -78,6 +79,8 @@ def main() -> int:
             print(f"本机分析环境缺少依赖，请参照 README.md 安装：{exc}", file=sys.stderr)
             return 1
 
+        # Older Windows MIME tables may omit WebP.
+        mimetypes.add_type("image/webp", ".webp")
         app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="offline-frontend")
         listener.listen()
         print(f"Aeolus 离线版：{url}  |  按 Ctrl+C 停止服务。", flush=True)

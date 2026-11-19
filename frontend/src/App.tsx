@@ -562,8 +562,7 @@ function WorkspaceApp() {
                     开启分析工作流 <Icon name="arrow" size={17} />
                   </button>
                 </div>
-                <WindScene />
-                <span className="scene-caption">EXPLORE THE INVISIBLE.</span>
+                <div className="hero-cover" aria-hidden="true" />
               </section>
               <div className="stats">
                 {[

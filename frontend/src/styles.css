@@ -1,7 +1,7 @@
 :root {
-  --ui-canvas: #f7f5ed;
-  --ui-paper: #fffdf8;
-  --ui-soft: #f7f7ee;
+  --ui-canvas: #ffffff;
+  --ui-paper: #ffffff;
+  --ui-soft: #f3f8f2;
   --ui-line: #dbe4d7;
   --ui-ink: #293a2f;
   --ui-muted: #506456;
@@ -9,8 +9,8 @@
   --ui-sage-deep: #315940;
   --ui-sage-soft: #e1efdd;
   --ui-focus: #729777;
-  --ui-glass: rgb(249 249 238 / 85%);
-  --ui-glass-solid: rgb(255 253 246 / 96%);
+  --ui-glass: rgb(249 253 248 / 86%);
+  --ui-glass-solid: rgb(255 255 255 / 96%);
   --ui-shadow-card:
     0 2px 5px rgb(48 72 50 / 8%), 0 12px 26px -12px rgb(48 72 50 / 25%);
   --ui-shadow-raised:
@@ -34,7 +34,7 @@ body {
   margin: 0;
   background-image:
     linear-gradient(180deg, transparent 42%, var(--ui-canvas)),
-    linear-gradient(125deg, #faf8ef 8%, #e7f1e2);
+    linear-gradient(125deg, #ffffff 15%, #e9f4e7);
   background-size: 100% 1050px;
   background-repeat: no-repeat;
 }
@@ -120,7 +120,7 @@ button:disabled {
   height: 43px;
   border-radius: 14px;
   background: linear-gradient(140deg, #c7e0c0, #87af87);
-  color: #fffdf7;
+  color: #ffffff;
   box-shadow: var(--ui-shadow-card);
 }
 .brand-blades {
@@ -161,7 +161,7 @@ button:disabled {
 }
 .nav-item.active {
   background: var(--ui-sage);
-  color: #fffdf4;
+  color: #ffffff;
   font-weight: 600;
 }
 .nav-dot {
@@ -380,7 +380,7 @@ p {
 .hero {
   height: 286px;
   position: relative;
-  background: #f2f5e7;
+  background: #f2f8f0;
   border-radius: 18px;
   overflow: hidden;
   border: 1px solid var(--ui-line);
@@ -434,7 +434,7 @@ p {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: linear-gradient(155deg, #f6f4e8, #dcead7);
+  background: linear-gradient(155deg, #f8fcf7, #dcead7);
 }
 .hero-cover {
   position: absolute;
@@ -484,7 +484,7 @@ p {
   top: 34%;
   width: 1px;
   height: 55%;
-  color: #fffef5;
+  color: #ffffff;
   filter: drop-shadow(3px 4px 3px #47644820);
 }
 .pole {

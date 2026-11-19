@@ -1455,7 +1455,7 @@
   color: var(--ww-ink-soft);
 }
 .ww-panel {
-  background: linear-gradient(180deg, #fffefa, var(--ui-paper));
+  background: var(--ui-paper);
   border: 1px solid var(--ww-line);
   border-radius: 16px;
   box-shadow: var(--ui-shadow-card);

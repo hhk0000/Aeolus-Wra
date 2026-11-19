@@ -1842,10 +1842,22 @@
   flex-basis: 100%;
   margin: 0;
 }
-.ww-axis-minimum label {
+.ww-axis-minimum label,
+.ww-density-controls > label {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+}
+.ww-density-controls {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.ww-density-controls .ww-axis-minimum {
+  margin: 0;
 }
 .ww-lt-controls .ww-axis-minimum label {
   padding: 0;
@@ -1853,7 +1865,8 @@
   background: transparent;
 }
 .ww-axis-minimum select,
-.ww-axis-minimum input {
+.ww-axis-minimum input,
+.ww-density-controls > label select {
   min-height: 32px;
   padding: 4px 8px;
   border: 1px solid var(--ww-line);
@@ -2588,6 +2601,9 @@
   grid-column: 1 / -1;
   min-width: 0;
   margin-top: 20px;
+}
+.ww-reference-rose > .ww-rose-figure {
+  grid-column: 1 / -1;
 }
 .ww-reference-months article {
   min-width: 0;

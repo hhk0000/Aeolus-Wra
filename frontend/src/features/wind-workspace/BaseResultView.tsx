@@ -4,11 +4,12 @@ import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
-import { AxisMinimum } from "./AxisMinimum";
-import { getAxisMinimum } from "./axisRange";
-import type { AxisMinimumSetting } from "./axisRange";
+import { AxisRange } from "./AxisRangeControl";
+import { defaultAxisRange, getAxisRange } from "./axisRange";
 
 const palette = EXCEL.series;
+const seriesColor = (key: string, index: number) =>
+  key === "fitted_frequency" ? EXCEL.weibull : palette[index % palette.length];
 const labels: Record<string, string> = {
   channel: "通道",
   direction_name: "实测风向通道",
@@ -359,6 +360,8 @@ function CartesianPlot({
   showConcurrent = true,
   compact = false,
   annualMinimum = 0,
+  annualMaximum,
+  annualCustomAxis = false,
   showMeanLabel = false,
 }: {
   rows: Record<string, unknown>[];
@@ -368,6 +371,8 @@ function CartesianPlot({
   showConcurrent?: boolean;
   compact?: boolean;
   annualMinimum?: number;
+  annualMaximum?: number;
+  annualCustomAxis?: boolean;
   showMeanLabel?: boolean;
 }) {
   const textSize = useChartTextSize();
@@ -404,13 +409,15 @@ function CartesianPlot({
     top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
     bottom = compact ? 215 : 285;
   const maxFor = (key: string) =>
-    Math.max(
-      1e-6,
-      ...rows.map((r) => Number(r[key]) || 0),
-      ...(key === "mean_speed"
-        ? means.map((r) => Number(r.mean_speed) || 0)
-        : []),
-    ) * 1.15;
+    isAnnual && annualMaximum !== undefined
+      ? annualMaximum
+      : Math.max(
+          1e-6,
+          ...rows.map((r) => Number(r[key]) || 0),
+          ...(key === "mean_speed"
+            ? means.map((r) => Number(r.mean_speed) || 0)
+            : []),
+        ) * 1.15;
   const minFor = (key: string) =>
     isAnnual
       ? annualMinimum
@@ -472,7 +479,7 @@ function CartesianPlot({
                 maxFor(used[0]) -
                 (n / 4) * (maxFor(used[0]) - minFor(used[0]))
               ).toFixed(
-                isTI || isShear ? 3 : isAnnual && annualMinimum > 0 ? 2 : 1,
+                isTI || isShear ? 3 : isAnnual && annualCustomAxis ? 2 : 1,
               )}
             </text>
             {dual && (
@@ -510,7 +517,11 @@ function CartesianPlot({
                           (isFrequency ? 0.25 : 0.65),
                       )}
                       height={bottom - y(Number(row[key]), key)}
-                      fill={isAnnual && row.concurrent ? "#e3b341" : palette[k]}
+                      fill={
+                        isAnnual && row.concurrent
+                          ? "#e3b341"
+                          : seriesColor(key, k)
+                      }
                       opacity={row.complete === false ? 0.35 : 0.8}
                     >
                       <title>
@@ -524,7 +535,7 @@ function CartesianPlot({
               <>
                 <polyline
                   fill="none"
-                  stroke={palette[k]}
+                  stroke={seriesColor(key, k)}
                   strokeWidth={compact && dual ? 2.5 : EXCEL.lineWidth}
                   strokeDasharray={
                     dual && key === "power_density"
@@ -555,7 +566,7 @@ function CartesianPlot({
                           width="12"
                           height="12"
                           transform={`rotate(45 ${cx} ${cy})`}
-                          fill={palette[k]}
+                          fill={seriesColor(key, k)}
                         />
                       ) : (
                         <rect
@@ -563,7 +574,7 @@ function CartesianPlot({
                           y={cy - 5}
                           width="10"
                           height="10"
-                          fill={palette[k]}
+                          fill={seriesColor(key, k)}
                         />
                       )}
                       <title>
@@ -576,7 +587,7 @@ function CartesianPlot({
                       cx={cx}
                       cy={cy}
                       r={EXCEL.marker}
-                      fill={palette[k]}
+                      fill={seriesColor(key, k)}
                     >
                       <title>
                         {label(row)} · {labels[key]}：{display(row[key])}
@@ -707,8 +718,8 @@ function CartesianPlot({
             </>
           ) : (
             used.map((key, i) => (
-              <span key={key} style={{ color: palette[i % palette.length] }}>
-                <i style={{ borderColor: palette[i % palette.length] }} />
+              <span key={key} style={{ color: seriesColor(key, i) }}>
+                <i style={{ borderColor: seriesColor(key, i) }} />
                 {labels[key]}
               </span>
             ))
@@ -1023,10 +1034,7 @@ export function BaseResultView({
   const [roseZoom, setRoseZoom] = useState("1");
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
-  const [annualAxis, setAnnualAxis] = useState<AxisMinimumSetting>({
-    mode: "default",
-    custom: "0",
-  });
+  const [annualAxis, setAnnualAxis] = useState(defaultAxisRange);
   const [showMeanLabel, setShowMeanLabel] = useState(false);
   const [ltConcurrent, setLtConcurrent] = useState(true);
   const [ltLine, setLtLine] = useState(true);
@@ -1180,8 +1188,20 @@ export function BaseResultView({
         .map((row) => row.mean_speed)
         .filter(numeric)
     : [];
-  const { lower: annualMinimum, invalid: invalidAnnualMinimum } =
-    getAxisMinimum(annualAxis, annualValues, 0);
+  const annualDefaultUpper = isAnnual
+    ? Math.max(
+        1e-6,
+        ...[...annualRows, ...chartMeans].map(
+          (row) => Number(row.mean_speed) || 0,
+        ),
+      ) * 1.15
+    : 1;
+  const annualRange = getAxisRange(
+    annualAxis,
+    annualValues,
+    0,
+    annualDefaultUpper,
+  );
   const exportPlots = () => {
     container.current
       ?.querySelectorAll("svg")
@@ -1342,13 +1362,13 @@ export function BaseResultView({
                 <small className="ww-mean-position-hint">图中标注可拖动</small>
               )}
               {!exportMode && annualValues.length > 0 && (
-                <AxisMinimum
+                <AxisRange
                   setting={annualAxis}
                   onChange={setAnnualAxis}
                   unit="m/s"
-                  minimum={Math.min(...annualValues)}
-                  fallback={0}
-                  invalid={invalidAnnualMinimum}
+                  lowerDefault={0}
+                  upperDefault={annualDefaultUpper}
+                  invalid={annualRange.invalid}
                 />
               )}
             </div>
@@ -1386,7 +1406,7 @@ export function BaseResultView({
             ref={container}
             className={
               isRose
-                ? "ww-rose-pair"
+                ? `ww-rose-pair${outputId === "reference-rose" ? " ww-reference-rose" : ""}`
                 : isScatter
                   ? "ww-scatter-grid"
                   : "ww-live-chart"
@@ -1489,7 +1509,11 @@ export function BaseResultView({
                 means={chartMeans}
                 bars={isAnnual ? ltBars : true}
                 showConcurrent={ltConcurrent}
-                annualMinimum={annualMinimum}
+                annualMinimum={annualRange.lower}
+                annualMaximum={annualRange.upper}
+                annualCustomAxis={
+                  annualAxis.mode !== "default" && !annualRange.invalid
+                }
                 showMeanLabel={showMeanLabel}
               />
             )}

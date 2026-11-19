@@ -1,6 +1,7 @@
 """Wind direction frequencies calculated solely from measured direction channels."""
 
 from datetime import UTC, datetime
+from functools import lru_cache
 
 import numpy as np
 
@@ -8,7 +9,9 @@ from wind_platform.core.calculations import COMPASS, CalculationError, sector_in
 from wind_platform.services.analysis import boundary, period, times, values
 
 
+@lru_cache(maxsize=32)
 def run_measured_direction(store, analysis_id: str, sectors: int):
+    # Sources and saved runs are immutable. Reuse the persisted result for the same request.
     analysis = store.get("runs", analysis_id)
     if analysis["kind"] != "analysis":
         raise CalculationError("请从风资源分析成果打开实测风向。")

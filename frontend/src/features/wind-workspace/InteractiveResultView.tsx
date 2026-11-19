@@ -8,9 +8,8 @@ import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
-import { AxisMinimum } from "./AxisMinimum";
-import { getAxisMinimum } from "./axisRange";
-import type { AxisMinimumSetting } from "./axisRange";
+import { AxisRange } from "./AxisRangeControl";
+import { defaultAxisRange, getAxisRange } from "./axisRange";
 
 type Row = Record<string, unknown>;
 type RoseMetric = "direction" | "energy" | "both";
@@ -27,6 +26,7 @@ type RoseSession = {
 };
 const roseSessions = new Map<string, RoseSession>();
 const measuredRuns = new Map<string, Run>();
+const pendingMeasuredRuns = new Map<string, Promise<Run>>();
 
 function rememberRose<T>(cache: Map<string, T>, key: string, value: T) {
   cache.delete(key);
@@ -36,12 +36,24 @@ function rememberRose<T>(cache: Map<string, T>, key: string, value: T) {
     if (oldest !== undefined) cache.delete(oldest);
   }
 }
+function loadMeasuredRun(key: string, id: string, sectors: number) {
+  const pending = pendingMeasuredRuns.get(key);
+  if (pending) return pending;
+  const request = api<Run>(`/runs/${id}/measured-direction`, { sectors })
+    .then((result) => {
+      rememberRose(measuredRuns, key, result);
+      return result;
+    })
+    .finally(() => pendingMeasuredRuns.delete(key));
+  pendingMeasuredRuns.set(key, request);
+  return request;
+}
 const colors = EXCEL.series;
 const iecFields = ["IEC_A", "IEC_B", "IEC_C"];
 function seriesColor(field: string, index: number) {
   if (["power_density", "energy_frequency"].includes(field)) return colors[1];
   if (["mean_speed", "frequency"].includes(field)) return colors[0];
-  if (field === "fitted_frequency") return colors[2];
+  if (field === "fitted_frequency") return EXCEL.weibull;
   const tiIndex = [
     "representative",
     ...iecFields,
@@ -74,6 +86,8 @@ function Plot({
   title,
   density = false,
   densityMinimum = 0.5,
+  densityMaximum,
+  densityBars = false,
   rose = "",
   energy = false,
   zoom = "1",
@@ -85,6 +99,8 @@ function Plot({
   title: string;
   density?: boolean;
   densityMinimum?: number;
+  densityMaximum?: number;
+  densityBars?: boolean;
   rose?: string;
   energy?: boolean;
   zoom?: string;
@@ -124,7 +140,8 @@ function Plot({
       .filter(Number.isFinite);
     const lo = density ? densityMinimum : Math.min(0, ...vals);
     const hi = density
-      ? Math.max(lo + 0.01, Math.ceil(Math.max(...vals) * 20) / 20)
+      ? (densityMaximum ??
+        Math.max(lo + 0.01, Math.ceil(Math.max(...vals) * 20) / 20))
       : Math.max(0.001, ...vals) * 1.1;
     return [lo, hi];
   };
@@ -137,6 +154,9 @@ function Plot({
     outputId === "turbulence"
       ? rows.findIndex((row) => Number(row.bin) === 15)
       : -1;
+  const isBar = (field: string) =>
+    (densityBars && field === "density") ||
+    ["frequency", "energy_frequency"].includes(field);
   return (
     <figure className="ww-interactive-plot">
       <figcaption>{title}</figcaption>
@@ -313,25 +333,39 @@ function Plot({
               ))}
               {fields.map((f, j) => (
                 <g key={f}>
-                  {["frequency", "energy_frequency"].includes(f) &&
+                  {isBar(f) &&
                     rows.map((r, i) => {
-                      const barW = ((R - L) / Math.max(1, rows.length)) * 0.34;
+                      if (
+                        density &&
+                        (r[f] == null || !Number.isFinite(Number(r[f])))
+                      )
+                        return null;
+                      const barW =
+                        ((R - L) / Math.max(1, rows.length)) *
+                        (density ? 0.66 : 0.34);
                       return (
                         <rect
                           key={`bar-${i}`}
                           x={
-                            x(i) - barW + (f === "energy_frequency" ? barW : 0)
+                            density
+                              ? x(i) - barW / 2
+                              : x(i) -
+                                barW +
+                                (f === "energy_frequency" ? barW : 0)
                           }
                           y={y(Number(r[f]), f)}
-                          width={barW * 0.9}
-                          height={B - y(Number(r[f]), f)}
+                          width={barW * (density ? 1 : 0.9)}
+                          height={Math.max(0, B - y(Number(r[f]), f))}
                           fill={seriesColor(f, j)}
                         >
-                          <title>{Number(r[f]).toFixed(3)}%</title>
+                          <title>
+                            {Number(r[f]).toFixed(density ? 4 : 3)}
+                            {density ? " kg/m³" : "%"}
+                          </title>
                         </rect>
                       );
                     })}
-                  {!["frequency", "energy_frequency"].includes(f) && (
+                  {!isBar(f) && (
                     <>
                       <polyline
                         points={rows
@@ -500,7 +534,7 @@ function Plot({
             aria-label="图例"
           >
             {fields.map((f, j) => {
-              const box = ["frequency", "energy_frequency"].includes(f);
+              const box = isBar(f);
               const shape = dualAxis
                 ? j === 0
                   ? "diamond"
@@ -554,6 +588,7 @@ export function InteractiveResultView({
   >([]);
   const [layers, setLayers] = useState<{ id: string; height: number }[]>([]);
   useEffect(() => {
+    if (outputId !== "shear" || exportMode) return;
     let active = true;
     const id = original.config.qc_id;
     if (typeof id === "string")
@@ -577,33 +612,7 @@ export function InteractiveResultView({
     return () => {
       active = false;
     };
-  }, [original]);
-  useEffect(() => {
-    let active = true;
-    const id = original.config.result_id;
-    if (typeof id === "string")
-      void api<{
-        channels: {
-          id: string;
-          name: string;
-          height: number;
-          quantity: string;
-          statistic: string;
-        }[];
-      }>(`/datasets/${id}`)
-        .then((d) => {
-          if (active)
-            setDirections(
-              d.channels.filter(
-                (c) => c.quantity === "direction" && c.statistic === "mean",
-              ),
-            );
-        })
-        .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [original]);
+  }, [original, outputId, exportMode]);
   const [run, setRun] = useState(remembered?.run ?? original),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -620,10 +629,8 @@ export function InteractiveResultView({
     [zoom, setZoom] = useState(remembered?.zoom ?? "1"),
     [month, setMonth] = useState(remembered?.month ?? "all");
   const [visibleIec, setVisibleIec] = useState(iecFields);
-  const [densityAxis, setDensityAxis] = useState<AxisMinimumSetting>({
-    mode: "default",
-    custom: "0.5",
-  });
+  const [densityAxis, setDensityAxis] = useState(defaultAxisRange);
+  const [densityType, setDensityType] = useState("line");
   const [minimumSamples, setMinimumSamples] = useState(
     String(run.config.turbulence_minimum_samples ?? 20),
   );
@@ -644,6 +651,32 @@ export function InteractiveResultView({
   );
   const compareRose = localRose && roseMetric === "both";
   const measured = localRose && roseMetric !== "energy";
+  useEffect(() => {
+    const id = original.config.result_id;
+    if (!localRose || measured || exportMode || typeof id !== "string") return;
+    let active = true;
+    api<{
+      channels: {
+        id: string;
+        name: string;
+        height: number;
+        quantity: string;
+        statistic: string;
+      }[];
+    }>(`/datasets/${id}`)
+      .then((d) => {
+        if (active)
+          setDirections(
+            d.channels.filter(
+              (c) => c.quantity === "direction" && c.statistic === "mean",
+            ),
+          );
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [original, localRose, measured, exportMode]);
   const [measuredResponse, setMeasuredResponse] = useState<{
     sectors: number;
     run?: Run;
@@ -687,22 +720,17 @@ export function InteractiveResultView({
       measuredRuns.has(measuredKey)
     )
       return;
-    const controller = new AbortController();
-    api<Run>(
-      `/runs/${original.id}/measured-direction`,
-      { sectors },
-      controller.signal,
-    )
+    let active = true;
+    loadMeasuredRun(measuredKey, original.id, sectors)
       .then((result) => {
-        rememberRose(measuredRuns, measuredKey, result);
-        if (!controller.signal.aborted)
-          setMeasuredResponse({ sectors, run: result });
+        if (active) setMeasuredResponse({ sectors, run: result });
       })
       .catch((cause: Error) => {
-        if (!controller.signal.aborted)
-          setMeasuredResponse({ sectors, error: cause.message });
+        if (active) setMeasuredResponse({ sectors, error: cause.message });
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, [
     measured,
     measurementSnapshot,
@@ -1398,7 +1426,14 @@ export function InteractiveResultView({
         {busy && <p role="status">正在计算，完成后更新图表…</p>}
         {error && <p role="alert">{error}</p>}
       </div>
-      {custom && output.status === "ready" ? (
+      {measured &&
+      !chartRun &&
+      !exportMode &&
+      !(measuredResponse?.sectors === sectors && measuredResponse.error) ? (
+        <div className="ww-simple-empty" role="status">
+          正在统计实测风向…
+        </div>
+      ) : custom && output.status === "ready" ? (
         <>
           {(all ? (channels.length ? channels : [""]) : [selected]).map((c) => {
             let subset = rows.filter(
@@ -1434,8 +1469,16 @@ export function InteractiveResultView({
             const densityValues = subset
               .map((r) => (r.density == null ? NaN : Number(r.density)))
               .filter((v) => Number.isFinite(v));
-            const { lower: densityMinimum, invalid: invalidDensityMinimum } =
-              getAxisMinimum(densityAxis, densityValues, 0.5);
+            const densityDefaultUpper = Math.max(
+              0.51,
+              Math.ceil(Math.max(...densityValues) * 20) / 20,
+            );
+            const densityRange = getAxisRange(
+              densityAxis,
+              densityValues,
+              0.5,
+              densityDefaultUpper,
+            );
             const meanOf = (key: string) => {
               const values = subset
                 .map((r) => Number(r[key]))
@@ -1553,14 +1596,29 @@ export function InteractiveResultView({
                         {!exportMode &&
                           outputId === "density" &&
                           densityValues.length > 0 && (
-                            <AxisMinimum
-                              setting={densityAxis}
-                              onChange={setDensityAxis}
-                              unit="kg/m³"
-                              minimum={Math.min(...densityValues)}
-                              fallback={0.5}
-                              invalid={invalidDensityMinimum}
-                            />
+                            <div className="ww-density-controls">
+                              <AxisRange
+                                setting={densityAxis}
+                                onChange={setDensityAxis}
+                                unit="kg/m³"
+                                lowerDefault={0.5}
+                                upperDefault={densityDefaultUpper}
+                                invalid={densityRange.invalid}
+                              />
+                              <label>
+                                图表类型
+                                <select
+                                  aria-label="空气密度图表类型"
+                                  value={densityType}
+                                  onChange={(event) =>
+                                    setDensityType(event.target.value)
+                                  }
+                                >
+                                  <option value="line">折线图</option>
+                                  <option value="bar">柱状图</option>
+                                </select>
+                              </label>
+                            </div>
                           )}
                         <Plot
                           rows={subset}
@@ -1572,7 +1630,9 @@ export function InteractiveResultView({
                           }
                           outputId={outputId}
                           density={outputId === "density"}
-                          densityMinimum={densityMinimum}
+                          densityMinimum={densityRange.lower}
+                          densityMaximum={densityRange.upper}
+                          densityBars={densityType === "bar"}
                           fit={
                             outputId === "weibull"
                               ? (

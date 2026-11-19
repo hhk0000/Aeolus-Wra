@@ -4,6 +4,14 @@
 
 收到“在 DSH 的基础上继续开发”“在 GPT 的基础上继续开发”或“继续开发”，先读本文件和 [协作检索规则](docs/COLLABORATION.md)，自行查找交接和提取需求。
 
+## 2026-11-19 接续分支（DSH）
+
+- 从 GPT 最新提交 `3914cb6`（`codex/chart-center-feedback-20261119`，含同期分析、批量上传、图表中心反馈、Windows 离线入口）拉出
+  `agent/continue-gpt-20261119`，已推送 `origin`。
+- 基线验证：`scripts/check.py` 全通过（pytest **78 passed**、Ruff、ESLint、Prettier、`tsc -b && vite build`）；
+  本机页面冒烟加载正常（项目管理中心，无控制台错误）。
+- 图表样式沿用 `chartTheme.ts` 红蓝基线；`.crtx` 文件在本机不存在，1:1 样式以初设 docx 的原生图表 XML（chart1/16/31/45）为准。
+
 ## 当前共享代码基线
 
 - 仓库为 `hhk0000/Aeolus-Wra`。

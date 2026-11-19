@@ -474,13 +474,13 @@ p {
   pointer-events: auto;
 }
 .hero-formula-weibull {
-  top: 14%;
+  top: 9%;
   right: 32%;
   rotate: -7deg;
 }
 .hero-formula-power {
-  right: 5%;
-  bottom: 11%;
+  right: max(36%, 290px);
+  bottom: 6%;
   rotate: 6deg;
 }
 .hero-formula figcaption {
@@ -516,6 +516,11 @@ p {
   display: block;
   width: 100%;
   height: auto;
+}
+@media (801px <= width <= 1100px) {
+  .hero-cover {
+    max-width: 52%;
+  }
 }
 @media (max-width: 800px) {
   .hero:has(.hero-formulas) {

@@ -30,9 +30,21 @@ export function RoseChart({
   const w = 900,
     h = 680,
     cx = 450,
-    cy = 340,
-    maxR = 280,
-    labelR = maxR + 36;
+    cy = 340;
+  const compassSize = textSize(compact ? 34 : 18);
+  const percentageSize = textSize(compact ? 30 : 17);
+  const labelGap = Math.max(36, Math.ceil(compassSize * 0.85));
+  const longestLabel = Math.max(
+    1,
+    ...rows.map((row) => String(row.label ?? row.degrees ?? "").length),
+  );
+  const framePadding = 16;
+  const labelR = Math.min(
+    316,
+    cy - Math.ceil(compassSize * 0.7) - framePadding,
+    cx - Math.ceil((longestLabel * compassSize) / 2) - framePadding,
+  );
+  const maxR = labelR - labelGap;
   const key = energy ? "energy_frequency" : "frequency";
   const color = EXCEL.series[energy ? 1 : 0];
   const rawMax = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0));
@@ -66,7 +78,7 @@ export function RoseChart({
           aria-label={title}
           fontFamily={EXCEL.font}
           fontWeight="700"
-          fontSize={textSize(compact ? 30 : 17)}
+          fontSize={percentageSize}
           style={{
             width: `calc(${Math.max(1, Number(zoom) || 1) * 100}% * var(--ww-plot-scale, 1))`,
             background: "white",
@@ -83,7 +95,7 @@ export function RoseChart({
               <text
                 x={cx + 6}
                 y={cy - (value / max) * maxR + 4}
-                fontSize={textSize(compact ? 30 : 17)}
+                fontSize={percentageSize}
                 fill={EXCEL.text}
               >
                 {value.toFixed(0)}%
@@ -112,9 +124,9 @@ export function RoseChart({
               <text
                 key={i}
                 x={label[0]}
-                y={label[1]}
+                y={label[1] + Math.round(compassSize * 0.32)}
                 textAnchor="middle"
-                fontSize={textSize(compact ? 34 : 18)}
+                fontSize={compassSize}
                 fill={EXCEL.text}
               >
                 {String(r.label ?? a)}
@@ -165,7 +177,7 @@ export function RoseChart({
               </circle>
             );
           })}
-          <text x={cx} y={28} textAnchor="middle" fontSize={EXCEL.tickSize + 2}>
+          <text x={framePadding} y={28} fontSize={EXCEL.tickSize + 2}>
             {hover}
           </text>
           <rect

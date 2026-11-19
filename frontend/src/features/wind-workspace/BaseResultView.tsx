@@ -230,11 +230,13 @@ function CartesianPlot({
   const used = keys.filter((key) => rows.some((r) => numeric(r[key])));
   if (!used.length || !rows.length) return null;
   const tickSize = compact ? 17 : 13;
+  const axisSize = textSize(tickSize);
+  const dual = used.includes("power_density");
   const w = compact ? 480 : 900,
     h = compact ? 250 : 350,
-    left = compact ? 48 : 66,
-    right = compact ? 433 : 830,
-    top = compact ? 18 : 35,
+    left = compact ? 48 : dual ? Math.max(66, 5 * axisSize + 12) : 66,
+    right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : 830,
+    top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
     bottom = compact ? 215 : 285;
   const maxFor = (key: string) =>
     Math.max(
@@ -250,7 +252,6 @@ function CartesianPlot({
   const y = (value: number, key: string) =>
     bottom -
     ((value - minFor(key)) / (maxFor(key) - minFor(key))) * (bottom - top);
-  const dual = used.includes("power_density");
   const label = (row: Record<string, unknown>) =>
     String(row.period ?? row.bin ?? row.label ?? row.group ?? "");
   return (
@@ -470,16 +471,17 @@ function CartesianPlot({
             </text>
             {dual && (
               <text
-                transform={`translate(${w - 6} ${(top + bottom) / 2}) rotate(90)`}
-                textAnchor="middle"
-                fontSize={textSize(tickSize)}
+                x={w - 14}
+                y={top - axisSize - 12}
+                textAnchor="end"
+                fontSize={axisSize}
                 fill={palette[1]}
               >
-                风功率密度(W/m²)
+                风功率密度 (W/m²)
               </text>
             )}
             <text
-              transform={`translate(14 ${(top + bottom) / 2}) rotate(-90)`}
+              transform={`translate(${dual ? axisSize + 4 : 14} ${(top + bottom) / 2}) rotate(-90)`}
               textAnchor="middle"
               fontSize={textSize(tickSize)}
               fill={EXCEL.text}

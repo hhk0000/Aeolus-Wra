@@ -63,11 +63,12 @@ function Plot({
   const [hover, setHover] = useState("");
   const dualAxis =
     fields.includes("power_density") && fields.includes("mean_speed");
+  const axisSize = textSize(13);
   const w = rose ? 900 : dualAxis ? 900 : 800,
     h = rose ? 680 : dualAxis ? 540 : 340,
-    L = dualAxis ? 90 : 65,
-    R = dualAxis ? 810 : 725,
-    T = fit ? 54 : dualAxis ? 40 : 35,
+    L = dualAxis ? Math.max(90, 5 * axisSize + 12) : 65,
+    R = dualAxis ? w - Math.max(90, 4 * axisSize + 16) : 725,
+    T = fit ? 54 : dualAxis ? 3 * axisSize + 24 : 35,
     B = dualAxis ? 440 : 275;
   const cx = rose ? 450 : 400,
     cy = rose ? 310 : 165;
@@ -116,7 +117,12 @@ function Plot({
             background: "white",
           }}
         >
-          <text x="65" y="20" fontSize={textSize(13)} fill={EXCEL.text}>
+          <text
+            x={L}
+            y={dualAxis ? axisSize + 4 : 20}
+            fontSize={axisSize}
+            fill={EXCEL.text}
+          >
             {hover}
           </text>
           {fit && typeof fit.k === "number" && typeof fit.c === "number" && (
@@ -395,7 +401,7 @@ function Plot({
                           : ""}
               </text>
               <text
-                transform={`translate(16 ${(T + B) / 2}) rotate(-90)`}
+                transform={`translate(${dualAxis ? axisSize + 4 : 16} ${(T + B) / 2}) rotate(-90)`}
                 textAnchor="middle"
                 fontSize={textSize(13)}
                 fill={EXCEL.text}
@@ -410,12 +416,13 @@ function Plot({
               </text>
               {dualAxis && (
                 <text
-                  transform={`translate(${w - 8} ${(T + B) / 2}) rotate(90)`}
-                  textAnchor="middle"
-                  fontSize={textSize(13)}
+                  x={w - 14}
+                  y={T - axisSize - 12}
+                  textAnchor="end"
+                  fontSize={axisSize}
                   fill={colors[1]}
                 >
-                  风功率密度(W/m²)
+                  风功率密度 (W/m²)
                 </text>
               )}
             </>

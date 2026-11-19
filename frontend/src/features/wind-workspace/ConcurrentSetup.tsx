@@ -3,28 +3,13 @@ import type { FormEvent } from "react";
 import { api } from "./api";
 import type { Channel, Dataset } from "./api";
 import { localInput } from "./autoSetup";
-import { useChartTextSize } from "./chartText";
-import { EXCEL, excelSvgProps } from "./chartTheme";
+import { ConcurrentCharts } from "./ConcurrentCharts";
+import type { ConcurrentComparison } from "./ConcurrentCharts";
 import { sourceLabel } from "./model";
 import type { WorkspaceViewProps } from "./model";
 
 type Quantity = "speed" | "direction";
 type Choice = { fileId?: string; speed?: string; direction?: string };
-type Point = [number, number | null, number | null, number, number];
-type Series = {
-  paired: number;
-  counts: [number, number];
-  visible: number;
-  points: Point[];
-};
-export type ConcurrentComparison = {
-  id: string;
-  start: number;
-  end: number;
-  timezone: string;
-  config: { paired_only: boolean; aggregation: "hourly" | "native" };
-  metrics: Partial<Record<Quantity, Series>>;
-};
 const quantities: Quantity[] = ["speed", "direction"];
 const captions = { speed: "风速", direction: "风向" };
 
@@ -38,162 +23,6 @@ function resolve(available: Channel[], picked: string | undefined) {
   return picked === "" || available.some((channel) => channel.id === picked)
     ? picked
     : (available[0]?.id ?? "");
-}
-
-function ConcurrentChart({
-  metric,
-  result,
-}: {
-  metric: Quantity;
-  result: ConcurrentComparison;
-}) {
-  const label = captions[metric];
-  const series = result.metrics[metric];
-  const textSize = useChartTextSize();
-  if (!series)
-    return (
-      <section>
-        <h3>{label}同期</h3>
-        <p>未选择{label}通道。</p>
-      </section>
-    );
-  const points = series.points;
-  const speedMax = Math.max(
-    1,
-    ...points.flatMap((p) => [p[1] ?? 0, p[2] ?? 0]),
-  );
-  const max = metric === "direction" ? 360 : Math.ceil(speedMax);
-  const axisSize = textSize(16);
-  const timeSize = textSize(15);
-  const topPadding = axisSize + 14;
-  const panelGap = Math.max(43, axisSize + 16);
-  const left = Math.max(78, axisSize * 2.6),
-    right = 685,
-    panelHeight = 99;
-  const dateY = topPadding + 2 * panelHeight + panelGap + timeSize + 5;
-  const ticks = timeSize > 24 ? [0, 1] : [0, 1 / 3, 2 / 3, 1];
-  const x = (time: number) =>
-    left +
-    ((right - left) * (time - result.start)) / (result.end - result.start);
-  const color = metric === "speed" ? EXCEL.series[0] : "#35696d";
-  return (
-    <section>
-      <h3>{label}同期</h3>
-      <p>
-        A 有效 {series.counts[0]} · B 有效 {series.counts[1]} · 同期{" "}
-        {series.paired} 条
-      </p>
-      {series.visible > points.length && (
-        <p>图中抽样显示 {points.length} 点，计数使用全部数据。</p>
-      )}
-      {points.length ? (
-        <svg
-          viewBox={`0 0 705 ${dateY + timeSize + 18}`}
-          role="img"
-          aria-label={label + "同期，A 在上，B 在下"}
-          {...excelSvgProps()}
-        >
-          {([0, 1] as const).map((side) => {
-            const top = topPadding + side * (panelHeight + panelGap);
-            const y = (value: number) => top + panelHeight * (1 - value / max);
-            let previousSegment: number | undefined;
-            const path = points
-              .map((p) => {
-                const value = side ? p[2] : p[1];
-                const segment = side ? p[4] : p[3];
-                if (value === null) return "";
-                const coordinate = x(p[0]) + " " + y(value);
-                const command =
-                  previousSegment === segment
-                    ? "L" + coordinate
-                    : "M" + coordinate + "h0.01";
-                previousSegment = segment;
-                return command;
-              })
-              .join(" ");
-            return (
-              <g key={side}>
-                <text x={left} y={top - 8} fontSize={axisSize}>
-                  {side ? "B" : "A"} · {label}（
-                  {metric === "speed" ? "m/s" : "°"}）
-                </text>
-                {(axisSize > 24 ? [0, 2, 4] : [0, 1, 2, 3, 4]).map((tick) => (
-                  <g key={tick}>
-                    <line
-                      x1={left}
-                      x2={right}
-                      y1={y((tick * max) / 4)}
-                      y2={y((tick * max) / 4)}
-                      stroke={EXCEL.grid}
-                    />
-                    <text
-                      x={left - 8}
-                      y={y((tick * max) / 4) + 4}
-                      textAnchor="end"
-                      fontSize={axisSize}
-                    >
-                      {Number(((tick * max) / 4).toFixed(1))}
-                    </text>
-                  </g>
-                ))}
-                <path
-                  d={path}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </g>
-            );
-          })}
-          {ticks.map((step) => {
-            const time = result.start + step * (result.end - result.start);
-            const iso = localInput(
-              new Date(time * 1000).toISOString(),
-              result.timezone,
-            );
-            const caption =
-              result.end - result.start >= 365 * 86400
-                ? iso.slice(0, 10)
-                : iso.slice(5).replace("T", " ");
-            return (
-              <text
-                key={step}
-                x={x(time)}
-                y={dateY}
-                textAnchor={
-                  step === 0 ? "start" : step === 1 ? "end" : "middle"
-                }
-                fontSize={timeSize}
-              >
-                {caption}
-              </text>
-            );
-          })}
-          <text
-            x="380"
-            y={dateY + timeSize + 10}
-            textAnchor="middle"
-            fontSize={textSize(12)}
-          >
-            {result.timezone}
-          </text>
-        </svg>
-      ) : (
-        <p>所选时间范围内没有符合条件的{label}记录。</p>
-      )}
-    </section>
-  );
-}
-
-export function ConcurrentCharts({ result }: { result: ConcurrentComparison }) {
-  return (
-    <div className="ww-concurrent-grid ww-concurrent-charts">
-      {quantities.map((metric) => (
-        <ConcurrentChart key={metric} result={result} metric={metric} />
-      ))}
-    </div>
-  );
 }
 
 export default function ConcurrentSetup({
@@ -428,7 +257,7 @@ export default function ConcurrentSetup({
       </section>
       {result && (
         <section className="ww-panel">
-          <ConcurrentCharts result={result} />
+          <ConcurrentCharts key={result.id} result={result} />
         </section>
       )}
     </div>

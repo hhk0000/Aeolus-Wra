@@ -1,11 +1,14 @@
 """Align two wind series without extrapolating either source."""
 
-from math import ceil
+from collections import Counter
+from datetime import UTC, datetime
+from math import ceil, fsum
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
-from wind_platform.core.calculations import CalculationError
+from wind_platform.core.calculations import COMPASS, CalculationError, rose, sector_index
 from wind_platform.core.ingestion import parse_timestamp
 from wind_platform.services.analysis import channel, channel_series
 
@@ -27,7 +30,12 @@ class ConcurrentOptions(BaseModel):
     plot_points: int = Field(default=1500, ge=100, le=3000)
 
 
-def compare_concurrent(store, config: ConcurrentOptions) -> dict:
+class ConcurrentWindow(BaseModel):
+    start: float = Field(allow_inf_nan=False)
+    end: float = Field(allow_inf_nan=False)
+
+
+def compare_concurrent(store, config: ConcurrentOptions, window: ConcurrentWindow | None = None):
     sources = (config.a, config.b)
     datasets = [store.get("datasets", source.dataset_id) for source in sources]
     intervals = {data["options"]["interval_minutes"] for data in datasets}
@@ -38,8 +46,16 @@ def compare_concurrent(store, config: ConcurrentOptions) -> dict:
     end = parse_timestamp(config.end, config.timezone, "auto")
     if start >= end:
         raise CalculationError("结束时间须晚于开始时间。")
+    if window:
+        if not start.timestamp() <= window.start < window.end <= end.timestamp():
+            raise CalculationError("缩放时段须在原分析时段内。")
+        start, end = (
+            datetime.fromtimestamp(window.start, UTC),
+            datetime.fromtimestamp(window.end, UTC),
+        )
 
     results = {}
+    visible_series = {}
     for quantity in ("speed", "direction"):
         ids = [getattr(source, f"{quantity}_channel") for source in sources]
         if not any(ids):
@@ -59,6 +75,11 @@ def compare_concurrent(store, config: ConcurrentOptions) -> dict:
         a, b = sequences
         common = a.keys() & b.keys()
         stamps = sorted(common if config.paired_only else a.keys() | b.keys())
+        if not window:
+            visible_series[quantity] = [
+                {stamp: series[stamp] for stamp in stamps if stamp in series}
+                for series in sequences
+            ]
         stride = max(1, ceil(len(stamps) / config.plot_points))
         # Segment on missing slots or a compass wrap before reducing display points.
         points = []
@@ -90,9 +111,71 @@ def compare_concurrent(store, config: ConcurrentOptions) -> dict:
         }
     if not results:
         raise CalculationError("请至少选择一个风速或风向通道。")
-    return {
+    output = {
         "start": start.timestamp(),
         "end": end.timestamp(),
         "timezone": config.timezone,
         "metrics": results,
+    }
+    if not window:
+        output["summary"] = summarize(visible_series, config, datasets)
+    return output
+
+
+def summarize(visible, config, datasets):
+    speeds = visible.get("speed", [{}, {}])
+    directions = visible.get("direction", [{}, {}])
+    zone = ZoneInfo(config.timezone)
+    monthly = []
+    for speed in speeds:
+        months = [[] for _ in range(12)]
+        for stamp, value in speed.items():
+            months[stamp.astimezone(zone).month - 1].append(value)
+        monthly.append(
+            [fsum(values) / len(values) if values else None for values in months]
+            + [fsum(speed.values()) / len(speed) if speed else None]
+        )
+    wind_direction, wind_energy = [], []
+    for direction in directions:
+        bins = Counter(sector_index(value) for value in direction.values() if 0 <= value <= 360)
+        total = sum(bins.values())
+        wind_direction.append(
+            [
+                {"label": label, "degrees": index * 22.5, "frequency": bins[index] / total * 100}
+                for index, label in enumerate(COMPASS)
+            ]
+            if total
+            else []
+        )
+    valid = [
+        {
+            stamp
+            for stamp in speed.keys() & direction.keys()
+            if speed[stamp] >= 0 and 0 <= direction[stamp] <= 360
+        }
+        for speed, direction in zip(speeds, directions, strict=True)
+    ]
+    if config.paired_only:
+        valid = [valid[0] & valid[1]] * 2
+    for speed, direction, stamps in zip(speeds, directions, valid, strict=True):
+        paired_stamps = sorted(stamps)
+        distribution = (
+            rose(
+                [speed[stamp] for stamp in paired_stamps],
+                [direction[stamp] for stamp in paired_stamps],
+            )
+            if paired_stamps
+            else None
+        )
+        wind_energy.append(
+            distribution["rows"]
+            if distribution
+            and any(row["energy_frequency"] is not None for row in distribution["rows"])
+            else []
+        )
+    return {
+        "stages": [dataset["stage"] for dataset in datasets],
+        "monthly_speed": monthly,
+        "direction": wind_direction,
+        "energy": wind_energy,
     }

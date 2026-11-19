@@ -11,11 +11,10 @@ import type {
 } from "./model";
 import { ResultView } from "./ResultView";
 import WorkspaceReportExport from "./WorkspaceReportExport";
-import TowerComparison from "./TowerComparison";
 import { ChartTextScale } from "./chartText";
 import { api } from "./api";
-import { ConcurrentCharts } from "./ConcurrentSetup";
-import type { ConcurrentComparison } from "./ConcurrentSetup";
+import { ConcurrentCharts } from "./ConcurrentCharts";
+import type { ConcurrentComparison } from "./ConcurrentCharts";
 import "./workspace.css";
 
 const readingKey = "aeolus.chartReading";
@@ -137,7 +136,6 @@ export function ResultsWorkspace({
     if (projectId !== undefined)
       gallerySelection.set(projectId, { filter, activeId, pairIndex });
   }, [projectId, filter, activeId, pairIndex]);
-  const [compare, setCompare] = useState(false);
   const [reading, setReading] = useState(loadReadingSettings);
   useEffect(() => {
     try {
@@ -186,7 +184,7 @@ export function ResultsWorkspace({
     observer.observe(bar);
     update();
     return () => observer.disconnect();
-  }, [compare]);
+  }, []);
   function showStage() {
     const panel = stage.current;
     const bar = filterBar.current;
@@ -226,14 +224,6 @@ export function ResultsWorkspace({
       : filter === "correlation"
         ? state.correlationJobs.length
         : filtered.length;
-  if (compare)
-    return (
-      <ChartTextScale.Provider value={reading.axis / 100}>
-        <div className="ww-comparison-reading" style={styles}>
-          <TowerComparison state={state} onBack={() => setCompare(false)} />
-        </div>
-      </ChartTextScale.Provider>
-    );
   return (
     <div className="ww-results" ref={gallery} style={styles}>
       <section className="ww-results-hero">
@@ -284,9 +274,6 @@ export function ResultsWorkspace({
           ))}
         </div>
         <div className="ww-gallery-tools">
-          <button type="button" onClick={() => setCompare(true)}>
-            多塔对比
-          </button>
           <span className="ww-gallery-count">共 {groupCount} 组</span>
           <details className="ww-reading-settings">
             <summary>图幅与字号</summary>

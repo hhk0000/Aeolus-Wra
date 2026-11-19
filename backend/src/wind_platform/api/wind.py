@@ -28,7 +28,11 @@ from wind_platform.services.analysis import (
     run_long_term,
 )
 from wind_platform.services.comparison import ComparisonOptions, compare_towers
-from wind_platform.services.concurrent import ConcurrentOptions, compare_concurrent
+from wind_platform.services.concurrent import (
+    ConcurrentOptions,
+    ConcurrentWindow,
+    compare_concurrent,
+)
 from wind_platform.services.measured_direction import run_measured_direction
 from wind_platform.services.processing import ProcessingOptions, process
 from wind_platform.services.review import ReviewOptions, review
@@ -245,7 +249,20 @@ def concurrent(config: ConcurrentOptions, request: Request):
 
 @router.get("/concurrent/{id_}")
 def get_concurrent(id_: str, request: Request):
-    return store(request).get("concurrent", id_)
+    local = store(request)
+    snapshot = local.get("concurrent", id_)
+    if "summary" not in snapshot:
+        snapshot["summary"] = compare_concurrent(
+            local, ConcurrentOptions.model_validate(snapshot["config"])
+        )["summary"]
+    return snapshot
+
+
+@router.post("/concurrent/{id_}/window")
+def concurrent_window(id_: str, window: ConcurrentWindow, request: Request):
+    local = store(request)
+    snapshot = local.get("concurrent", id_)
+    return compare_concurrent(local, ConcurrentOptions.model_validate(snapshot["config"]), window)
 
 
 class MeasuredDirectionOptions(BaseModel):

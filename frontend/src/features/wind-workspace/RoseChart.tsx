@@ -16,6 +16,8 @@ export function RoseChart({
   zoom = "1",
   compact = false,
   radialMax,
+  lineColor,
+  overlay,
 }: {
   rows: Row[];
   title: string;
@@ -24,6 +26,8 @@ export function RoseChart({
   zoom?: string;
   compact?: boolean;
   radialMax?: number;
+  lineColor?: string;
+  overlay?: { rows: Row[]; color: string };
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
@@ -32,7 +36,7 @@ export function RoseChart({
     cx = 450,
     cy = 340;
   const compassSize = textSize(compact ? 34 : 18);
-  const percentageSize = textSize(compact ? 30 : 17);
+  const percentageSize = textSize(compact ? (overlay ? 22 : 30) : 17);
   const labelGap = Math.max(36, Math.ceil(compassSize * 0.85));
   const longestLabel = Math.max(
     1,
@@ -46,8 +50,11 @@ export function RoseChart({
   );
   const maxR = labelR - labelGap;
   const key = energy ? "energy_frequency" : "frequency";
-  const color = EXCEL.series[energy ? 1 : 0];
-  const rawMax = Math.max(0.001, ...rows.map((r) => Number(r[key]) || 0));
+  const color = lineColor ?? EXCEL.series[energy ? 1 : 0];
+  const rawMax = Math.max(
+    0.001,
+    ...[...rows, ...(overlay?.rows ?? [])].map((r) => Number(r[key]) || 0),
+  );
   const max = Math.max(1, Math.ceil(Math.max(rawMax, radialMax ?? 0) / 5) * 5);
   const point = (a: number, r: number): [number, number] => [
     cx + Math.sin((a * Math.PI) / 180) * r,
@@ -94,7 +101,7 @@ export function RoseChart({
               />
               <text
                 x={cx + 6}
-                y={cy - (value / max) * maxR + 4}
+                y={cy - (value / max) * maxR + (overlay ? 10 : 4)}
                 fontSize={percentageSize}
                 fill={EXCEL.text}
               >
@@ -144,6 +151,19 @@ export function RoseChart({
             stroke={color}
             strokeWidth="2"
           />
+          {!!overlay?.rows.length && (
+            <polygon
+              points={overlay.rows
+                .map((r) =>
+                  point(angleOf(r), (Number(r[key]) / max) * maxR).join(","),
+                )
+                .join(" ")}
+              fill="none"
+              stroke={overlay.color}
+              strokeWidth="4"
+              strokeDasharray="10 5"
+            />
+          )}
           {rows.map((r, i) => {
             const a = angleOf(r);
             const p = point(a, (Number(r[key]) / max) * maxR);

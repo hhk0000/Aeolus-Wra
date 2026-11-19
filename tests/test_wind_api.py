@@ -94,6 +94,28 @@ def test_concurrent_uses_shared_hours_without_filling_gaps(client):
     assert metrics["speed"]["counts"] == [1, 2]
     assert metrics["speed"]["paired"] == metrics["speed"]["visible"] == 1
     assert metrics["speed"]["points"][0][1:3] == [4, 5]
+    summary = snapshot["summary"]
+    legacy = client.app.state.wind_store.put(
+        "concurrent", {key: value for key, value in snapshot.items() if key != "summary"}
+    )
+    assert client.get(f"/api/v1/concurrent/{legacy['id']}").json()["summary"] == summary
+    assert summary["stages"] == ["qc", "reference"]
+    assert summary["monthly_speed"] == [[4] + [None] * 11 + [4], [5] + [None] * 11 + [5]]
+    assert summary["direction"][0][0]["frequency"] == 100
+    assert summary["energy"][1][0]["energy_frequency"] == 100
+    zoomed = client.post(
+        f"/api/v1/concurrent/{snapshot['id']}/window",
+        json={"start": snapshot["start"], "end": snapshot["start"] + 3600},
+    )
+    assert zoomed.status_code == 200, zoomed.text
+    assert zoomed.json()["metrics"]["speed"]["points"][0][1:3] == [4, 5]
+    assert (
+        client.post(
+            f"/api/v1/concurrent/{snapshot['id']}/window",
+            json={"start": snapshot["start"] - 1, "end": snapshot["end"]},
+        ).status_code
+        == 422
+    )
     assert abs(metrics["direction"]["points"][0][1] - 360) < 1e-9 or (
         abs(metrics["direction"]["points"][0][1]) < 1e-9
     )

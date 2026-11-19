@@ -27,7 +27,17 @@ npm.cmd --prefix frontend ci
 依赖锁文件适用于 Python 3.12。Linux/macOS 将解释器路径替换为 `.venv/bin/python`。
 如环境需要网络代理，可在安装命令中显式指定本机代理；代理地址不写入项目配置。
 
-## 启动与查看
+## Windows 离线使用
+
+双击仓库根目录的 `Start-Aeolus-Offline.cmd`，浏览器会打开 <http://127.0.0.1:5173/>。
+启动时使用本机已安装的 Python 环境和已构建的网页，导入、分析、图表和导出可离线使用。
+保留启动窗口，结束时按 Ctrl+C。网页和计算接口使用同一地址。
+
+- 首次准备依赖按上节操作。准备离线版或更新前端后，运行 `npm.cmd --prefix frontend run build`。
+- 文件和运行结果默认使用项目的 `data/engine`。浏览器保存的项目配置和头像随浏览器配置文件及地址保留，因此继续使用原浏览器配置文件和上述地址。
+- 规范库里的外部链接需要网络访问。
+
+## 开发启动与查看
 
 ```text
 .venv\Scripts\python.exe scripts/dev.py

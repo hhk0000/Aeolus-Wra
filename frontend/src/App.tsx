@@ -43,6 +43,34 @@ type Project = {
   type: string;
   demo: boolean;
 };
+const avatarKey = "aeolus.profile.avatar";
+const avatarFileTypes = ["image/jpeg", "image/png", "image/webp"];
+
+async function avatarThumbnail(file: File) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("浏览器无法处理这张图片。");
+    const side = Math.min(bitmap.width, bitmap.height);
+    context.drawImage(
+      bitmap,
+      (bitmap.width - side) / 2,
+      (bitmap.height - side) / 2,
+      side,
+      side,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    return canvas.toDataURL("image/webp", 0.9);
+  } finally {
+    bitmap.close();
+  }
+}
+
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, ReactNode> = {
     grid: (
@@ -142,6 +170,15 @@ export default function App() {
 }
 
 function WorkspaceApp() {
+  const avatarInput = useRef<HTMLInputElement>(null);
+  const avatarRequest = useRef(0);
+  const [avatar, setAvatar] = useState(() => {
+    try {
+      return localStorage.getItem(avatarKey) ?? "";
+    } catch {
+      return "";
+    }
+  });
   const [page, setPage] = useState(0);
   const [pageHistory, setPageHistory] = useState<number[]>([]);
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -228,6 +265,23 @@ function WorkspaceApp() {
   const [region, setRegion] = useState("");
   const [type, setType] = useState("陆上风电");
   const [notice, setNotice] = useState("");
+  async function chooseAvatar(file: File) {
+    const request = ++avatarRequest.current;
+    if (!avatarFileTypes.includes(file.type)) {
+      setNotice("请选择 JPG、PNG 或 WebP 图片。");
+      return;
+    }
+    try {
+      const image = await avatarThumbnail(file);
+      if (request !== avatarRequest.current) return;
+      localStorage.setItem(avatarKey, image);
+      setAvatar(image);
+      setNotice("头像已保存到当前浏览器。");
+    } catch {
+      if (request === avatarRequest.current)
+        setNotice("这张图片暂时无法读取或保存，请换一张重试。");
+    }
+  }
   const [health, setHealth] = useState("连接检查中");
   useEffect(() => {
     let active = true;
@@ -368,7 +422,27 @@ function WorkspaceApp() {
           <span className="version">界面预览 · v0.1</span>
         </div>
         <div className="profile">
-          <div className="avatar">HHK</div>
+          <button
+            type="button"
+            className="avatar avatar-picker"
+            title="上传头像"
+            aria-label="上传头像"
+            onClick={() => avatarInput.current?.click()}
+          >
+            {avatar ? <img src={avatar} alt="" /> : "HHK"}
+          </button>
+          <input
+            type="file"
+            accept={avatarFileTypes.join(",")}
+            ref={avatarInput}
+            hidden
+            aria-label="选择头像图片"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) void chooseAvatar(file);
+            }}
+          />
           <div>
             <strong>HHK 的工作空间</strong>
             <span>本地工作环境</span>
@@ -397,7 +471,9 @@ function WorkspaceApp() {
               <i className={health === "分析服务已连接" ? "connected" : ""} />
               {health}
             </span>
-            <span className="avatar mini">HHK</span>
+            <span className="avatar mini">
+              {avatar ? <img src={avatar} alt="HHK" /> : "HHK"}
+            </span>
           </div>
         </header>
         <div className="content">

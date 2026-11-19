@@ -1,10 +1,15 @@
 import { useId, useState } from "react";
 import { localInput, useErrorFocus } from "./autoSetup";
-import { correlationErrors, heightPairs, sourceLabel } from "./model";
+import {
+  correlationErrors,
+  heightPairs,
+  parseHeights,
+  sourceLabel,
+  windSpeedHeights,
+} from "./model";
 import type { CorrelationDraft, WorkspaceViewProps } from "./model";
 import { api, means } from "./api";
 import type { Run, Dataset } from "./api";
-import { parseHeights } from "./model";
 
 function alignedPeriod(
   files: WorkspaceViewProps["state"]["files"],
@@ -69,6 +74,9 @@ export default function CorrelationSetup({
       (defaultHeight ? String(defaultHeight) : ""),
   };
   const targets = state.files.filter((f) => f.kind !== "reference");
+  const right = state.files.find((f) => f.id === draft.rightFileId);
+  const leftHeights = windSpeedHeights(left?.dataset);
+  const rightHeights = windSpeedHeights(right?.dataset);
   const comparisons = state.files.filter((f) =>
     draft.mode === "reference"
       ? f.kind === "reference"
@@ -119,14 +127,30 @@ export default function CorrelationSetup({
     return range ? { ...next, ...range } : next;
   }
   function selectFile(key: "leftFileId" | "rightFileId", id: string) {
+    setApiError("");
     onChange((current) => {
+      const isTarget = key === "leftFileId";
+      const heightKey = isTarget ? "leftHeights" : "rightHeights";
+      const channelKey = isTarget ? "targetChannels" : "referenceChannels";
       const next: CorrelationDraft = {
         ...current.correlation,
         [key]: id,
-        ...(key === "leftFileId" && current.correlation.mode === "cross-tower"
-          ? { rightFileId: "" }
+        [channelKey]: {},
+        ...(isTarget && current.correlation.mode === "cross-tower"
+          ? { rightFileId: "", referenceChannels: {} }
           : {}),
       };
+      if (next.mode === "reference") {
+        const heights = windSpeedHeights(
+          current.files.find((file) => file.id === id)?.dataset,
+        );
+        const previous = parseHeights(next[heightKey]);
+        if (
+          !previous.length ||
+          previous.some((height) => !heights.includes(height))
+        )
+          next[heightKey] = heights.length ? String(heights[0]) : "";
+      }
       return {
         ...current,
         correlation: aligned(current, next),
@@ -144,6 +168,7 @@ export default function CorrelationSetup({
     key: K,
     value: CorrelationDraft[K],
   ) {
+    setApiError("");
     onChange((current) => ({
       ...current,
       correlation: { ...current.correlation, [key]: value },
@@ -181,8 +206,10 @@ export default function CorrelationSetup({
         quantity = "speed",
       ) => {
         const channels = means(data, quantity).filter(
-          (c) => c.height === height && (!chosen || c.id === chosen),
+          (c) => c.height === height,
         );
+        const explicit = channels.find((c) => c.id === chosen);
+        if (explicit) return explicit.id;
         if (channels.length !== 1)
           throw new Error(
             `${height}m ${quantity === "speed" ? "风速" : "风向"}未唯一匹配，请确认同高度支臂通道。`,
@@ -283,6 +310,7 @@ export default function CorrelationSetup({
                   ...current.correlation,
                   mode: id as CorrelationDraft["mode"],
                   rightFileId: "",
+                  referenceChannels: {},
                 }),
               }));
               setShowErrors(false);
@@ -349,12 +377,20 @@ export default function CorrelationSetup({
                 {...fieldProps("leftHeights")}
                 value={draft.leftHeights}
                 onChange={(e) => change("leftHeights", e.target.value)}
-                placeholder="例如 50, 70, 100, 120"
+                list={`${formId}-target-heights`}
+                placeholder="输入一层或多层高度"
               />
+              <datalist id={`${formId}-target-heights`}>
+                {leftHeights.map((height) => (
+                  <option key={height} value={height} />
+                ))}
+              </datalist>
               <small>
                 {draft.mode === "same-tower"
                   ? "两两组合，每个高度对生成一组图。"
-                  : "多高度将与对比高度逐一配对。"}
+                  : "两侧可选不同高度，多高度将逐一配对。"}
+                {leftHeights.length > 0 &&
+                  ` 可选：${leftHeights.join("、")} m。`}
               </small>
               {fieldError("leftHeights")}
             </label>
@@ -365,8 +401,17 @@ export default function CorrelationSetup({
                   {...fieldProps("rightHeights")}
                   value={draft.rightHeights}
                   onChange={(e) => change("rightHeights", e.target.value)}
-                  placeholder="例如 100"
+                  list={`${formId}-reference-heights`}
+                  placeholder="输入对比文件中的高度"
                 />
+                <datalist id={`${formId}-reference-heights`}>
+                  {rightHeights.map((height) => (
+                    <option key={height} value={height} />
+                  ))}
+                </datalist>
+                {rightHeights.length > 0 && (
+                  <small>可选：{rightHeights.join("、")} m。</small>
+                )}
                 {fieldError("rightHeights")}
               </label>
             )}
@@ -544,7 +589,7 @@ export default function CorrelationSetup({
         </p>
       </div>
       <section className="ww-panel">
-        <h3>同期对齐与同高通道确认</h3>
+        <h3>同期对齐与风速通道</h3>
         <div className="ww-fields ww-fields-three">
           <label>
             同期时间步长
@@ -570,11 +615,7 @@ export default function CorrelationSetup({
             parseHeights(
               side === "target" ? draft.leftHeights : draft.rightHeights,
             ).map((height) => {
-              const data = (
-                side === "target"
-                  ? left
-                  : state.files.find((f) => f.id === draft.rightFileId)
-              )?.dataset;
+              const data = (side === "target" ? left : right)?.dataset;
               const channels = means(data).filter((c) => c.height === height);
               const key =
                 side === "target" ? "targetChannels" : "referenceChannels";
@@ -582,7 +623,11 @@ export default function CorrelationSetup({
                 <label key={`${side}-${height}`}>
                   {side === "target" ? "目标Y" : "参考X"} · {height}m
                   <select
-                    value={draft[key][String(height)] ?? ""}
+                    value={
+                      channels.find((c) => c.id === draft[key][String(height)])
+                        ?.id ?? (channels.length === 1 ? channels[0].id : "")
+                    }
+                    disabled={channels.length < 2}
                     onChange={(e) =>
                       change(key, {
                         ...draft[key],
@@ -591,9 +636,9 @@ export default function CorrelationSetup({
                     }
                   >
                     <option value="">
-                      {channels.length === 1
-                        ? "唯一通道，可直接匹配"
-                        : "请明确选择同高通道"}
+                      {channels.length
+                        ? "请选择此高度的支臂通道"
+                        : "此文件没有该高度"}
                     </option>
                     {channels.map((c) => (
                       <option key={c.id} value={c.id}>

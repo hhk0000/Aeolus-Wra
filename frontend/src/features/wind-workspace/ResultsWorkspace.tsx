@@ -4,6 +4,7 @@ import { activateTower } from "./autoSetup";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
 import type {
   OutputSpec,
+  ConcurrentJob,
   SourceKind,
   WorkspaceTab,
   WorkspaceViewProps,
@@ -12,6 +13,9 @@ import { ResultView } from "./ResultView";
 import WorkspaceReportExport from "./WorkspaceReportExport";
 import TowerComparison from "./TowerComparison";
 import { ChartTextScale } from "./chartText";
+import { api } from "./api";
+import { ConcurrentCharts } from "./ConcurrentSetup";
+import type { ConcurrentComparison } from "./ConcurrentSetup";
 import "./workspace.css";
 
 const readingKey = "aeolus.chartReading";
@@ -42,11 +46,79 @@ interface ResultsProps extends WorkspaceViewProps {
   onConfigure: (tab: WorkspaceTab) => void;
   projectId?: number;
 }
-type GalleryFilter = SourceKind | "all" | "correlation";
+type GalleryFilter = SourceKind | "all" | "correlation" | "concurrent";
 const gallerySelection = new Map<
   number,
   { filter: GalleryFilter; activeId: string; pairIndex: number }
 >();
+
+function ConcurrentGalleryResult({ job }: { job: ConcurrentJob }) {
+  const [result, setResult] = useState<ConcurrentComparison>();
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<ConcurrentComparison>(
+      `/concurrent/${job.id}`,
+      undefined,
+      controller.signal,
+    )
+      .then(setResult)
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted) setError(cause.message);
+      });
+    return () => controller.abort();
+  }, [job.id, attempt]);
+  return (
+    <>
+      <h2>同期分析结果对比</h2>
+      <p>
+        {job.start.replace("T", " ")} → {job.end.replace("T", " ")}（终点不含）
+      </p>
+      <div className="ww-concurrent-grid ww-concurrent-sources">
+        {job.sources.map((source, index) => (
+          <section key={index}>
+            <h3>{index === 0 ? "数据 A" : "数据 B"}</h3>
+            <p>{source.label}</p>
+            {source.channels.map((channel) => (
+              <p key={channel}>{channel}</p>
+            ))}
+          </section>
+        ))}
+      </div>
+      {result ? (
+        <>
+          <p className="ww-inline-note">
+            {result.config.aggregation === "hourly"
+              ? "完整小时对齐"
+              : "原始步长对齐"}
+            {" · "}
+            {result.config.paired_only
+              ? "仅保留双方同时有数据的时刻"
+              : "保留任一侧有数据的时刻"}
+          </p>
+          <ConcurrentCharts result={result} />
+        </>
+      ) : error ? (
+        <div className="ww-chart-actions">
+          <p role="alert">{error}</p>
+          <button
+            type="button"
+            className="ww-button"
+            onClick={() => {
+              setError("");
+              setAttempt((previous) => previous + 1);
+            }}
+          >
+            重新载入
+          </button>
+        </div>
+      ) : (
+        <p role="status">正在加载同期分析结果…</p>
+      )}
+    </>
+  );
+}
 
 export function ResultsWorkspace({
   state,
@@ -144,6 +216,16 @@ export function ResultsWorkspace({
     state.correlationJobs[0];
   const pairRun =
     job?.runs?.[Math.min(pairIndex, (job?.runs?.length ?? 1) - 1)];
+  const concurrentJobs = state.concurrentJobs ?? [];
+  const concurrentJob =
+    concurrentJobs.find((entry) => entry.id === activeId) ??
+    concurrentJobs.at(-1);
+  const groupCount =
+    filter === "concurrent"
+      ? concurrentJobs.length
+      : filter === "correlation"
+        ? state.correlationJobs.length
+        : filtered.length;
   if (compare)
     return (
       <ChartTextScale.Provider value={reading.axis / 100}>
@@ -183,6 +265,7 @@ export function ResultsWorkspace({
               ["all", "全部"],
               ...SOURCE_TYPES.map((s) => [s.id, s.shortLabel]),
               ["correlation", "相关性"],
+              ["concurrent", "同期对比"],
             ] as [typeof filter, string][]
           ).map(([id, label]) => (
             <button
@@ -204,7 +287,7 @@ export function ResultsWorkspace({
           <button type="button" onClick={() => setCompare(true)}>
             多塔对比
           </button>
-          <span className="ww-gallery-count">共 {filtered.length} 组</span>
+          <span className="ww-gallery-count">共 {groupCount} 组</span>
           <details className="ww-reading-settings">
             <summary>图幅与字号</summary>
             <div className="ww-reading-drawer">
@@ -253,46 +336,81 @@ export function ResultsWorkspace({
       </div>
       <div className="ww-gallery-layout">
         <aside className="ww-chart-list">
-          {filter === "correlation"
-            ? state.correlationJobs.map((j, i) => (
+          {filter === "concurrent"
+            ? concurrentJobs.map((entry, i) => (
                 <button
-                  key={j.id}
-                  className={job?.id === j.id ? "active" : ""}
+                  key={entry.id}
+                  className={concurrentJob?.id === entry.id ? "active" : ""}
                   onClick={() => {
-                    setActiveId(j.id);
-                    setPairIndex(0);
+                    setActiveId(entry.id);
                     showStage();
                   }}
                 >
                   <span>
-                    <strong>相关性任务 {i + 1}</strong>
+                    <strong>同期分析 {i + 1}</strong>
                     <small>
-                      {j.pairs.length}组高度对 · {j.sectors}扇区
+                      {entry.start.slice(0, 10)} → {entry.end.slice(0, 10)}
                     </small>
                   </span>
                 </button>
               ))
-            : filtered.map((o) => (
-                <button
-                  key={o.id}
-                  className={active?.id === o.id ? "active" : ""}
-                  onClick={() => {
-                    setActiveId(o.id);
-                    showStage();
-                  }}
-                >
-                  <span className={`ww-mini-source ${o.kind}`} />
-                  <span>
-                    <strong>{o.title}</strong>
-                    <small>{o.form}</small>
-                  </span>
-                  <span className="ww-chevron">›</span>
-                </button>
-              ))}
+            : filter === "correlation"
+              ? state.correlationJobs.map((j, i) => (
+                  <button
+                    key={j.id}
+                    className={job?.id === j.id ? "active" : ""}
+                    onClick={() => {
+                      setActiveId(j.id);
+                      setPairIndex(0);
+                      showStage();
+                    }}
+                  >
+                    <span>
+                      <strong>相关性任务 {i + 1}</strong>
+                      <small>
+                        {j.pairs.length}组高度对 · {j.sectors}扇区
+                      </small>
+                    </span>
+                  </button>
+                ))
+              : filtered.map((o) => (
+                  <button
+                    key={o.id}
+                    className={active?.id === o.id ? "active" : ""}
+                    onClick={() => {
+                      setActiveId(o.id);
+                      showStage();
+                    }}
+                  >
+                    <span className={`ww-mini-source ${o.kind}`} />
+                    <span>
+                      <strong>{o.title}</strong>
+                      <small>{o.form}</small>
+                    </span>
+                    <span className="ww-chevron">›</span>
+                  </button>
+                ))}
         </aside>
         <ChartTextScale.Provider value={reading.axis / 100}>
           <section className="ww-panel ww-chart-stage" ref={stage}>
-            {filter === "correlation" ? (
+            {filter === "concurrent" ? (
+              concurrentJob ? (
+                <ConcurrentGalleryResult
+                  key={concurrentJob.id}
+                  job={concurrentJob}
+                />
+              ) : (
+                <div className="ww-simple-empty">
+                  <h3>还没有同期分析结果</h3>
+                  <button
+                    className="ww-button"
+                    onClick={() => onConfigure("concurrent")}
+                  >
+                    前往同期分析 →
+                  </button>
+                </div>
+              )
+            ) : filter === "correlation" ? (
               job ? (
                 <>
                   <div className="ww-section-heading">

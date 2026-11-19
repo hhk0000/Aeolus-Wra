@@ -86,7 +86,11 @@ def test_concurrent_uses_shared_hours_without_filling_gaps(client):
     }
     aligned = client.post("/api/v1/concurrent", json=payload)
     assert aligned.status_code == 200, aligned.text
-    metrics = aligned.json()["metrics"]
+    snapshot = aligned.json()
+    restored = client.get(f"/api/v1/concurrent/{snapshot['id']}")
+    assert restored.status_code == 200
+    assert restored.json() == snapshot
+    metrics = snapshot["metrics"]
     assert metrics["speed"]["counts"] == [1, 2]
     assert metrics["speed"]["paired"] == metrics["speed"]["visible"] == 1
     assert metrics["speed"]["points"][0][1:3] == [4, 5]

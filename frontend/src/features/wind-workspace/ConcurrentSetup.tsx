@@ -17,10 +17,12 @@ type Series = {
   visible: number;
   points: Point[];
 };
-type Comparison = {
+export type ConcurrentComparison = {
+  id: string;
   start: number;
   end: number;
   timezone: string;
+  config: { paired_only: boolean; aggregation: "hourly" | "native" };
   metrics: Partial<Record<Quantity, Series>>;
 };
 const quantities: Quantity[] = ["speed", "direction"];
@@ -43,7 +45,7 @@ function ConcurrentChart({
   result,
 }: {
   metric: Quantity;
-  result: Comparison;
+  result: ConcurrentComparison;
 }) {
   const label = captions[metric];
   const series = result.metrics[metric];
@@ -61,9 +63,15 @@ function ConcurrentChart({
     ...points.flatMap((p) => [p[1] ?? 0, p[2] ?? 0]),
   );
   const max = metric === "direction" ? 360 : Math.ceil(speedMax);
-  const left = 78,
+  const axisSize = textSize(16);
+  const timeSize = textSize(15);
+  const topPadding = axisSize + 14;
+  const panelGap = Math.max(43, axisSize + 16);
+  const left = Math.max(78, axisSize * 2.6),
     right = 685,
     panelHeight = 99;
+  const dateY = topPadding + 2 * panelHeight + panelGap + timeSize + 5;
+  const ticks = timeSize > 24 ? [0, 1] : [0, 1 / 3, 2 / 3, 1];
   const x = (time: number) =>
     left +
     ((right - left) * (time - result.start)) / (result.end - result.start);
@@ -80,13 +88,13 @@ function ConcurrentChart({
       )}
       {points.length ? (
         <svg
-          viewBox="0 0 705 320"
+          viewBox={`0 0 705 ${dateY + timeSize + 18}`}
           role="img"
           aria-label={label + "同期，A 在上，B 在下"}
           {...excelSvgProps()}
         >
           {([0, 1] as const).map((side) => {
-            const top = 29 + side * 130;
+            const top = topPadding + side * (panelHeight + panelGap);
             const y = (value: number) => top + panelHeight * (1 - value / max);
             let previousSegment: number | undefined;
             const path = points
@@ -105,11 +113,11 @@ function ConcurrentChart({
               .join(" ");
             return (
               <g key={side}>
-                <text x={left} y={top - 8} fontSize={textSize(13)}>
+                <text x={left} y={top - 8} fontSize={axisSize}>
                   {side ? "B" : "A"} · {label}（
                   {metric === "speed" ? "m/s" : "°"}）
                 </text>
-                {[0, 1, 2, 3, 4].map((tick) => (
+                {(axisSize > 24 ? [0, 2, 4] : [0, 1, 2, 3, 4]).map((tick) => (
                   <g key={tick}>
                     <line
                       x1={left}
@@ -122,7 +130,7 @@ function ConcurrentChart({
                       x={left - 8}
                       y={y((tick * max) / 4) + 4}
                       textAnchor="end"
-                      fontSize={textSize(12)}
+                      fontSize={axisSize}
                     >
                       {Number(((tick * max) / 4).toFixed(1))}
                     </text>
@@ -138,27 +146,36 @@ function ConcurrentChart({
               </g>
             );
           })}
-          {[0, 1, 2, 3].map((step) => {
-            const time =
-              result.start + (step * (result.end - result.start)) / 3;
+          {ticks.map((step) => {
+            const time = result.start + step * (result.end - result.start);
+            const iso = localInput(
+              new Date(time * 1000).toISOString(),
+              result.timezone,
+            );
+            const caption =
+              result.end - result.start >= 365 * 86400
+                ? iso.slice(0, 10)
+                : iso.slice(5).replace("T", " ");
             return (
               <text
                 key={step}
                 x={x(time)}
-                y="286"
+                y={dateY}
                 textAnchor={
-                  step === 0 ? "start" : step === 3 ? "end" : "middle"
+                  step === 0 ? "start" : step === 1 ? "end" : "middle"
                 }
-                fontSize={textSize(11)}
+                fontSize={timeSize}
               >
-                {localInput(
-                  new Date(time * 1000).toISOString(),
-                  result.timezone,
-                ).replace("T", " ")}
+                {caption}
               </text>
             );
           })}
-          <text x="380" y="311" textAnchor="middle" fontSize={textSize(12)}>
+          <text
+            x="380"
+            y={dateY + timeSize + 10}
+            textAnchor="middle"
+            fontSize={textSize(12)}
+          >
             {result.timezone}
           </text>
         </svg>
@@ -169,7 +186,21 @@ function ConcurrentChart({
   );
 }
 
-export default function ConcurrentSetup({ state }: WorkspaceViewProps) {
+export function ConcurrentCharts({ result }: { result: ConcurrentComparison }) {
+  return (
+    <div className="ww-concurrent-grid ww-concurrent-charts">
+      {quantities.map((metric) => (
+        <ConcurrentChart key={metric} result={result} metric={metric} />
+      ))}
+    </div>
+  );
+}
+
+export default function ConcurrentSetup({
+  state,
+  onChange,
+  onNotice,
+}: WorkspaceViewProps) {
   const files = state.files.filter((file) => file.dataset);
   const [a, setA] = useState<Choice>({});
   const [b, setB] = useState<Choice>({});
@@ -177,7 +208,7 @@ export default function ConcurrentSetup({ state }: WorkspaceViewProps) {
   const [end, setEnd] = useState("");
   const [paired, setPaired] = useState(true);
   const [alignment, setAlignment] = useState("");
-  const [result, setResult] = useState<Comparison>();
+  const [result, setResult] = useState<ConcurrentComparison>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileA =
@@ -225,21 +256,54 @@ export default function ConcurrentSetup({ state }: WorkspaceViewProps) {
   });
   async function calculate(event: FormEvent) {
     event.preventDefault();
-    if (!datasetA || !datasetB) return;
+    if (!fileA || !fileB || !datasetA || !datasetB) return;
     setBusy(true);
     setError("");
     try {
-      setResult(
-        await api<Comparison>("/concurrent", {
-          a: channelConfig(datasetA, a),
-          b: channelConfig(datasetB, b),
-          start: start || dateValue("start"),
-          end: end || dateValue("end"),
-          aggregation,
-          timezone,
-          paired_only: paired,
-        }),
-      );
+      const requestedStart = start || dateValue("start");
+      const requestedEnd = end || dateValue("end");
+      const target = channelConfig(datasetA, a);
+      const reference = channelConfig(datasetB, b);
+      const comparison = await api<ConcurrentComparison>("/concurrent", {
+        a: target,
+        b: reference,
+        start: requestedStart,
+        end: requestedEnd,
+        aggregation,
+        timezone,
+        paired_only: paired,
+      });
+      const sources = (
+        [
+          [fileA, datasetA, target],
+          [fileB, datasetB, reference],
+        ] as const
+      ).map(([file, dataset, config]) => ({
+        label: sourceLabel(file, state),
+        channels: [config.speed_channel, config.direction_channel]
+          .map((id) => dataset.channels.find((channel) => channel.id === id))
+          .flatMap((channel) =>
+            channel
+              ? [
+                  `${captions[channel.quantity === "direction" ? "direction" : "speed"]} ${channel.height} m · ${channel.name}`,
+                ]
+              : [],
+          ),
+      }));
+      onChange((current) => ({
+        ...current,
+        concurrentJobs: [
+          ...(current.concurrentJobs ?? []),
+          {
+            id: comparison.id,
+            start: requestedStart,
+            end: requestedEnd,
+            sources,
+          },
+        ],
+      }));
+      setResult(comparison);
+      onNotice("同期分析已保存，可在图表中心的「同期对比」查看。");
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -363,10 +427,8 @@ export default function ConcurrentSetup({ state }: WorkspaceViewProps) {
         )}
       </section>
       {result && (
-        <section className="ww-panel ww-concurrent-grid ww-concurrent-charts">
-          {quantities.map((metric) => (
-            <ConcurrentChart key={metric} result={result} metric={metric} />
-          ))}
+        <section className="ww-panel">
+          <ConcurrentCharts result={result} />
         </section>
       )}
     </div>

@@ -1969,6 +1969,23 @@
   width: 100%;
   background: #fff;
 }
+.ww-concurrent-sources {
+  margin: 16px 0;
+}
+.ww-concurrent-sources section {
+  padding: 12px;
+  border: 1px solid var(--ww-line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.ww-chart-stage .ww-concurrent-charts section {
+  min-width: 0;
+  overflow-x: auto;
+}
+.ww-chart-stage .ww-concurrent-charts svg {
+  width: calc(100% * var(--ww-plot-scale, 1));
+  max-width: none;
+}
 @media (max-width: 800px) {
   .ww-concurrent-grid {
     grid-template-columns: minmax(0, 1fr);

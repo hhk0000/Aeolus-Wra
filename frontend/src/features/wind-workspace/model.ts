@@ -1,5 +1,6 @@
 export type SourceKind = "raw" | "qc" | "result" | "reference";
 import type { UploadedFile, Dataset, Run } from "./api";
+import { means } from "./api";
 export type WorkspaceTab =
   "data" | "analysis" | "correlation" | "concurrent" | "long-term" | "tools";
 
@@ -100,6 +101,13 @@ export interface CorrelationJob extends CorrelationDraft {
   runs?: Run[];
 }
 
+export interface ConcurrentJob {
+  id: string;
+  sources: { label: string; channels: string[] }[];
+  start: string;
+  end: string;
+}
+
 export interface WorkspaceState {
   analysisByTower?: Record<string, WorkspaceState["analysis"]>;
   autoValues?: Record<string, Partial<Record<keyof Tower, string>>>;
@@ -111,6 +119,7 @@ export interface WorkspaceState {
   qcPeriod: "all" | "analysis";
   correlation: CorrelationDraft;
   correlationJobs: CorrelationJob[];
+  concurrentJobs?: ConcurrentJob[];
   longTerm: {
     fileId: string;
     height: string;
@@ -374,6 +383,12 @@ export function heightPairs(draft: CorrelationDraft): [number, number][] {
   return left.flatMap((h) => right.map((r): [number, number] => [h, r]));
 }
 
+export function windSpeedHeights(data?: Dataset): number[] {
+  return [...new Set(means(data).map((channel) => channel.height))]
+    .filter((height) => Number.isFinite(height) && height > 0)
+    .sort((a, b) => b - a);
+}
+
 export function correlationErrors(state: WorkspaceState) {
   const draft = state.correlation;
   const left = state.files.find((f) => f.id === draft.leftFileId);
@@ -416,6 +431,23 @@ export function correlationErrors(state: WorkspaceState) {
     );
   if (draft.mode !== "same-tower" && !parseHeights(draft.rightHeights).length)
     add("rightHeights", "请填写有效的对比高度。");
+  for (const [field, data] of [
+    ["leftHeights", left?.dataset],
+    ["rightHeights", draft.mode === "same-tower" ? undefined : right?.dataset],
+  ] as const) {
+    if (!data) continue;
+    const available = windSpeedHeights(data);
+    const missing = parseHeights(draft[field]).filter(
+      (height) => !available.includes(height),
+    );
+    if (missing.length)
+      add(
+        field,
+        available.length
+          ? `所选文件没有 ${missing.join("、")} m 平均风速通道。可选高度：${available.join("、")} m。`
+          : "所选文件没有已识别的平均风速通道，请检查通道映射。",
+      );
+  }
   if (!draft.start) add("start", "请设置相关性开始时间。");
   if (!draft.end || (draft.start && draft.start >= draft.end))
     add("end", "请设置晚于起点的相关性结束时间。");

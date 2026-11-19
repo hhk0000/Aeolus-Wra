@@ -238,7 +238,14 @@ def get_run(id_: str, request: Request):
 
 @router.post("/concurrent")
 def concurrent(config: ConcurrentOptions, request: Request):
-    return compare_concurrent(store(request), config)
+    local = store(request)
+    comparison = compare_concurrent(local, config)
+    return local.put("concurrent", {**comparison, "config": config.model_dump()})
+
+
+@router.get("/concurrent/{id_}")
+def get_concurrent(id_: str, request: Request):
+    return store(request).get("concurrent", id_)
 
 
 class MeasuredDirectionOptions(BaseModel):

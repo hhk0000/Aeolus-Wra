@@ -1978,10 +1978,30 @@
   border-radius: 4px;
   text-align: center;
 }
-.ww-year-bar {
+.ww-year-zero {
+  text-align: center;
+  color: #52675d;
+}
+.ww-wind-year-cell {
   position: relative;
-  width: 44px;
+}
+.ww-wind-year-cell::before {
+  content: "";
+  position: absolute;
+  left: calc(3.25em + 4.4em + 24px + 44px);
+  inset-block: 0;
+  border-left: 1px solid #9aafa3;
+  pointer-events: none;
+}
+.ww-year-track {
+  position: relative;
+  width: 88px;
   height: 10px;
+}
+.ww-year-bar {
+  position: absolute;
+  width: 50%;
+  inset-block: 0;
 }
 .ww-year-bar i {
   position: absolute;
@@ -1989,19 +2009,27 @@
   bottom: 0;
 }
 .ww-year-bar.higher {
-  margin-left: 44px;
-  border-left: 1px solid #b2c2b9;
+  left: 50%;
 }
 .ww-year-bar.higher i {
   left: 0;
   background: #c0504d;
 }
 .ww-year-bar.lower {
-  border-right: 1px solid #b2c2b9;
+  right: 50%;
 }
 .ww-year-bar.lower i {
   right: 0;
   background: #4f81bd;
+}
+.ww-year-bar.typical i {
+  min-width: 2px;
+  background: #24774b;
+}
+.ww-concurrent-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .ww-concurrent-analysis {
   display: grid;
@@ -2061,6 +2089,56 @@
 .ww-concurrent-zoom-target {
   cursor: crosshair;
   touch-action: pan-y;
+}
+.ww-concurrent-readout {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  min-height: 36px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: #f2f7f3;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #40594f;
+  font-variant-numeric: tabular-nums;
+}
+.ww-concurrent-readout span {
+  white-space: nowrap;
+}
+.ww-concurrent-timeline [role="slider"]:focus-visible {
+  outline: 2px solid #2f7d5b;
+  outline-offset: 2px;
+}
+.ww-concurrent-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-top: 1px solid var(--ww-line);
+  padding: 4px 0 0;
+}
+.ww-chart-list .ww-concurrent-task-actions button {
+  display: block;
+  width: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  color: #255440;
+  font-size: 12px;
+}
+.ww-chart-list .ww-concurrent-task-actions button:last-child {
+  color: #86382e;
+}
+.ww-concurrent-task-dialog {
+  max-width: calc(100% - 32px);
+  color: #263530;
+}
+.ww-concurrent-task-dialog::backdrop {
+  background: #18322973;
+}
+.ww-concurrent-task-dialog h2 {
+  margin-top: 0;
 }
 .ww-concurrent-roses figure figcaption {
   display: none;

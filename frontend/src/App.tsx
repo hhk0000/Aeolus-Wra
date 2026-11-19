@@ -43,7 +43,35 @@ type Project = {
   type: string;
   demo: boolean;
 };
+const profileKey = "aeolus.profile.v1";
 const avatarKey = "aeolus.profile.avatar";
+type Profile = { nickname: string; avatar: string };
+const defaultProfile: Profile = { nickname: "HHK", avatar: "" };
+
+function loadProfile(): Profile {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(profileKey) ?? "null",
+    ) as Partial<Profile> | null;
+    return {
+      nickname:
+        (typeof saved?.nickname === "string" && saved.nickname.trim()) ||
+        defaultProfile.nickname,
+      avatar:
+        typeof saved?.avatar === "string"
+          ? saved.avatar
+          : (localStorage.getItem(avatarKey) ?? ""),
+    };
+  } catch {
+    return defaultProfile;
+  }
+}
+
+function profileInitials(nickname: string) {
+  return /^[a-z0-9]{1,3}$/i.test(nickname)
+    ? nickname
+    : Array.from(nickname).slice(0, 2).join("");
+}
 const avatarFileTypes = ["image/jpeg", "image/png", "image/webp"];
 
 async function avatarThumbnail(file: File) {
@@ -171,14 +199,12 @@ export default function App() {
 
 function WorkspaceApp() {
   const avatarInput = useRef<HTMLInputElement>(null);
+  const profileDialog = useRef<HTMLDialogElement>(null);
   const avatarRequest = useRef(0);
-  const [avatar, setAvatar] = useState(() => {
-    try {
-      return localStorage.getItem(avatarKey) ?? "";
-    } catch {
-      return "";
-    }
-  });
+  const [profile, setProfile] = useState(loadProfile);
+  const [draftProfile, setDraftProfile] = useState(defaultProfile);
+  const [profileError, setProfileError] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
   const [page, setPage] = useState(0);
   const [galleryJobId, setGalleryJobId] = useState<string>();
   const [pageHistory, setPageHistory] = useState<number[]>([]);
@@ -266,22 +292,46 @@ function WorkspaceApp() {
   const [region, setRegion] = useState("");
   const [type, setType] = useState("陆上风电");
   const [notice, setNotice] = useState("");
+  function openProfile() {
+    setDraftProfile(profile);
+    setProfileError("");
+    profileDialog.current?.showModal();
+  }
   async function chooseAvatar(file: File) {
     const request = ++avatarRequest.current;
     if (!avatarFileTypes.includes(file.type)) {
-      setNotice("请选择 JPG、PNG 或 WebP 图片。");
+      setProfileError("请选择 JPG、PNG 或 WebP 图片。");
       return;
     }
+    setProfileBusy(true);
+    setProfileError("");
     try {
       const image = await avatarThumbnail(file);
-      if (request !== avatarRequest.current) return;
-      localStorage.setItem(avatarKey, image);
-      setAvatar(image);
-      setNotice("头像已保存到当前浏览器。");
+      if (request === avatarRequest.current)
+        setDraftProfile((current) => ({ ...current, avatar: image }));
     } catch {
       if (request === avatarRequest.current)
-        setNotice("这张图片暂时无法读取或保存，请换一张重试。");
+        setProfileError("这张图片无法读取，请换一张重试。");
+    } finally {
+      if (request === avatarRequest.current) setProfileBusy(false);
     }
+  }
+  function saveProfile() {
+    const nickname = draftProfile.nickname.trim();
+    if (!nickname) {
+      setProfileError("请填写昵称。");
+      return;
+    }
+    const next = { ...draftProfile, nickname };
+    try {
+      localStorage.setItem(profileKey, JSON.stringify(next));
+    } catch {
+      setProfileError("浏览器暂时无法保存个人信息，请重试。");
+      return;
+    }
+    setProfile(next);
+    profileDialog.current?.close();
+    setNotice("个人信息已保存到当前浏览器。");
   }
   const [health, setHealth] = useState("连接检查中");
   useEffect(() => {
@@ -423,34 +473,25 @@ function WorkspaceApp() {
           </p>
           <span className="version">界面预览 · v0.1</span>
         </div>
-        <div className="profile">
-          <button
-            type="button"
-            className="avatar avatar-picker"
-            title="上传头像"
-            aria-label="上传头像"
-            onClick={() => avatarInput.current?.click()}
-          >
-            {avatar ? <img src={avatar} alt="" /> : "HHK"}
-          </button>
-          <input
-            type="file"
-            accept={avatarFileTypes.join(",")}
-            ref={avatarInput}
-            hidden
-            aria-label="选择头像图片"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = "";
-              if (file) void chooseAvatar(file);
-            }}
-          />
-          <div>
-            <strong>HHK 的工作空间</strong>
-            <span>本地工作环境</span>
-          </div>
+        <button
+          className="profile profile-edit"
+          type="button"
+          onClick={openProfile}
+          aria-label="编辑个人信息"
+        >
+          <span className="avatar">
+            {profile.avatar ? (
+              <img src={profile.avatar} alt="" />
+            ) : (
+              profileInitials(profile.nickname)
+            )}
+          </span>
+          <span className="profile-copy">
+            <strong>{profile.nickname} 的工作空间</strong>
+            <small>编辑个人信息</small>
+          </span>
           <span className="online-dot" />
-        </div>
+        </button>
       </aside>
       <main>
         <header className="topbar">
@@ -475,7 +516,11 @@ function WorkspaceApp() {
               {health}
             </span>
             <span className="avatar mini">
-              {avatar ? <img src={avatar} alt="HHK" /> : "HHK"}
+              {profile.avatar ? (
+                <img src={profile.avatar} alt={profile.nickname} />
+              ) : (
+                profileInitials(profile.nickname)
+              )}
             </span>
           </div>
         </header>
@@ -729,6 +774,101 @@ function WorkspaceApp() {
           {notice}
         </div>
       )}
+      <dialog
+        ref={profileDialog}
+        className="modal profile-dialog"
+        aria-labelledby="profile-title"
+        onClose={() => {
+          avatarRequest.current++;
+          setProfileBusy(false);
+        }}
+      >
+        <h2 id="profile-title">编辑个人信息</h2>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveProfile();
+          }}
+        >
+          <div className="profile-avatar-preview">
+            <span className="avatar">
+              {draftProfile.avatar ? (
+                <img src={draftProfile.avatar} alt="" />
+              ) : (
+                profileInitials(
+                  draftProfile.nickname.trim() || defaultProfile.nickname,
+                )
+              )}
+            </span>
+            <button
+              className="ww-button"
+              type="button"
+              disabled={profileBusy}
+              onClick={() => avatarInput.current?.click()}
+            >
+              选择头像
+            </button>
+            {draftProfile.avatar && (
+              <button
+                className="ww-button"
+                type="button"
+                disabled={profileBusy}
+                onClick={() =>
+                  setDraftProfile((current) => ({ ...current, avatar: "" }))
+                }
+              >
+                移除头像
+              </button>
+            )}
+            <input
+              type="file"
+              hidden
+              aria-label="选择头像图片"
+              accept={avatarFileTypes.join(",")}
+              ref={avatarInput}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void chooseAvatar(file);
+              }}
+            />
+          </div>
+          <label className="field">
+            昵称
+            <input
+              autoFocus
+              required
+              maxLength={30}
+              value={draftProfile.nickname}
+              onChange={(event) => {
+                const nickname = event.target.value;
+                setDraftProfile((current) => ({ ...current, nickname }));
+              }}
+            />
+          </label>
+          {profileError && (
+            <p className="ww-field-error" role="alert">
+              {profileError}
+            </p>
+          )}
+          <div className="project-delete-actions">
+            <button
+              type="button"
+              className="ww-button"
+              onClick={() => profileDialog.current?.close()}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="ww-button primary"
+              disabled={profileBusy}
+            >
+              保存
+            </button>
+          </div>
+        </form>
+      </dialog>
       <dialog
         ref={deleteDialog}
         className="modal project-delete-dialog"

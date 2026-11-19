@@ -251,10 +251,10 @@ def concurrent(config: ConcurrentOptions, request: Request):
 def get_concurrent(id_: str, request: Request):
     local = store(request)
     snapshot = local.get("concurrent", id_)
-    if "summary" not in snapshot:
-        snapshot["summary"] = compare_concurrent(
-            local, ConcurrentOptions.model_validate(snapshot["config"])
-        )["summary"]
+    if "summary" not in snapshot or "monthly_metrics" not in snapshot:
+        calculated = compare_concurrent(local, ConcurrentOptions.model_validate(snapshot["config"]))
+        snapshot.setdefault("summary", calculated["summary"])
+        snapshot.setdefault("monthly_metrics", calculated["monthly_metrics"])
     return snapshot
 
 

@@ -71,7 +71,7 @@ function ConcurrentGalleryResult({ job }: { job: ConcurrentJob }) {
   }, [job.id, attempt]);
   return (
     <>
-      <h2>同期分析结果对比</h2>
+      <h2>{job.title || "同期分析结果对比"}</h2>
       <p>
         {job.start.replace("T", " ")} → {job.end.replace("T", " ")}（终点不含）
       </p>
@@ -232,6 +232,36 @@ export function ResultsWorkspace({
   const concurrentJob =
     concurrentJobs.find((entry) => entry.id === activeId) ??
     concurrentJobs.at(-1);
+  const taskDialog = useRef<HTMLDialogElement>(null);
+  const [taskAction, setTaskAction] = useState<"rename" | "delete">("rename");
+  const [editingTask, setEditingTask] = useState<ConcurrentJob>();
+  const [taskTitle, setTaskTitle] = useState("");
+  useEffect(() => {
+    if (editingTask && !taskDialog.current?.open)
+      taskDialog.current?.showModal();
+  }, [editingTask]);
+  function editTask(task: ConcurrentJob, action: "rename" | "delete") {
+    setEditingTask(task);
+    setTaskAction(action);
+    setTaskTitle(task.title || `同期分析 ${concurrentJobs.indexOf(task) + 1}`);
+  }
+  function confirmTask() {
+    if (!editingTask) return;
+    const id = editingTask.id;
+    const name = taskTitle.trim();
+    if (taskAction === "rename" && !name) return;
+    onChange((current) => ({
+      ...current,
+      concurrentJobs:
+        taskAction === "rename"
+          ? (current.concurrentJobs ?? []).map((entry) =>
+              entry.id === id ? { ...entry, title: name } : entry,
+            )
+          : (current.concurrentJobs ?? []).filter((entry) => entry.id !== id),
+    }));
+    if (taskAction === "delete" && activeId === id) setActiveId("");
+    taskDialog.current?.close();
+  }
   const groupCount =
     filter === "concurrent"
       ? concurrentJobs.length
@@ -348,7 +378,7 @@ export function ResultsWorkspace({
                   }}
                 >
                   <span>
-                    <strong>同期分析 {i + 1}</strong>
+                    <strong>{entry.title || `同期分析 ${i + 1}`}</strong>
                     <small>
                       {entry.start.slice(0, 10)} → {entry.end.slice(0, 10)}
                     </small>
@@ -391,6 +421,26 @@ export function ResultsWorkspace({
                     <span className="ww-chevron">›</span>
                   </button>
                 ))}
+          {filter === "concurrent" && concurrentJob && (
+            <div
+              className="ww-concurrent-task-actions"
+              aria-label="管理当前同期任务"
+              role="group"
+            >
+              <button
+                type="button"
+                onClick={() => editTask(concurrentJob, "rename")}
+              >
+                编辑标题
+              </button>
+              <button
+                type="button"
+                onClick={() => editTask(concurrentJob, "delete")}
+              >
+                删除任务
+              </button>
+            </div>
+          )}
         </aside>
         <ChartTextScale.Provider value={reading.axis / 100}>
           <section
@@ -530,6 +580,60 @@ export function ResultsWorkspace({
           </section>
         </ChartTextScale.Provider>
       </div>
+      <dialog
+        ref={taskDialog}
+        className="modal ww-concurrent-task-dialog"
+        aria-labelledby="ww-concurrent-task-heading"
+        onClose={() => setEditingTask(undefined)}
+      >
+        <h2 id="ww-concurrent-task-heading">
+          {taskAction === "rename" ? "编辑同期任务标题" : "删除同期任务"}
+        </h2>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            confirmTask();
+          }}
+        >
+          {taskAction === "rename" ? (
+            <label className="field">
+              标题
+              <input
+                autoFocus
+                required
+                maxLength={60}
+                value={taskTitle}
+                onChange={(event) => setTaskTitle(event.target.value)}
+              />
+            </label>
+          ) : (
+            <p>
+              从本项目移除「{taskTitle}」。原始测风资料和本机计算记录会保留。
+            </p>
+          )}
+          <div className="project-delete-actions">
+            <button
+              type="button"
+              className="ww-button"
+              autoFocus={taskAction === "delete"}
+              onClick={() => taskDialog.current?.close()}
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className={
+                taskAction === "rename"
+                  ? "ww-button primary"
+                  : "ww-button project-delete-confirm"
+              }
+              disabled={taskAction === "rename" && !taskTitle.trim()}
+            >
+              {taskAction === "rename" ? "保存标题" : "确认删除"}
+            </button>
+          </div>
+        </form>
+      </dialog>
     </div>
   );
 }

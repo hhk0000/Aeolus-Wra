@@ -103,6 +103,7 @@ export interface CorrelationJob extends CorrelationDraft {
 
 export interface ConcurrentJob {
   id: string;
+  title?: string;
   sources: { label: string; channels: string[] }[];
   start: string;
   end: string;

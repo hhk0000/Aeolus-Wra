@@ -95,10 +95,21 @@ def test_concurrent_uses_shared_hours_without_filling_gaps(client):
     assert metrics["speed"]["paired"] == metrics["speed"]["visible"] == 1
     assert metrics["speed"]["points"][0][1:3] == [4, 5]
     summary = snapshot["summary"]
+    monthly = snapshot["monthly_metrics"]
+    assert monthly["speed"]["points"][0][1:3] == [4, 5]
+    assert monthly["speed"]["counts"] == [1, 1]
+    assert monthly["direction"]["points"][0][1:3] == pytest.approx([0, 355])
     legacy = client.app.state.wind_store.put(
-        "concurrent", {key: value for key, value in snapshot.items() if key != "summary"}
+        "concurrent",
+        {
+            key: value
+            for key, value in snapshot.items()
+            if key not in {"summary", "monthly_metrics"}
+        },
     )
-    assert client.get(f"/api/v1/concurrent/{legacy['id']}").json()["summary"] == summary
+    restored_legacy = client.get(f"/api/v1/concurrent/{legacy['id']}").json()
+    assert restored_legacy["summary"] == summary
+    assert restored_legacy["monthly_metrics"] == monthly
     assert summary["stages"] == ["qc", "reference"]
     assert summary["monthly_speed"] == [[4] + [None] * 11 + [4], [5] + [None] * 11 + [5]]
     assert summary["direction"][0][0]["frequency"] == 100

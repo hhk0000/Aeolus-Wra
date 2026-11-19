@@ -91,18 +91,21 @@ export function DataTable({
   footer,
   continuous = false,
   highlightBin,
+  hiddenColumns,
 }: {
   rows: Record<string, unknown>[];
   footer?: Record<string, unknown>;
   continuous?: boolean;
   highlightBin?: number;
+  hiddenColumns?: string[];
 }) {
   const [page, setPage] = useState(0);
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter(
     (key) =>
       key !== "points" &&
       key !== "through_origin" &&
-      key !== "wind_year_deviation",
+      key !== "wind_year_deviation" &&
+      !hiddenColumns?.includes(key),
   );
   const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / 60) - 1));
   const visibleRows = continuous
@@ -127,7 +130,17 @@ export function DataTable({
           <thead>
             <tr>
               {keys.map((key) => (
-                <th key={key}>{labels[key] ?? key}</th>
+                <th key={key}>
+                  {key === "风年类型" ? (
+                    <span className="ww-year-deviation">
+                      <span>风年类型</span>
+                      <span />
+                      <span className="ww-year-zero">0%</span>
+                    </span>
+                  ) : (
+                    (labels[key] ?? key)
+                  )}
+                </th>
               ))}
             </tr>
           </thead>
@@ -144,7 +157,13 @@ export function DataTable({
                 }
               >
                 {keys.map((key) => (
-                  <td key={key} title={display(row[key])}>
+                  <td
+                    key={key}
+                    title={display(row[key])}
+                    className={
+                      key === "风年类型" ? "ww-wind-year-cell" : undefined
+                    }
+                  >
                     {key === "风年类型" && numeric(row.wind_year_deviation) ? (
                       <span className="ww-year-deviation">
                         <span>{display(row[key])}</span>
@@ -152,14 +171,9 @@ export function DataTable({
                           {row.wind_year_deviation > 0 ? "+" : ""}
                           {row.wind_year_deviation.toFixed(1)}%
                         </span>
-                        {row[key] !== "平风年" && (
+                        <span className="ww-year-track" aria-hidden="true">
                           <span
-                            className={
-                              row.wind_year_deviation > 0
-                                ? "ww-year-bar higher"
-                                : "ww-year-bar lower"
-                            }
-                            aria-hidden="true"
+                            className={`ww-year-bar ${row.wind_year_deviation >= 0 ? "higher" : "lower"}${row[key] === "平风年" ? " typical" : ""}`}
                           >
                             <i
                               style={{
@@ -170,7 +184,7 @@ export function DataTable({
                               }}
                             />
                           </span>
-                        )}
+                        </span>
                       </span>
                     ) : (
                       display(row[key])
@@ -534,13 +548,14 @@ function CartesianPlot({
               numeric(row.mean_speed) && (
                 <text
                   key={i}
-                  x={x(i)}
-                  y={y(row.mean_speed, "mean_speed") - axisSize - 14}
+                  data-concurrent-axis-marker
+                  x={Math.min(w - 16, x(i) + 18)}
+                  y={bottom + 2 * axisSize + 25}
                   textAnchor="end"
                   fill="#79570d"
                   fontSize={axisSize}
                 >
-                  实测同期 {label(row).slice(0, 4)}
+                  同期（{label(row).slice(0, 4)}）
                 </text>
               ),
           )}
@@ -1491,6 +1506,7 @@ export function BaseResultView({
           ) : (
             <DataTable
               rows={isAnnual ? annualTable : rows}
+              hiddenColumns={isAnnual ? ["complete", "concurrent"] : undefined}
               highlightBin={outputId === "turbulence" ? 15 : undefined}
               footer={densityFooter}
             />

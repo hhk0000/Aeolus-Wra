@@ -1,6 +1,6 @@
 """Align two wind series without extrapolating either source."""
 
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from math import ceil, fsum
 from typing import Literal
@@ -8,7 +8,13 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 
-from wind_platform.core.calculations import COMPASS, CalculationError, rose, sector_index
+from wind_platform.core.calculations import (
+    COMPASS,
+    CalculationError,
+    circular_mean,
+    rose,
+    sector_index,
+)
 from wind_platform.core.ingestion import parse_timestamp
 from wind_platform.services.analysis import channel, channel_series
 
@@ -119,6 +125,56 @@ def compare_concurrent(store, config: ConcurrentOptions, window: ConcurrentWindo
     }
     if not window:
         output["summary"] = summarize(visible_series, config, datasets)
+        output["monthly_metrics"] = monthly_metrics(visible_series, start, end, config.timezone)
+    return output
+
+
+def monthly_metrics(visible_series, start, end, timezone):
+    zone = ZoneInfo(timezone)
+    output = {}
+    for quantity, sources in visible_series.items():
+        aggregates = []
+        for source in sources:
+            grouped = defaultdict(list)
+            for stamp, value in source.items():
+                local = stamp.astimezone(zone)
+                if quantity != "direction" or 0 <= value <= 360:
+                    grouped[(local.year, local.month)].append(value)
+            averages = {}
+            for month, values in grouped.items():
+                mean = (
+                    circular_mean(values) if quantity == "direction" else fsum(values) / len(values)
+                )
+                if mean is not None:
+                    averages[month] = mean
+            aggregates.append(averages)
+        a, b = aggregates
+        points, segments = [], [0, 0]
+        previous_month, previous = None, [None, None]
+        for year, month in sorted(a.keys() | b.keys()):
+            ordinal = year * 12 + month
+            month_start = datetime(year, month, 1, tzinfo=zone)
+            month_end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=zone)
+            left = max(start.timestamp(), month_start.timestamp())
+            right = min(end.timestamp(), month_end.timestamp())
+            values = [a.get((year, month)), b.get((year, month))]
+            for side, value in enumerate(values):
+                if (
+                    previous_month is not None
+                    and ordinal != previous_month + 1
+                    or value is None
+                    or previous[side] is None
+                    or (quantity == "direction" and abs(value - previous[side]) > 180)
+                ):
+                    segments[side] += 1
+            points.append([(left + right) / 2, *values, *segments])
+            previous_month, previous = ordinal, values
+        output[quantity] = {
+            "paired": len(a.keys() & b.keys()),
+            "counts": [len(a), len(b)],
+            "visible": len(points),
+            "points": points,
+        }
     return output
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getHealth } from "./api";
 import SavedRunPreview from "./features/wind-workspace/SavedRunPreview";
@@ -36,7 +36,13 @@ const subtitles = [
   "让每一个结论，都有据可循。",
 ];
 const icons = ["grid", "sliders", "chart", "file", "shield", "book"];
-type Project = { name: string; region: string; type: string; demo: boolean };
+type Project = {
+  id: number;
+  name: string;
+  region: string;
+  type: string;
+  demo: boolean;
+};
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, ReactNode> = {
     grid: (
@@ -145,32 +151,38 @@ function WorkspaceApp() {
       );
       if (
         Array.isArray(saved) &&
-        saved.length &&
         saved.every(
           (p) =>
-            typeof p.name === "string" &&
+            typeof p?.name === "string" &&
             typeof p.region === "string" &&
             typeof p.type === "string",
         )
       )
-        return saved;
+        return saved.map((p, index) => ({
+          ...p,
+          // Older projects use their original index as the workspace key.
+          id: Number.isSafeInteger(p.id) ? p.id : index,
+        }));
     } catch {
       /* A corrupt browser cache must not prevent opening the application. */
     }
     return [
       {
+        id: 0,
         name: "张北风电场风资源评估",
         region: "河北 · 张家口",
         type: "陆上风电",
         demo: true,
       },
       {
+        id: 1,
         name: "沿海风电项目可行性研究",
         region: "江苏 · 盐城",
         type: "海上风电",
         demo: true,
       },
       {
+        id: 2,
         name: "山地风电场测风数据分析",
         region: "云南 · 曲靖",
         type: "陆上风电",
@@ -178,12 +190,14 @@ function WorkspaceApp() {
       },
     ];
   });
-  const [selected, setSelected] = useState(() =>
-    Math.min(
-      projects.length - 1,
-      Math.max(0, Number(localStorage.getItem("aeolus.selected.v1")) || 0),
-    ),
-  );
+  const [selected, setSelected] = useState(() => {
+    const saved = Number(localStorage.getItem("aeolus.selected.v1"));
+    return (
+      projects.find((project) => project.id === saved)?.id ??
+      projects[0]?.id ??
+      -1
+    );
+  });
   useEffect(() => {
     try {
       localStorage.setItem("aeolus.projects.v1", JSON.stringify(projects));
@@ -194,15 +208,22 @@ function WorkspaceApp() {
   }, [projects, selected]);
   const [workspaces, setWorkspaces] =
     useState<Record<number, WorkspaceState>>(loadWorkspaceCache);
+  const deletedProjects = useRef(new Set<number>());
   const workspace = workspaces[selected] ?? createWorkspace();
   const updateWorkspace = (update: (s: WorkspaceState) => WorkspaceState) =>
-    setWorkspaces((current) => ({
-      ...current,
-      [selected]: update(current[selected] ?? createWorkspace()),
-    }));
+    setWorkspaces((current) =>
+      deletedProjects.current.has(selected)
+        ? current
+        : {
+            ...current,
+            [selected]: update(current[selected] ?? createWorkspace()),
+          },
+    );
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("全部项目");
   const [modal, setModal] = useState(false);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Project>();
   const [name, setName] = useState("");
   const [region, setRegion] = useState("");
   const [type, setType] = useState("陆上风电");
@@ -284,7 +305,23 @@ function WorkspaceApp() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [modal]);
-  const current = projects[selected];
+  const current = projects.find((project) => project.id === selected);
+  useEffect(() => {
+    if (deleteCandidate && !deleteDialog.current?.open)
+      deleteDialog.current?.showModal();
+  }, [deleteCandidate]);
+  function deleteProject(project: Project) {
+    deletedProjects.current.add(project.id);
+    const remaining = projects.filter((item) => item.id !== project.id);
+    setProjects(remaining);
+    setWorkspaces((previous) => {
+      const next = { ...previous };
+      delete next[project.id];
+      return next;
+    });
+    if (selected === project.id) setSelected(remaining[0]?.id ?? -1);
+    setNotice("已删除项目「" + project.name + "」");
+  }
   const go = (i: number) => {
     if (i !== page) setPageHistory((v) => [...v, page]);
     setPage(i);
@@ -331,9 +368,9 @@ function WorkspaceApp() {
           <span className="version">界面预览 · v0.1</span>
         </div>
         <div className="profile">
-          <div className="avatar">H</div>
+          <div className="avatar">HHK</div>
           <div>
-            <strong>我的工作空间</strong>
+            <strong>HHK 的工作空间</strong>
             <span>本地工作环境</span>
           </div>
           <span className="online-dot" />
@@ -360,7 +397,7 @@ function WorkspaceApp() {
               <i className={health === "分析服务已连接" ? "connected" : ""} />
               {health}
             </span>
-            <span className="avatar mini">H</span>
+            <span className="avatar mini">HHK</span>
           </div>
         </header>
         <div className="content">
@@ -397,7 +434,7 @@ function WorkspaceApp() {
                     <br />
                     专注探索，让复杂的风资源分析变得井然有序。
                   </p>
-                  <button onClick={() => go(1)}>
+                  <button onClick={() => (current ? go(1) : setModal(true))}>
                     开启分析工作流 <Icon name="arrow" size={17} />
                   </button>
                 </div>
@@ -468,33 +505,44 @@ function WorkspaceApp() {
                       (p.name + p.region).includes(query),
                   )
                   .map((p) => (
-                    <button
+                    <article
                       className={`project-card project-${p.index % 3}`}
-                      key={p.index}
-                      onClick={() => {
-                        setSelected(p.index);
-                        go(1);
-                      }}
+                      key={p.id}
                     >
-                      <div className="project-art">
-                        <WindScene />
-                        <span className="project-tag">
-                          {p.demo ? "示例项目" : "本地草稿"}
-                        </span>
-                        <span className="project-arrow">↗</span>
-                      </div>
-                      <div className="project-info">
-                        <span className="project-type">{p.type}</span>
-                        <h3>{p.name}</h3>
-                        <p>{p.region || "地区待填写"}</p>
-                        <div className="project-bottom">
-                          <span>
-                            <i /> {p.demo ? "探索示例工作流" : "等待导入数据"}
+                      <button
+                        className="project-open"
+                        onClick={() => {
+                          setSelected(p.id);
+                          go(1);
+                        }}
+                      >
+                        <div className="project-art">
+                          <WindScene />
+                          <span className="project-tag">
+                            {p.demo ? "示例项目" : "本地草稿"}
                           </span>
-                          <span>进入项目 →</span>
                         </div>
-                      </div>
-                    </button>
+                        <div className="project-info">
+                          <span className="project-type">{p.type}</span>
+                          <h3>{p.name}</h3>
+                          <p>{p.region || "地区待填写"}</p>
+                          <div className="project-bottom">
+                            <span>
+                              <i /> {p.demo ? "探索示例工作流" : "等待导入数据"}
+                            </span>
+                            <span>进入项目 →</span>
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="project-delete"
+                        aria-label={`删除项目 ${p.name}`}
+                        onClick={() => setDeleteCandidate(p)}
+                      >
+                        删除
+                      </button>
+                    </article>
                   ))}
                 <button className="new-card" onClick={() => setModal(true)}>
                   <span>
@@ -505,6 +553,18 @@ function WorkspaceApp() {
                 </button>
               </div>
             </>
+          ) : !current ? (
+            page === 5 ? (
+              <StandardsLibrary />
+            ) : (
+              <section className="ww-panel">
+                <h2>还没有项目</h2>
+                <p>创建项目后即可导入测风数据并开始分析。</p>
+                <button className="primary" onClick={() => setModal(true)}>
+                  新建项目
+                </button>
+              </section>
+            )
           ) : (
             <>
               <div className="project-context">
@@ -520,8 +580,8 @@ function WorkspaceApp() {
                       setSelected(Number(e.target.value));
                     }}
                   >
-                    {projects.map((p, i) => (
-                      <option key={i} value={i}>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
                     ))}
@@ -533,7 +593,7 @@ function WorkspaceApp() {
               </div>
               {page === 1 && (
                 <AnalysisWorkspace
-                  projectName={projects[selected]?.name ?? "项目"}
+                  projectName={current.name}
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
@@ -542,6 +602,8 @@ function WorkspaceApp() {
               )}
               {page === 2 && (
                 <ResultsWorkspace
+                  key={selected}
+                  projectId={selected}
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
@@ -587,6 +649,30 @@ function WorkspaceApp() {
           {notice}
         </div>
       )}
+      <dialog
+        ref={deleteDialog}
+        className="modal project-delete-dialog"
+        aria-labelledby="delete-project-title"
+        aria-describedby="delete-project-description"
+        onClose={() => setDeleteCandidate(undefined)}
+      >
+        <h2 id="delete-project-title">删除项目「{deleteCandidate?.name}」？</h2>
+        <p id="delete-project-description">
+          此操作会移除当前浏览器中的项目和分析配置。原始测风文件和本机计算记录会保留。
+        </p>
+        <form method="dialog" className="project-delete-actions">
+          <button type="submit" className="ww-button" autoFocus>
+            取消
+          </button>
+          <button
+            type="submit"
+            className="ww-button project-delete-confirm"
+            onClick={() => deleteCandidate && deleteProject(deleteCandidate)}
+          >
+            删除项目
+          </button>
+        </form>
+      </dialog>
       {modal && (
         <div className="modal-backdrop" onClick={() => setModal(false)}>
           <section
@@ -611,16 +697,21 @@ function WorkspaceApp() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                const id = Math.max(
+                  Date.now(),
+                  ...projects.map((p) => p.id + 1),
+                );
                 setProjects([
                   ...projects,
                   {
+                    id,
                     name: name.trim(),
                     region: region.trim(),
                     type,
                     demo: false,
                   },
                 ]);
-                setSelected(projects.length);
+                setSelected(id);
                 setModal(false);
                 setName("");
                 setRegion("");

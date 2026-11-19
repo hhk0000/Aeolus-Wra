@@ -1,6 +1,7 @@
 import { activateTower } from "./autoSetup";
 import AnalysisSetup from "./AnalysisSetup";
 import CorrelationSetup from "./CorrelationSetup";
+import ConcurrentSetup from "./ConcurrentSetup";
 import DataSources from "./DataSources";
 import AlgorithmTools from "./AlgorithmTools";
 import LongTermSetup from "./LongTermSetup";
@@ -22,8 +23,9 @@ export default function AnalysisWorkspace(props: Props) {
     ["data", "数据资料", "01"],
     ["analysis", "风资源分析", "02"],
     ["correlation", "相关性分析", "03"],
-    ["long-term", "长期参考", "04"],
-    ["tools", "审核与处理", "05"],
+    ["concurrent", "同期分析", "04"],
+    ["long-term", "长期参考", "05"],
+    ["tools", "审核与处理", "06"],
   ];
 
   function downloadConfiguration() {
@@ -124,6 +126,7 @@ export default function AnalysisWorkspace(props: Props) {
           {state.activeTab === "data" && <DataSources {...props} />}
           {state.activeTab === "analysis" && <AnalysisSetup {...props} />}
           {state.activeTab === "correlation" && <CorrelationSetup {...props} />}
+          {state.activeTab === "concurrent" && <ConcurrentSetup {...props} />}
           {state.activeTab === "long-term" && <LongTermSetup {...props} />}
           {state.activeTab === "tools" && <AlgorithmTools {...props} />}
         </div>

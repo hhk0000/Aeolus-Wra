@@ -125,7 +125,11 @@ export async function api<T>(
                 body: JSON.stringify(body),
               }),
         },
-  );
+  ).catch((error: unknown) => {
+    if (error instanceof TypeError && !signal?.aborted)
+      throw new Error("无法连接本机分析服务。请确认服务已启动，再重试。");
+    throw error;
+  });
   if (!response.ok) {
     const result = await response.json().catch(() => null);
     const detail = result?.detail;
@@ -139,7 +143,9 @@ export async function api<T>(
                   `${d.loc.join(".")}: ${d.msg}`,
               )
               .join("；")
-          : `服务请求失败（${response.status}）`,
+          : response.status >= 500
+            ? "本机分析服务暂时不可用，请确认服务已启动后重试。"
+            : "服务请求失败（" + response.status + "）",
     );
   }
   return response.json() as Promise<T>;

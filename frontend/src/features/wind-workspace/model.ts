@@ -1,7 +1,7 @@
 export type SourceKind = "raw" | "qc" | "result" | "reference";
 import type { UploadedFile, Dataset, Run } from "./api";
 export type WorkspaceTab =
-  "data" | "analysis" | "correlation" | "long-term" | "tools";
+  "data" | "analysis" | "correlation" | "concurrent" | "long-term" | "tools";
 
 export const SOURCE_TYPES: {
   id: SourceKind;

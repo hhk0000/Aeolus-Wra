@@ -36,6 +36,7 @@ class AnalysisOptions(BaseModel):
     manual_density: float | None = Field(default=None, gt=0, le=2)
     result_channels: list[str] = Field(default_factory=list)
     shear_channels: list[str] = Field(default_factory=list)
+    turbulence_minimum_samples: int = Field(default=20, ge=1)
     aggregation: str = "hourly"
     sectors: int = Field(ge=1, le=36, default=16)
     calm_threshold: float = Field(ge=0, le=1, default=0.5)
@@ -368,7 +369,11 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                         {"channel": c["name"], "reason": "同高度同支臂标准差未唯一确认。"}
                     )
                     continue
-                ti = calc.turbulence(values(c, mask), values(sd[0], mask))
+                ti = calc.turbulence(
+                    values(c, mask),
+                    values(sd[0], mask),
+                    minimum_samples=config.turbulence_minimum_samples,
+                )
                 v10, sd10 = values(c, mask), values(sd[0], mask)
                 hourly_groups = defaultdict(list)
                 for t, v_, sd_ in zip(qc_stamps, v10, sd10, strict=True):
@@ -414,7 +419,11 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                     "channels": summaries,
                     "ddof": 1,
                     "formula": "Icha=mean(I)+std(I)；Irep=mean(I)+1.28std(I)；std为I的样本标准差",
-                    "low_sample_notice": "箱内少于20对样本时标注低样本，不作自动机组等级判定。",
+                    "minimum_samples": config.turbulence_minimum_samples,
+                    "low_sample_notice": (
+                        f"箱内少于{config.turbulence_minimum_samples}对样本时标注低样本，"
+                        "不作自动机组等级判定。"
+                    ),
                 },
             }
 

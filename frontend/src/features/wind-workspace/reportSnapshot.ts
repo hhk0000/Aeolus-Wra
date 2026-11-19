@@ -66,6 +66,7 @@ function copyFigure(svg: SVGSVGElement, title: string) {
       text.setAttribute("x", String(x + 26));
       text.setAttribute("y", String(y));
       text.setAttribute("font-size", "15");
+      text.setAttribute("fill", item.style.color || EXCEL.text);
       text.textContent = label;
       copy.append(rect, text);
       x += width;

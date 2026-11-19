@@ -1891,6 +1891,89 @@
   margin: 0;
   align-items: end;
 }
+.ww-iec-options,
+.ww-turbulence-threshold {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.ww-turbulence-threshold {
+  grid-column: 1 / -1;
+}
+.ww-turbulence-threshold input {
+  width: 130px;
+}
+.ww-result-table .ww-turbulence-reference-row td {
+  font-weight: 700;
+  background: #e5eee5;
+}
+.ww-year-deviation {
+  display: grid;
+  grid-template-columns: 3.25em 4.4em 88px;
+  gap: 6px;
+  align-items: center;
+  white-space: nowrap;
+}
+.ww-year-percent {
+  padding: 2px 4px;
+  border: 1px solid #c9d8cf;
+  border-radius: 4px;
+  text-align: center;
+}
+.ww-year-bar {
+  position: relative;
+  width: 44px;
+  height: 10px;
+}
+.ww-year-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.ww-year-bar.higher {
+  margin-left: 44px;
+  border-left: 1px solid #b2c2b9;
+}
+.ww-year-bar.higher i {
+  left: 0;
+  background: #c0504d;
+}
+.ww-year-bar.lower {
+  border-right: 1px solid #b2c2b9;
+}
+.ww-year-bar.lower i {
+  right: 0;
+  background: #4f81bd;
+}
+.ww-concurrent-analysis {
+  display: grid;
+  gap: 16px;
+}
+.ww-concurrent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.ww-concurrent-grid fieldset {
+  padding: 12px;
+  border: 1px solid var(--ww-line);
+  border-radius: 8px;
+}
+.ww-concurrent-grid label > select {
+  display: block;
+  margin-top: 4px;
+}
+.ww-concurrent-charts svg {
+  display: block;
+  width: 100%;
+  background: #fff;
+}
+@media (max-width: 800px) {
+  .ww-concurrent-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .ww-chart-actions,
 .ww-month-controls,
 .ww-series-options {

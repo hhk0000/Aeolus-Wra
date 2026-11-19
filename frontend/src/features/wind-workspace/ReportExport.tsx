@@ -64,7 +64,9 @@ export default function ReportExport({
 
   const chosenSaved = saved.filter((chart) => selected.includes(chart.id));
   const chosenEntries = entries.filter((entry) => selected.includes(entry.id));
-  const defaults = chosenSaved.length + chosenEntries.length === 0;
+  const selectedCount = chosenSaved.length + chosenEntries.length;
+  const availableCount = entries.length + saved.length;
+  const defaults = selectedCount === 0;
   const chosen = defaults ? entries : chosenEntries;
   function select(id: string) {
     setSelected((previous) =>
@@ -180,6 +182,37 @@ export default function ReportExport({
       <p>
         默认导出当前范围内全部已计算成果。勾选后只导出所选项，可同时选择默认成果和图上保存的配置。
       </p>
+      <div
+        className="ww-report-actions"
+        role="group"
+        aria-label="批量选择报告内容"
+      >
+        <button
+          type="button"
+          className="ww-button"
+          disabled={selectedCount === availableCount}
+          onClick={() => {
+            setSelected([...entries, ...saved].map((item) => item.id));
+            setStatus("");
+          }}
+        >
+          全选
+        </button>
+        <button
+          type="button"
+          className="ww-button"
+          disabled={defaults}
+          onClick={() => {
+            setSelected([]);
+            setStatus("");
+          }}
+        >
+          取消全选
+        </button>
+        <span aria-live="polite">
+          已勾选 {selectedCount} / {availableCount} 项
+        </span>
+      </div>
       <div className="ww-output-grid">
         {entries.map((entry) => (
           <label key={entry.id}>

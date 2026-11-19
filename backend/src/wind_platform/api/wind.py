@@ -28,6 +28,7 @@ from wind_platform.services.analysis import (
     run_long_term,
 )
 from wind_platform.services.comparison import ComparisonOptions, compare_towers
+from wind_platform.services.concurrent import ConcurrentOptions, compare_concurrent
 from wind_platform.services.measured_direction import run_measured_direction
 from wind_platform.services.processing import ProcessingOptions, process
 from wind_platform.services.review import ReviewOptions, review
@@ -233,6 +234,11 @@ def extremes(config: ExtremeOptions, request: Request):
 @router.get("/runs/{id_}")
 def get_run(id_: str, request: Request):
     return store(request).get("runs", id_)
+
+
+@router.post("/concurrent")
+def concurrent(config: ConcurrentOptions, request: Request):
+    return compare_concurrent(store(request), config)
 
 
 class MeasuredDirectionOptions(BaseModel):

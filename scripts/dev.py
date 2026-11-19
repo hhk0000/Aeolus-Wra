@@ -1,5 +1,6 @@
 """从项目根目录启动本机开发服务；不依赖 PowerShell 执行策略。"""
 
+import argparse
 import os
 import shutil
 import signal
@@ -38,6 +39,9 @@ def stop_process(process: subprocess.Popen) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--no-reload", action="store_true", help="关闭 API 文件热重载")
+    args = parser.parse_args()
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if npm is None or not (ROOT / "frontend/node_modules").is_dir():
         print("请先按 README 安装 Node.js 和前后端依赖。", file=sys.stderr)
@@ -49,9 +53,7 @@ def main() -> int:
             "-m",
             "uvicorn",
             "wind_platform.main:app",
-            "--reload",
-            "--reload-dir",
-            str(ROOT / "backend/src"),
+            *([] if args.no_reload else ["--reload", "--reload-dir", str(ROOT / "backend/src")]),
             "--host",
             "127.0.0.1",
             "--port",

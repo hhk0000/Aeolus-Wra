@@ -30,12 +30,76 @@ def import_csv(client, stage, content, channels=None, **options):
             "timezone": "UTC",
             "delimiter": "comma",
             "channels": channels
-            or [{"index": 1, "quantity": "speed", "height": 80, "unit": "m/s", "arm": "N"}],
+            or [
+                {
+                    "index": 1,
+                    "quantity": "speed",
+                    "height": 80,
+                    "unit": "m/s",
+                    "arm": "N",
+                }
+            ],
             **options,
         },
     )
     assert response.status_code == 200, response.text
     return file, response.json()
+
+
+def test_concurrent_uses_shared_hours_without_filling_gaps(client):
+    channels = [
+        {"index": 1, "quantity": "speed", "height": 80, "unit": "m/s", "arm": "N"},
+        {"index": 2, "quantity": "direction", "height": 80, "unit": "deg", "arm": "N"},
+    ]
+    mast_rows = [
+        f"2024-01-01 00:{minute:02d},4,{350 if minute < 30 else 10}" for minute in range(0, 60, 10)
+    ]
+    mast_rows += [f"2024-01-01 01:{minute:02d},8,90" for minute in range(0, 50, 10)]
+    _, mast = import_csv(
+        client,
+        "qc",
+        ("Date,WS,WD\n" + "\n".join(mast_rows)).encode(),
+        channels=channels,
+        interval_minutes=10,
+    )
+    _, reference = import_csv(
+        client,
+        "reference",
+        b"Date,WS,WD\n2024-01-01 00:00,5,355\n2024-01-01 01:00,7,10\n",
+        channels=channels,
+        interval_minutes=60,
+    )
+    sources = [
+        {
+            "dataset_id": dataset["id"],
+            "speed_channel": dataset["channels"][0]["id"],
+            "direction_channel": dataset["channels"][1]["id"],
+        }
+        for dataset in (mast, reference)
+    ]
+    payload = {
+        "a": sources[0],
+        "b": sources[1],
+        "start": "2024-01-01T00:00",
+        "end": "2024-01-01T02:00",
+        "timezone": "UTC",
+    }
+    aligned = client.post("/api/v1/concurrent", json=payload)
+    assert aligned.status_code == 200, aligned.text
+    metrics = aligned.json()["metrics"]
+    assert metrics["speed"]["counts"] == [1, 2]
+    assert metrics["speed"]["paired"] == metrics["speed"]["visible"] == 1
+    assert metrics["speed"]["points"][0][1:3] == [4, 5]
+    assert abs(metrics["direction"]["points"][0][1] - 360) < 1e-9 or (
+        abs(metrics["direction"]["points"][0][1]) < 1e-9
+    )
+    union = client.post("/api/v1/concurrent", json={**payload, "paired_only": False})
+    assert union.status_code == 200, union.text
+    speed = union.json()["metrics"]["speed"]
+    assert speed["paired"] == 1 and speed["visible"] == 2
+    assert speed["points"][1][1:3] == [None, 7]
+    native = client.post("/api/v1/concurrent", json={**payload, "aggregation": "native"})
+    assert native.status_code == 422
 
 
 def test_full_workflow_preserves_original_and_gives_distinct_denominators(client):
@@ -94,7 +158,12 @@ def test_measured_direction_uses_observed_heights_without_wind_speed(client):
     qc = f"Date,WD100m\n{stamps[0]},0\n{stamps[1]},90"
 
     def direction(index, height):
-        return {"index": index, "quantity": "direction", "height": height, "unit": "deg"}
+        return {
+            "index": index,
+            "quantity": "direction",
+            "height": height,
+            "unit": "deg",
+        }
 
     _, raw_data = import_csv(client, "raw", raw.encode(), [direction(1, 100), direction(2, 10)])
     _, qc_data = import_csv(client, "qc", qc.encode(), [direction(1, 100)])
@@ -256,7 +325,12 @@ def test_365_days_of_records_qualify_across_a_leap_anniversary(tmp_path):
         "end_exclusive": (start + timedelta(days=366)).isoformat(),
         "options": {"timezone": "UTC", "interval_minutes": 60},
         "channels": [
-            {"id": "c0", "quantity": "speed", "statistic": "mean", "values": [3] * len(stamps)}
+            {
+                "id": "c0",
+                "quantity": "speed",
+                "statistic": "mean",
+                "values": [3] * len(stamps),
+            }
         ],
         "stage": "reference",
     }

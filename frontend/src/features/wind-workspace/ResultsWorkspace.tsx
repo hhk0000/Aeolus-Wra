@@ -40,17 +40,31 @@ function loadReadingSettings(): ReadingSettings {
 
 interface ResultsProps extends WorkspaceViewProps {
   onConfigure: (tab: WorkspaceTab) => void;
+  projectId?: number;
 }
+type GalleryFilter = SourceKind | "all" | "correlation";
+const gallerySelection = new Map<
+  number,
+  { filter: GalleryFilter; activeId: string; pairIndex: number }
+>();
+
 export function ResultsWorkspace({
   state,
   onChange,
   onConfigure,
+  projectId,
 }: ResultsProps) {
-  const [filter, setFilter] = useState<SourceKind | "all" | "correlation">(
-    "all",
+  const selection =
+    projectId === undefined ? undefined : gallerySelection.get(projectId);
+  const [filter, setFilter] = useState<GalleryFilter>(
+    selection?.filter ?? "all",
   );
-  const [activeId, setActiveId] = useState("");
-  const [pairIndex, setPairIndex] = useState(0);
+  const [activeId, setActiveId] = useState(selection?.activeId ?? "");
+  const [pairIndex, setPairIndex] = useState(selection?.pairIndex ?? 0);
+  useEffect(() => {
+    if (projectId !== undefined)
+      gallerySelection.set(projectId, { filter, activeId, pairIndex });
+  }, [projectId, filter, activeId, pairIndex]);
   const [compare, setCompare] = useState(false);
   const [reading, setReading] = useState(loadReadingSettings);
   useEffect(() => {

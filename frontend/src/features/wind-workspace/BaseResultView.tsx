@@ -90,19 +90,31 @@ export function DataTable({
   rows,
   footer,
   continuous = false,
+  highlightBin,
 }: {
   rows: Record<string, unknown>[];
   footer?: Record<string, unknown>;
   continuous?: boolean;
+  highlightBin?: number;
 }) {
   const [page, setPage] = useState(0);
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))].filter(
-    (key) => key !== "points" && key !== "through_origin",
+    (key) =>
+      key !== "points" &&
+      key !== "through_origin" &&
+      key !== "wind_year_deviation",
   );
   const safePage = Math.min(page, Math.max(0, Math.ceil(rows.length / 60) - 1));
   const visibleRows = continuous
     ? rows
     : rows.slice(safePage * 60, (safePage + 1) * 60);
+  const deviationMax = rows.reduce(
+    (largest, row) =>
+      numeric(row.wind_year_deviation)
+        ? Math.max(largest, Math.abs(row.wind_year_deviation))
+        : largest,
+    2,
+  );
   return (
     <>
       <div
@@ -124,12 +136,45 @@ export function DataTable({
               <tr
                 key={i}
                 className={
-                  row.concurrent === true ? "ww-concurrent-row" : undefined
+                  row.concurrent === true
+                    ? "ww-concurrent-row"
+                    : highlightBin !== undefined && row.bin === highlightBin
+                      ? "ww-turbulence-reference-row"
+                      : undefined
                 }
               >
                 {keys.map((key) => (
                   <td key={key} title={display(row[key])}>
-                    {display(row[key])}
+                    {key === "风年类型" && numeric(row.wind_year_deviation) ? (
+                      <span className="ww-year-deviation">
+                        <span>{display(row[key])}</span>
+                        <span className="ww-year-percent">
+                          {row.wind_year_deviation > 0 ? "+" : ""}
+                          {row.wind_year_deviation.toFixed(1)}%
+                        </span>
+                        {row[key] !== "平风年" && (
+                          <span
+                            className={
+                              row.wind_year_deviation > 0
+                                ? "ww-year-bar higher"
+                                : "ww-year-bar lower"
+                            }
+                            aria-hidden="true"
+                          >
+                            <i
+                              style={{
+                                width:
+                                  (100 * Math.abs(row.wind_year_deviation)) /
+                                    deviationMax +
+                                  "%",
+                              }}
+                            />
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      display(row[key])
+                    )}
                   </td>
                 ))}
               </tr>
@@ -201,12 +246,14 @@ function CartesianPlot({
   outputId,
   means = [],
   bars = true,
+  showConcurrent = true,
   compact = false,
 }: {
   rows: Record<string, unknown>[];
   outputId: string;
   means?: Record<string, unknown>[];
   bars?: boolean;
+  showConcurrent?: boolean;
   compact?: boolean;
 }) {
   const textSize = useChartTextSize();
@@ -232,10 +279,14 @@ function CartesianPlot({
   const tickSize = compact ? 17 : 13;
   const axisSize = textSize(tickSize);
   const dual = used.includes("power_density");
-  const w = compact ? 480 : 900,
-    h = compact ? 250 : 350,
+  const w = isAnnual
+      ? Math.max(900, rows.length * axisSize * 1.5 + 160)
+      : compact
+        ? 480
+        : 900,
+    h = compact ? 250 : isAnnual ? 390 : 350,
     left = compact ? 48 : dual ? Math.max(66, 5 * axisSize + 12) : 66,
-    right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : 830,
+    right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : w - 70,
     top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
     bottom = compact ? 215 : 285;
   const maxFor = (key: string) =>
@@ -318,14 +369,15 @@ function CartesianPlot({
             )}
           </g>
         ))}
-        {used.map((key, k) => (
+        {(!isAnnual || bars ? used : []).map((key, k) => (
           <g key={key}>
             {(isAnnual || isFrequency || outputId === "density") &&
             key !== "fitted_frequency" &&
             bars ? (
               rows.map(
                 (row, i) =>
-                  numeric(row[key]) && (
+                  numeric(row[key]) &&
+                  (!isAnnual || showConcurrent || !row.concurrent) && (
                     <rect
                       key={i}
                       x={
@@ -430,24 +482,68 @@ function CartesianPlot({
                 stroke="#c0392b"
                 strokeWidth="2"
               />
+              {isAnnual && (
+                <text
+                  x={right - 4}
+                  y={y(Number(m.mean_speed), "mean_speed") - 7}
+                  textAnchor="end"
+                  fontSize={axisSize}
+                  fill="#a9332b"
+                  stroke="white"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                >
+                  {String(m.years)} 年中尺度均值{" "}
+                  {Number(m.mean_speed).toFixed(3)} m/s
+                </text>
+              )}
             </g>
           ))}
         {rows.map(
           (row, i) =>
-            i % Math.max(1, Math.ceil(rows.length / (compact ? 8 : 13))) ===
-              0 && (
+            (isAnnual ||
+              i % Math.max(1, Math.ceil(rows.length / (compact ? 8 : 13))) ===
+                0) && (
               <text
                 key={i}
-                x={x(i)}
-                y={bottom + 20}
-                textAnchor="middle"
-                fill={EXCEL.text}
-                fontSize={textSize(tickSize)}
+                x={isAnnual ? 0 : x(i)}
+                y={isAnnual ? 0 : bottom + 20}
+                transform={
+                  isAnnual
+                    ? "translate(" +
+                      x(i) +
+                      " " +
+                      (bottom + 13) +
+                      ") rotate(-45)"
+                    : undefined
+                }
+                textAnchor={isAnnual ? "end" : "middle"}
+                fill={isAnnual && row.concurrent ? "#79570d" : EXCEL.text}
+                fontSize={axisSize}
               >
                 {isAnnual ? label(row).slice(0, 4) : label(row)}
               </text>
             ),
         )}
+        {isAnnual &&
+          bars &&
+          showConcurrent &&
+          rows.map(
+            (row, i) =>
+              row.concurrent === true &&
+              numeric(row.mean_speed) && (
+                <text
+                  key={i}
+                  x={x(i)}
+                  y={y(row.mean_speed, "mean_speed") - axisSize - 14}
+                  textAnchor="end"
+                  fill="#79570d"
+                  fontSize={axisSize}
+                >
+                  实测同期 {label(row).slice(0, 4)}
+                </text>
+              ),
+          )}
         {!compact && (
           <>
             <text
@@ -496,13 +592,15 @@ function CartesianPlot({
           {isAnnual ? (
             <>
               <span>
-                <i className="box" style={{ background: palette[0] }} />
+                <i className="box" style={{ backgroundColor: palette[0] }} />
                 周年均值（蓝柱）
               </span>
-              <span>
-                <i className="box" style={{ background: "#e3b341" }} />
-                测风同期（黄柱）
-              </span>
+              {bars && showConcurrent && (
+                <span style={{ color: "#79570d" }}>
+                  <i className="box" style={{ backgroundColor: "#e3b341" }} />
+                  实测同期（黄柱）
+                </span>
+              )}
               {means.length > 0 && (
                 <span>
                   <i style={{ borderColor: "#c0392b" }} />
@@ -512,7 +610,7 @@ function CartesianPlot({
             </>
           ) : (
             used.map((key, i) => (
-              <span key={key}>
+              <span key={key} style={{ color: palette[i % palette.length] }}>
                 <i style={{ borderColor: palette[i % palette.length] }} />
                 {labels[key]}
               </span>
@@ -828,6 +926,7 @@ export function BaseResultView({
   const [roseZoom, setRoseZoom] = useState("1");
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
+  const [ltConcurrent, setLtConcurrent] = useState(true);
   const [ltLine, setLtLine] = useState(true);
   const [monthScope, setMonthScope] = useState("q1");
   const [monthPage, setMonthPage] = useState(0);
@@ -951,6 +1050,7 @@ export function BaseResultView({
           numeric(speed);
         return {
           ...row,
+          wind_year_deviation: classified ? (speed / baseline - 1) * 100 : null,
           风年类型: !classified
             ? "—"
             : speed > baseline * 1.02
@@ -1101,6 +1201,15 @@ export function BaseResultView({
               <label>
                 <input
                   type="checkbox"
+                  checked={ltConcurrent}
+                  disabled={!ltBars}
+                  onChange={(e) => setLtConcurrent(e.target.checked)}
+                />
+                实测同期（黄柱）
+              </label>
+              <label>
+                <input
+                  type="checkbox"
                   checked={ltLine}
                   onChange={(e) => setLtLine(e.target.checked)}
                 />
@@ -1151,11 +1260,11 @@ export function BaseResultView({
             {outputId === "monthly-hourly" ? (
               <>
                 <div className="ww-plot-legend is-dual" aria-label="小图图例">
-                  <span>
+                  <span style={{ color: palette[0] }}>
                     <i className="diamond" style={{ background: palette[0] }} />
                     风速
                   </span>
-                  <span>
+                  <span style={{ color: palette[1] }}>
                     <i className="square" style={{ background: palette[1] }} />
                     风功率密度
                   </span>
@@ -1244,6 +1353,7 @@ export function BaseResultView({
                 outputId={outputId}
                 means={chartMeans}
                 bars={isAnnual ? ltBars : true}
+                showConcurrent={ltConcurrent}
               />
             )}
           </div>
@@ -1381,6 +1491,7 @@ export function BaseResultView({
           ) : (
             <DataTable
               rows={isAnnual ? annualTable : rows}
+              highlightBin={outputId === "turbulence" ? 15 : undefined}
               footer={densityFooter}
             />
           )}

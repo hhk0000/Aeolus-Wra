@@ -10,11 +10,35 @@ import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 
 type Row = Record<string, unknown>;
+type RoseMetric = "direction" | "energy" | "both";
+type RoseSession = {
+  run: Run;
+  metric: RoseMetric;
+  all: boolean;
+  channel: string;
+  measuredChannel: string;
+  sectors: number;
+  rose: string;
+  zoom: string;
+  month: string;
+};
+const roseSessions = new Map<string, RoseSession>();
+const measuredRuns = new Map<string, Run>();
+
+function rememberRose<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > 16) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+}
 const colors = EXCEL.series;
 const iecFields = ["IEC_A", "IEC_B", "IEC_C"];
 function seriesColor(field: string, index: number) {
   if (["power_density", "energy_frequency"].includes(field)) return colors[1];
   if (["mean_speed", "frequency"].includes(field)) return colors[0];
+  if (field === "fitted_frequency") return colors[2];
   const tiIndex = [
     "representative",
     ...iecFields,
@@ -36,6 +60,9 @@ const names: Record<string, string> = {
   std: "TI标准差",
   characteristic: "特征TI",
   representative: "代表TI",
+  IEC_A: "IEC A",
+  IEC_B: "IEC B",
+  IEC_C: "IEC C",
 };
 
 function Plot({
@@ -404,7 +431,7 @@ function Plot({
                 transform={`translate(${dualAxis ? axisSize + 4 : 16} ${(T + B) / 2}) rotate(-90)`}
                 textAnchor="middle"
                 fontSize={textSize(13)}
-                fill={EXCEL.text}
+                fill={fields.length ? seriesColor(fields[0], 0) : EXCEL.text}
               >
                 {outputId === "turbulence"
                   ? "湍流强度"
@@ -434,20 +461,23 @@ function Plot({
             aria-label="图例"
           >
             {fields.map((f, j) => {
-              const box = [
-                "frequency",
-                "energy_frequency",
-                "fitted_frequency",
-              ].includes(f);
-              const shape = dualAxis ? (j === 0 ? "diamond" : "square") : box;
+              const box = ["frequency", "energy_frequency"].includes(f);
+              const shape = dualAxis
+                ? j === 0
+                  ? "diamond"
+                  : "square"
+                : box
+                  ? "box"
+                  : "";
+              const color = seriesColor(f, j);
               return (
-                <span key={f}>
+                <span key={f} style={{ color }}>
                   <i
-                    className={shape ? String(shape) : ""}
+                    className={shape}
                     style={
                       box || dualAxis
-                        ? { background: seriesColor(f, j) }
-                        : { borderColor: seriesColor(f, j) }
+                        ? { backgroundColor: color }
+                        : { borderColor: color }
                     }
                   />
                   {names[f] ?? f}
@@ -477,6 +507,9 @@ export function InteractiveResultView({
   exportMode?: boolean;
 }) {
   const turbulence = outputId === "turbulence";
+  const localRose = ["annual-rose", "monthly-rose"].includes(outputId);
+  const roseKey = localRose && !exportMode ? original.id + "/" + outputId : "";
+  const remembered = roseSessions.get(roseKey);
   const [directions, setDirections] = useState<
     { id: string; name: string; height: number }[]
   >([]);
@@ -532,31 +565,39 @@ export function InteractiveResultView({
       active = false;
     };
   }, [original]);
-  const [run, setRun] = useState(original),
+  const [run, setRun] = useState(remembered?.run ?? original),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [reportNotice, setReportNotice] = useState("");
   const [addedReportIds, setAddedReportIds] = useState<string[]>([]);
-  const [all, setAll] = useState(exportMode && outputId !== "monthly-rose"),
-    [channel, setChannel] = useState("");
+  const [all, setAll] = useState(
+      remembered?.all ?? (exportMode && outputId !== "monthly-rose"),
+    ),
+    [channel, setChannel] = useState(remembered?.channel ?? "");
   const [seriesVisibility, setSeriesVisibility] = useState<
       Record<string, boolean>
     >({}),
-    [rose, setRose] = useState("line"),
-    [zoom, setZoom] = useState("1"),
-    [month, setMonth] = useState("all");
+    [rose, setRose] = useState(remembered?.rose ?? "line"),
+    [zoom, setZoom] = useState(remembered?.zoom ?? "1"),
+    [month, setMonth] = useState(remembered?.month ?? "all");
+  const [visibleIec, setVisibleIec] = useState(iecFields);
+  const [minimumSamples, setMinimumSamples] = useState(
+    String(run.config.turbulence_minimum_samples ?? 20),
+  );
   const [method, setMethod] = useState(
       String(run.config.weibull_method ?? "mle"),
     ),
-    [sectors, setSectors] = useState(Number(run.config.sectors ?? 16));
+    [sectors, setSectors] = useState(
+      remembered?.sectors ?? Number(run.config.sectors ?? 16),
+    );
   const measurementSnapshot = original.kind === "measured-direction";
-  const localRose = ["annual-rose", "monthly-rose"].includes(outputId);
-  const [roseMetric, setRoseMetric] = useState<"direction" | "energy" | "both">(
-    !exportMode && outputId === "annual-rose"
-      ? "both"
-      : !exportMode || measurementSnapshot
-        ? "direction"
-        : "energy",
+  const [roseMetric, setRoseMetric] = useState<RoseMetric>(
+    remembered?.metric ??
+      (!exportMode && outputId === "annual-rose"
+        ? "both"
+        : !exportMode || measurementSnapshot
+          ? "direction"
+          : "energy"),
   );
   const compareRose = localRose && roseMetric === "both";
   const measured = localRose && roseMetric !== "energy";
@@ -565,29 +606,90 @@ export function InteractiveResultView({
     run?: Run;
     error?: string;
   }>();
-  const [measuredChannel, setMeasuredChannel] = useState("");
+  const [measuredChannel, setMeasuredChannel] = useState(
+    remembered?.measuredChannel ?? "",
+  );
+  const [retry, setRetry] = useState(0);
+  const measuredKey = original.id + "/" + sectors;
   useEffect(() => {
-    if (!measured || measurementSnapshot || exportMode) return;
+    if (roseKey)
+      rememberRose(roseSessions, roseKey, {
+        run,
+        metric: roseMetric,
+        all,
+        channel,
+        measuredChannel,
+        sectors,
+        rose,
+        zoom,
+        month,
+      });
+  }, [
+    roseKey,
+    run,
+    roseMetric,
+    all,
+    channel,
+    measuredChannel,
+    sectors,
+    rose,
+    zoom,
+    month,
+  ]);
+  useEffect(() => {
+    if (
+      !measured ||
+      measurementSnapshot ||
+      exportMode ||
+      measuredRuns.has(measuredKey)
+    )
+      return;
     const controller = new AbortController();
     api<Run>(
       `/runs/${original.id}/measured-direction`,
       { sectors },
       controller.signal,
     )
-      .then((result) => setMeasuredResponse({ sectors, run: result }))
+      .then((result) => {
+        rememberRose(measuredRuns, measuredKey, result);
+        if (!controller.signal.aborted)
+          setMeasuredResponse({ sectors, run: result });
+      })
       .catch((cause: Error) => {
         if (!controller.signal.aborted)
           setMeasuredResponse({ sectors, error: cause.message });
       });
     return () => controller.abort();
-  }, [measured, measurementSnapshot, exportMode, original.id, sectors]);
-  const [low, setLow] = useState(""),
-    [high, setHigh] = useState("");
+  }, [
+    measured,
+    measurementSnapshot,
+    exportMode,
+    original.id,
+    sectors,
+    measuredKey,
+    retry,
+  ]);
+  const originalShear = Array.isArray(original.config.shear_channels)
+    ? (original.config.shear_channels as string[])
+    : [];
+  const originalProfile = (initial.summary?.profile ?? []) as {
+    height: number;
+  }[];
+  const [low, setLow] = useState(() =>
+      originalProfile.length === 2 ? String(originalProfile[0].height) : "",
+    ),
+    [high, setHigh] = useState(() =>
+      originalProfile.length === 2 ? String(originalProfile[1].height) : "",
+    );
+  const [shearMode, setShearMode] = useState(
+    originalProfile.length === 2 ? "pair" : "profile",
+  );
   const chartRun =
     measured && !measurementSnapshot
-      ? measuredResponse?.sectors === sectors
-        ? measuredResponse.run
-        : undefined
+      ? (measuredRuns.get(measuredKey) ??
+        (measuredResponse?.sectors === sectors
+          ? measuredResponse.run
+          : undefined))
       : run;
   const output =
     (exportMode ? initial : chartRun?.outputs[outputId]) ??
@@ -666,8 +768,10 @@ export function InteractiveResultView({
         : ["mean_speed", "power_density"];
   const seriesKey = (c: string, f: string) => JSON.stringify([c, f]);
   const isVisible = (c: string, f: string) =>
-    seriesVisibility[seriesKey(c, f)] ??
-    (!turbulence || !["mean", "std", "characteristic"].includes(f));
+    iecFields.includes(f)
+      ? visibleIec.includes(f)
+      : (seriesVisibility[seriesKey(c, f)] ??
+        (!turbulence || !["mean", "std", "characteristic"].includes(f)));
   async function recalculate(changes: Record<string, unknown>) {
     setBusy(true);
     setError("");
@@ -679,16 +783,26 @@ export function InteractiveResultView({
       setRun(next);
     } catch (e) {
       setError((e as Error).message);
-      setMethod(String(run.config.weibull_method ?? "mle"));
+      setMinimumSamples(String(run.config.turbulence_minimum_samples ?? 20));
+
       setSectors(Number(run.config.sectors ?? 16));
     } finally {
       setBusy(false);
     }
   }
-  async function choosePair(a: string, b: string) {
-    if (!a || !b) return;
+  async function calculateShear() {
+    if (shearMode === "profile") {
+      if (originalShear.length < 2) {
+        setError("请先在风资源分析配置中选择用于回归的实测高度。");
+        return;
+      }
+      await recalculate({ shear_channels: originalShear });
+      return;
+    }
+    const a = low,
+      b = high;
     const ids = [a, b].map((z) => layers.filter((c) => c.height === Number(z)));
-    if (Number(a) >= Number(b) || ids.some((v) => v.length !== 1)) {
+    if (!a || !b || Number(a) >= Number(b) || ids.some((v) => v.length !== 1)) {
       setError("请选择低层小于高层、且每层通道唯一的组合。");
       return;
     }
@@ -699,12 +813,15 @@ export function InteractiveResultView({
     all,
     channel: selected,
     seriesVisibility,
+    visibleIec,
+    minimumSamples: run.config.turbulence_minimum_samples ?? 20,
     rose,
     month,
-    weibullMethod: method,
+    weibullMethod: String(run.config.weibull_method ?? "mle"),
     sectors,
     low,
     high,
+    shearMode,
     roseMetric,
     runId: chartRun?.id ?? run.id,
     sourceRunId: original.id,
@@ -734,7 +851,7 @@ export function InteractiveResultView({
     if (!root) return;
     const title = [
       output.title,
-      outputId === "weibull" && method,
+      outputId === "weibull" && config.weibullMethod,
       (outputId === "correlation" || isRose) && `${sectors}扇区`,
       isRose &&
         outputId !== "reference-rose" &&
@@ -1008,23 +1125,85 @@ export function InteractiveResultView({
                 {measured ? "全部实测风向高度" : "全部高度分图"}
               </label>
             )}
-            {outputId === "weibull" && (
-              <label>
-                拟合算法
-                <select
-                  disabled={busy}
-                  value={method}
-                  onChange={(e) => {
-                    setMethod(e.target.value);
-                    void recalculate({ weibull_method: e.target.value });
+            {turbulence && !exportMode && (
+              <>
+                <div
+                  className="ww-iec-options"
+                  role="group"
+                  aria-label="IEC 参考线（所有高度）"
+                >
+                  {iecFields.map((field) => (
+                    <label key={field}>
+                      <input
+                        type="checkbox"
+                        checked={visibleIec.includes(field)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setVisibleIec((previous) =>
+                            checked
+                              ? [...previous, field]
+                              : previous.filter((item) => item !== field),
+                          );
+                        }}
+                      />
+                      {names[field]}
+                    </label>
+                  ))}
+                </div>
+                <form
+                  className="ww-turbulence-threshold"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void recalculate({
+                      turbulence_minimum_samples: Number(minimumSamples),
+                    });
                   }}
                 >
-                  <option value="mle">最大似然 MLE（默认）</option>
-                  <option value="least-squares">累计概率线性最小二乘</option>
-                  <option value="moments">矩估计</option>
-                  <option value="energy">均速与能量匹配</option>
-                </select>
-              </label>
+                  <label>
+                    样本充足阈值（条/风速档）
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      required
+                      value={minimumSamples}
+                      disabled={busy}
+                      onChange={(e) => setMinimumSamples(e.target.value)}
+                    />
+                  </label>
+                  <button type="submit" className="ww-button" disabled={busy}>
+                    应用阈值
+                  </button>
+                </form>
+              </>
+            )}
+            {outputId === "weibull" && (
+              <>
+                <label>
+                  拟合算法
+                  <select
+                    disabled={busy}
+                    value={method}
+                    onChange={(e) => {
+                      setMethod(e.target.value);
+                      setError("");
+                    }}
+                  >
+                    <option value="mle">最大似然 MLE（默认）</option>
+                    <option value="least-squares">累计概率线性最小二乘</option>
+                    <option value="moments">矩估计</option>
+                    <option value="energy">均速与能量匹配</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="ww-button"
+                  disabled={busy}
+                  onClick={() => void recalculate({ weibull_method: method })}
+                >
+                  开始计算
+                </button>
+              </>
             )}
             {(outputId === "correlation" || (isRose && custom)) && (
               <label>
@@ -1095,84 +1274,84 @@ export function InteractiveResultView({
             {outputId === "shear" && (
               <>
                 <label>
-                  低层m
+                  计算方法
                   <select
                     disabled={busy}
-                    value={low}
-                    aria-label="低层m"
-                    onChange={(e) => {
-                      setLow(e.target.value);
-                      void choosePair(e.target.value, high);
-                    }}
+                    value={shearMode}
+                    onChange={(e) => setShearMode(e.target.value)}
                   >
-                    <option value="">请选择高度</option>
-                    {layers.map((c) => (
-                      <option key={c.id} value={c.height}>
-                        {c.height}m
-                      </option>
-                    ))}
+                    <option value="profile">幂律回归（使用配置高度）</option>
+                    <option value="pair">两高度幂律（指定高度对）</option>
                   </select>
                 </label>
-                <label>
-                  高层m
-                  <select
-                    disabled={busy}
-                    value={high}
-                    aria-label="高层m"
-                    onChange={(e) => {
-                      setHigh(e.target.value);
-                      void choosePair(low, e.target.value);
-                    }}
-                  >
-                    <option value="">请选择高度</option>
-                    {layers.map((c) => (
-                      <option key={c.id} value={c.height}>
-                        {c.height}m
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {shearMode === "pair" && (
+                  <>
+                    <label>
+                      低层（m）
+                      <select
+                        disabled={busy}
+                        value={low}
+                        onChange={(e) => setLow(e.target.value)}
+                      >
+                        <option value="">请选择高度</option>
+                        {[...new Set(layers.map((layer) => layer.height))].map(
+                          (height) => (
+                            <option key={height} value={height}>
+                              {height} m
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label>
+                      高层（m）
+                      <select
+                        disabled={busy}
+                        value={high}
+                        onChange={(e) => setHigh(e.target.value)}
+                      >
+                        <option value="">请选择高度</option>
+                        {[...new Set(layers.map((layer) => layer.height))].map(
+                          (height) => (
+                            <option key={height} value={height}>
+                              {height} m
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  </>
+                )}
                 <button
+                  type="button"
                   className="ww-button"
-                  onClick={async () => {
-                    try {
-                      const d = await api<{
-                        channels: {
-                          id: string;
-                          height: number;
-                          quantity: string;
-                          statistic: string;
-                        }[];
-                      }>(`/datasets/${run.config.qc_id}`);
-                      const ids = [Number(low), Number(high)].map((h) =>
-                        d.channels.filter(
-                          (c) =>
-                            c.height === h &&
-                            c.quantity === "speed" &&
-                            c.statistic === "mean",
-                        ),
-                      );
-                      if (
-                        Number(low) >= Number(high) ||
-                        ids.some((c) => c.length !== 1)
-                      )
-                        throw new Error(
-                          "请选择两个不同高度且通道唯一的实测层。",
-                        );
-                      await recalculate({
-                        shear_channels: ids.map((c) => c[0].id),
-                      });
-                    } catch (e) {
-                      setError((e as Error).message);
-                    }
-                  }}
+                  disabled={busy}
+                  onClick={() => void calculateShear()}
                 >
-                  选择高度对并重算
+                  开始计算
                 </button>
               </>
             )}
           </div>
         )}
+        {measured &&
+          !chartRun &&
+          measuredResponse?.sectors === sectors &&
+          measuredResponse.error && (
+            <div className="ww-chart-actions">
+              <p role="alert">{measuredResponse.error}</p>
+              <button
+                className="ww-button"
+                type="button"
+                onClick={() => {
+                  setMeasuredResponse(undefined);
+                  setRetry((previous) => previous + 1);
+                }}
+              >
+                重新载入风向
+              </button>
+            </div>
+          )}
         {busy && <p role="status">正在计算，完成后更新图表…</p>}
         {error && <p role="alert">{error}</p>}
       </div>
@@ -1306,22 +1485,24 @@ export function InteractiveResultView({
                             role="group"
                             aria-label="图上线条"
                           >
-                            {fields.map((f) => (
-                              <label key={f}>
-                                <input
-                                  type="checkbox"
-                                  checked={isVisible(c, f)}
-                                  onChange={(event) => {
-                                    const checked = event.target.checked;
-                                    setSeriesVisibility((previous) => ({
-                                      ...previous,
-                                      [seriesKey(c, f)]: checked,
-                                    }));
-                                  }}
-                                />
-                                {names[f] ?? f.replace("_", " ")}
-                              </label>
-                            ))}
+                            {fields
+                              .filter((f) => !iecFields.includes(f))
+                              .map((f) => (
+                                <label key={f}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isVisible(c, f)}
+                                    onChange={(event) => {
+                                      const checked = event.target.checked;
+                                      setSeriesVisibility((previous) => ({
+                                        ...previous,
+                                        [seriesKey(c, f)]: checked,
+                                      }));
+                                    }}
+                                  />
+                                  {names[f] ?? f.replace("_", " ")}
+                                </label>
+                              ))}
                           </div>
                         )}
                         <Plot
@@ -1346,7 +1527,11 @@ export function InteractiveResultView({
                     )}
                   </div>
                   <div>
-                    <DataTable rows={subset} footer={densityFooter} />
+                    <DataTable
+                      rows={subset}
+                      footer={densityFooter}
+                      highlightBin={turbulence ? 15 : undefined}
+                    />
                   </div>
                 </div>
               </section>

@@ -438,7 +438,27 @@ function WorkspaceApp() {
       <aside className="sidebar">
         <a className="brand" href="#" onClick={() => go(0)}>
           <span className="brand-icon">
-            <Icon name="wind" size={27} />
+            <svg
+              viewBox="0 0 28 30"
+              width="27"
+              height="29"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M13.2 14h1.6l1.1 13h-3.8z" />
+              <g className="brand-blades">
+                <circle cx="14" cy="13" r="2.1" />
+                <path d="M13 12C11.8 8.8 12.8 4.6 14.5 2c.9 3.1 1.3 7.4.4 10z" />
+                <path
+                  d="M13 12C11.8 8.8 12.8 4.6 14.5 2c.9 3.1 1.3 7.4.4 10z"
+                  transform="rotate(120 14 13)"
+                />
+                <path
+                  d="M13 12C11.8 8.8 12.8 4.6 14.5 2c.9 3.1 1.3 7.4.4 10z"
+                  transform="rotate(240 14 13)"
+                />
+              </g>
+            </svg>
           </span>
           <span>
             Aeolus<span className="brand-caption">风资源分析工作空间</span>

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { sameFile, sourceKindFromFilename } from "./batchImport";
 import type { ChangeEvent, DragEvent } from "react";
 import { SOURCE_TYPES, filesForTower, newTower } from "./model";
 import type {
@@ -19,12 +20,24 @@ import {
   useErrorFocus,
 } from "./autoSetup";
 
+type BatchEntry = {
+  file: File;
+  kind: SourceKind | "";
+  id: string;
+  error?: string;
+};
+type ImportEntry = Omit<BatchEntry, "kind"> & { kind: SourceKind };
+
 export default function DataSources({
   state,
   onChange,
   onNotice,
 }: WorkspaceViewProps) {
   const [busy, setBusy] = useState(false);
+  const importing = useRef(false);
+  const [batch, setBatch] = useState<BatchEntry[]>([]);
+  const [progress, setProgress] = useState<{ done: number; total: number }>();
+  const readyCount = batch.filter((entry) => entry.kind).length;
   const [previewId, setPreviewId] = useState("");
   const [error, setError] = useState("");
   const errorRef = useErrorFocus<HTMLParagraphElement>(error);
@@ -44,111 +57,162 @@ export default function DataSources({
     }));
   }
 
-  async function chooseFiles(kind: SourceKind, files: File[]) {
-    if (busy || !files.length) return;
-    files = files.filter(
-      (f) =>
-        !state.files.some(
-          (item) =>
-            item.kind === kind &&
-            item.towerId === (kind === "reference" ? null : tower.id) &&
-            item.file.name === f.name &&
-            item.file.size === f.size &&
-            item.file.lastModified === f.lastModified,
-        ),
-    );
-    if (!files.length) {
-      onNotice("这些文件已在当前资料中，可点击文件名继续查看。");
-      return;
-    }
+  function addToBatch(files: File[]) {
+    if (importing.current || !files.length) return;
+    const queued = files.map((file) => ({
+      file,
+      id: crypto.randomUUID(),
+      kind: sourceKindFromFilename(file.name),
+    }));
+    setBatch((current) => {
+      const next = [...current];
+      for (const entry of queued)
+        if (!next.some((item) => sameFile(item.file, entry.file)))
+          next.push(entry);
+      return next;
+    });
+  }
+
+  async function importFiles(entries: ImportEntry[], isBatch = false) {
+    if (importing.current || !entries.length) return;
+    importing.current = true;
     setBusy(true);
     setError("");
-    const selectedTowerId = tower.id;
-    const allowed = kind === "raw" ? /\.txt$/i : /\.(txt|csv|dat)$/i;
-    const invalid = files.filter((file) => !allowed.test(file.name));
-    if (invalid.length) {
-      setError(
-        `${invalid.map((file) => file.name).join("、")}：请选择${kind === "raw" ? " TXT 原始文件" : " TXT、CSV 或 DAT 文本文件"}。`,
-      );
-      setBusy(false);
-      return;
-    }
-    const results = await Promise.allSettled(
-      files.map(async (file): Promise<SourceFile> => {
-        if (file.size > 32 * 1024 * 1024)
-          throw new Error(`${file.name} 超过首版32MB限制，请按时段拆分。`);
-        const form = new FormData();
-        form.set("file", file);
-        form.set("stage", kind);
-        form.set(
-          "tower_id",
-          kind === "reference" ? "reference" : selectedTowerId,
-        );
-        const server = await api<UploadedFile>("/files", form);
-        const source: SourceFile = {
-          id: crypto.randomUUID(),
-          kind,
-          towerId: kind === "reference" ? null : selectedTowerId,
-          file: {
-            name: file.name,
-            size: file.size,
-            lastModified: file.lastModified,
-          },
-          preview: server.text_preview,
-          encoding: server.encoding,
-          warning: "",
-          server,
-        };
+    if (isBatch) setProgress({ done: 0, total: entries.length });
+    const additions: SourceFile[] = [];
+    const completed = new Set<string>();
+    const errors = new Map<string, string>();
+    let duplicates = 0;
+    try {
+      for (const [index, { file, kind, id }] of entries.entries()) {
+        const towerId = kind === "reference" ? null : tower.id;
         try {
-          return await autoParseSource(
-            source,
-            tower.timezone || DEFAULT_TIMEZONE,
-          );
-        } catch (e) {
-          return { ...source, warning: (e as Error).message };
+          if (
+            [...state.files, ...additions].some(
+              (item) =>
+                item.kind === kind &&
+                item.towerId === towerId &&
+                sameFile(item.file, file),
+            )
+          ) {
+            duplicates++;
+            completed.add(id);
+            continue;
+          }
+          const allowed = kind === "raw" ? /\.txt$/i : /\.(txt|csv|dat)$/i;
+          if (!allowed.test(file.name))
+            throw new Error(
+              kind === "raw"
+                ? "原始数据需使用 TXT 文件。"
+                : "请选择 TXT、CSV 或 DAT 文件。",
+            );
+          if (file.size > 32 * 1024 * 1024)
+            throw new Error("文件超过 32 MB，请按时段拆分。");
+          const form = new FormData();
+          form.set("file", file);
+          form.set("stage", kind);
+          form.set("tower_id", towerId ?? "reference");
+          const server = await api<UploadedFile>("/files", form);
+          const source: SourceFile = {
+            id,
+            kind,
+            towerId,
+            file: {
+              name: file.name,
+              size: file.size,
+              lastModified: file.lastModified,
+            },
+            preview: server.text_preview,
+            encoding: server.encoding,
+            warning: "",
+            server,
+          };
+          try {
+            additions.push(
+              await autoParseSource(source, tower.timezone || DEFAULT_TIMEZONE),
+            );
+          } catch (cause) {
+            additions.push({ ...source, warning: (cause as Error).message });
+          }
+          completed.add(id);
+        } catch (cause) {
+          errors.set(id, (cause as Error).message);
+        } finally {
+          if (isBatch) setProgress({ done: index + 1, total: entries.length });
         }
-      }),
+      }
+      if (additions.length) {
+        onChange((current) => {
+          const fresh = additions.filter(
+            (next) =>
+              !current.files.some(
+                (item) =>
+                  item.kind === next.kind &&
+                  item.towerId === next.towerId &&
+                  sameFile(item.file, next.file),
+              ),
+          );
+          if (!fresh.length) return current;
+          const next: typeof current = {
+            ...current,
+            files: [...current.files, ...fresh],
+            planSaved: false,
+          };
+          return fresh.reduce(
+            (value, file) => applySourceDefaults(value, file),
+            next,
+          );
+        });
+        setPreviewId(
+          (additions.find((file) => !file.dataset) ?? additions[0]).id,
+        );
+      }
+      if (isBatch) {
+        setBatch((current) =>
+          current
+            .filter((entry) => !completed.has(entry.id))
+            .map((entry) => ({ ...entry, error: errors.get(entry.id) })),
+        );
+        const pending = entries.length - additions.length - duplicates;
+        onNotice(
+          [
+            ...(additions.length ? ["已导入 " + additions.length + " 份"] : []),
+            ...(duplicates ? ["跳过 " + duplicates + " 份重复文件"] : []),
+            ...(pending ? [pending + " 份待修正或重试"] : []),
+            ...(additions.some((file) => !file.dataset)
+              ? ["部分文件待确认通道映射"]
+              : []),
+          ].join("，") + "。",
+        );
+      } else {
+        if (errors.size)
+          setError(
+            entries
+              .flatMap(({ file, id }) =>
+                errors.has(id) ? [file.name + "：" + errors.get(id)] : [],
+              )
+              .join("；"),
+          );
+        if (additions.length)
+          onNotice(
+            additions.every((file) => file.dataset)
+              ? "数据已自动导入，测风塔信息和分析配置已更新。"
+              : "文件已保存；部分信息无法识别，请展开对应文件的导入设置补充。",
+          );
+        else if (duplicates)
+          onNotice("这些文件已在当前资料中，可点击文件名继续查看。");
+      }
+    } finally {
+      importing.current = false;
+      setBusy(false);
+      setProgress(undefined);
+    }
+  }
+
+  function chooseFiles(kind: SourceKind, files: File[]) {
+    void importFiles(
+      files.map((file) => ({ file, kind, id: crypto.randomUUID() })),
     );
-    const additions = results
-      .filter(
-        (r): r is PromiseFulfilledResult<SourceFile> =>
-          r.status === "fulfilled",
-      )
-      .map((r) => r.value);
-    const errors = results
-      .filter((r) => r.status === "rejected")
-      .map((r) => String(r.reason?.message ?? r.reason));
-    if (errors.length) setError(errors.join("；"));
-    onChange((current) => {
-      const fresh = additions.filter(
-        (next) =>
-          !current.files.some(
-            (item) =>
-              item.kind === next.kind &&
-              item.towerId === next.towerId &&
-              item.file.name === next.file.name &&
-              item.file.size === next.file.size &&
-              item.file.lastModified === next.file.lastModified,
-          ),
-      );
-      const next: typeof current = {
-        ...current,
-        files: [...current.files, ...fresh],
-        planSaved: false,
-      };
-      return fresh.reduce(
-        (value, file) => applySourceDefaults(value, file),
-        next,
-      );
-    });
-    if (additions[0]) setPreviewId(additions[0].id);
-    setBusy(false);
-    if (additions.length)
-      onNotice(
-        additions.every((f) => f.dataset)
-          ? "数据已自动导入，测风塔信息和分析配置已更新。"
-          : "文件已保存；部分信息无法识别，请展开对应文件的导入设置补充。",
-      );
   }
 
   function pick(kind: SourceKind, event: ChangeEvent<HTMLInputElement>) {
@@ -176,6 +240,7 @@ export default function DataSources({
           当前测风塔
           <select
             aria-label="当前测风塔"
+            disabled={busy}
             value={tower.id}
             onChange={(e) => {
               setPreviewId("");
@@ -191,6 +256,7 @@ export default function DataSources({
         </label>
         <button
           className="ww-button"
+          disabled={busy}
           onClick={() => {
             const next = newTower(crypto.randomUUID(), state.towers.length + 1);
             onChange((current) =>
@@ -215,6 +281,124 @@ export default function DataSources({
           {error}
         </p>
       )}
+      <section
+        className="ww-panel ww-batch-import"
+        aria-labelledby="ww-batch-title"
+      >
+        <h3 id="ww-batch-title">批量上传</h3>
+        <p>
+          一次拖入多份资料，按文件名预选类别。原始、质控和结果资料归入当前测风塔，中尺度资料在项目内共享。
+        </p>
+        <label
+          className="ww-file-drop ww-batch-drop"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            addToBatch(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <input
+            type="file"
+            multiple
+            accept=".txt,.csv,.dat"
+            aria-label="选择批量上传文件"
+            disabled={busy}
+            onChange={(event) => {
+              addToBatch(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
+          <span aria-hidden="true">↥</span>
+          <strong>选择多个文件或拖到这里</strong>
+          <small>TXT / CSV / DAT</small>
+        </label>
+        {batch.length > 0 && (
+          <>
+            <ul className="ww-batch-queue" aria-label="批量上传文件">
+              {batch.map((entry) => (
+                <li key={entry.id}>
+                  <div>
+                    <strong>{entry.file.name}</strong>
+                    <small>{formatSize(entry.file.size)}</small>
+                    {entry.error && (
+                      <p className="ww-field-error" role="alert">
+                        {entry.error}
+                      </p>
+                    )}
+                  </div>
+                  <select
+                    value={entry.kind}
+                    aria-label={"资料类别：" + entry.file.name}
+                    disabled={busy}
+                    onChange={(event) => {
+                      const kind = event.target.value as BatchEntry["kind"];
+                      setBatch((current) =>
+                        current.map((item) =>
+                          item.id === entry.id
+                            ? { ...item, kind, error: undefined }
+                            : item,
+                        ),
+                      );
+                    }}
+                  >
+                    <option value="">请选择资料类别</option>
+                    {SOURCE_TYPES.map((source) => (
+                      <option key={source.id} value={source.id}>
+                        {source.shortLabel}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="ww-button"
+                    disabled={busy}
+                    aria-label={"移出待上传列表：" + entry.file.name}
+                    onClick={() =>
+                      setBatch((current) =>
+                        current.filter((item) => item.id !== entry.id),
+                      )
+                    }
+                  >
+                    移除
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="ww-chart-actions">
+              <button
+                type="button"
+                className="ww-button primary"
+                disabled={busy || !readyCount}
+                onClick={() =>
+                  void importFiles(
+                    batch.filter((entry): entry is ImportEntry =>
+                      Boolean(entry.kind),
+                    ),
+                    true,
+                  )
+                }
+              >
+                导入已分类文件（{readyCount} 份）
+              </button>
+              <button
+                type="button"
+                className="ww-button"
+                disabled={busy}
+                onClick={() => setBatch([])}
+              >
+                清空列表
+              </button>
+              <small role="status">
+                {progress
+                  ? "已处理 " + progress.done + " / " + progress.total + " 份"
+                  : batch.length > readyCount
+                    ? batch.length - readyCount + " 份待选类别"
+                    : "导入到：" + tower.name}
+              </small>
+            </div>
+          </>
+        )}
+      </section>
       <div className="ww-source-grid">
         {SOURCE_TYPES.map((source) => {
           const files = filesForTower(state, source.id);

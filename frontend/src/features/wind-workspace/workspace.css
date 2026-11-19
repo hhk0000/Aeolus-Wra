@@ -423,6 +423,60 @@
   font-size: 9px;
   color: #a6b3a8;
 }
+.ww-batch-import {
+  margin-bottom: 16px;
+}
+.ww-batch-import > h3 {
+  margin-top: 0;
+}
+.ww-batch-drop {
+  margin-top: 12px;
+  border-color: #9dbbad;
+  background: #edf5ef;
+  color: #255440;
+}
+.ww-batch-drop:focus-within {
+  outline: 2px solid #2f7d5b;
+  outline-offset: 2px;
+}
+.ww-batch-drop strong,
+.ww-batch-drop small {
+  font-size: 12px;
+  color: inherit;
+}
+.ww-batch-queue {
+  list-style: none;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.ww-batch-queue li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(128px, 0.36fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #dae6de;
+}
+.ww-batch-queue strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.ww-batch-queue small {
+  display: block;
+  margin-top: 4px;
+}
+.ww-batch-queue .ww-field-error {
+  margin: 4px 0 0;
+}
+@media (max-width: 620px) {
+  .ww-batch-queue li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ww-batch-queue li > div {
+    grid-column: 1 / -1;
+  }
+}
 .ww-file-list {
   padding: 0;
   list-style: none;

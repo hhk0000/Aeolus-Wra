@@ -1829,8 +1829,60 @@
   background: #ffffff;
   cursor: pointer;
 }
-.ww-lt-controls small {
-  color: #8aa196;
+.ww-lt-controls .ww-mean-position-hint {
+  color: var(--ww-ink-soft);
+}
+.ww-axis-minimum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-block: 0 10px;
+  color: var(--ww-ink);
+  font-size: 12px;
+}
+.ww-lt-controls .ww-axis-minimum {
+  flex-basis: 100%;
+  margin: 0;
+}
+.ww-axis-minimum label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ww-lt-controls .ww-axis-minimum label {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.ww-axis-minimum select,
+.ww-axis-minimum input {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--ww-line);
+  border-radius: 8px;
+  background: white;
+  color: inherit;
+}
+.ww-axis-minimum input {
+  width: 88px;
+}
+.ww-axis-minimum [aria-invalid="true"] {
+  border-color: #a9332b;
+}
+.ww-axis-minimum [role="status"] {
+  color: #a9332b;
+}
+.ww-movable-mean {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ww-movable-mean:active {
+  cursor: grabbing;
+}
+.ww-movable-mean:focus-visible {
+  outline: 2px solid var(--ww-accent-deep);
 }
 .ww-align-hint {
   display: flex;

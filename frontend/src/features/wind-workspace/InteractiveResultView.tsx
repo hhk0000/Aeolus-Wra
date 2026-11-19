@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, downloadJson, runTowerName } from "./api";
 import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
@@ -8,6 +8,9 @@ import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
+import { AxisMinimum } from "./AxisMinimum";
+import { getAxisMinimum } from "./axisRange";
+import type { AxisMinimumSetting } from "./axisRange";
 
 type Row = Record<string, unknown>;
 type RoseMetric = "direction" | "energy" | "both";
@@ -70,6 +73,7 @@ function Plot({
   fields,
   title,
   density = false,
+  densityMinimum = 0.5,
   rose = "",
   energy = false,
   zoom = "1",
@@ -80,6 +84,7 @@ function Plot({
   fields: string[];
   title: string;
   density?: boolean;
+  densityMinimum?: number;
   rose?: string;
   energy?: boolean;
   zoom?: string;
@@ -117,9 +122,9 @@ function Plot({
         shared.map((key) => (r[key] == null ? NaN : Number(r[key]))),
       )
       .filter(Number.isFinite);
-    const lo = density ? 0.5 : Math.min(0, ...vals);
+    const lo = density ? densityMinimum : Math.min(0, ...vals);
     const hi = density
-      ? Math.ceil(Math.max(...vals) * 20) / 20
+      ? Math.max(lo + 0.01, Math.ceil(Math.max(...vals) * 20) / 20)
       : Math.max(0.001, ...vals) * 1.1;
     return [lo, hi];
   };
@@ -128,6 +133,10 @@ function Plot({
     const [lo, hi] = limits(f);
     return B - ((v - lo) / (hi - lo || 1)) * (B - T);
   };
+  const highlightedBin =
+    outputId === "turbulence"
+      ? rows.findIndex((row) => Number(row.bin) === 15)
+      : -1;
   return (
     <figure className="ww-interactive-plot">
       <figcaption>{title}</figcaption>
@@ -293,7 +302,9 @@ function Plot({
                           fill={seriesColor(f, j)}
                           fontSize={textSize(13)}
                         >
-                          {(hi - (i * (hi - lo)) / 4).toFixed(density ? 2 : 2)}
+                          {(hi - (i * (hi - lo)) / 4).toFixed(
+                            density && hi - lo < 0.04 ? 3 : 2,
+                          )}
                         </text>
                       );
                     },
@@ -389,6 +400,33 @@ function Plot({
                   )}
                 </g>
               ))}
+              {highlightedBin >= 0 &&
+                fields.map((field, index) => {
+                  const value = rows[highlightedBin][field];
+                  if (
+                    iecFields.includes(field) ||
+                    value == null ||
+                    !Number.isFinite(Number(value))
+                  )
+                    return null;
+                  const color = seriesColor(field, index);
+                  const pointLabel = `15 m/s · ${names[field] ?? field}=${Number(value).toFixed(4)}`;
+                  return (
+                    <circle
+                      key={field}
+                      cx={x(highlightedBin)}
+                      cy={y(Number(value), field)}
+                      r="6"
+                      fill={color}
+                      stroke="white"
+                      strokeWidth="2"
+                      aria-label={pointLabel}
+                      onMouseEnter={() => setHover(pointLabel)}
+                    >
+                      <title>{pointLabel}</title>
+                    </circle>
+                  );
+                })}
               {rows.map(
                 (r, i) =>
                   i % Math.max(1, Math.ceil(rows.length / 24)) === 0 && (
@@ -398,6 +436,7 @@ function Plot({
                       y={B + 22}
                       textAnchor="middle"
                       fontSize={textSize(13)}
+                      fill={i === highlightedBin ? "#235e9a" : EXCEL.text}
                     >
                       {String(r.period ?? r.bin ?? r.label ?? "")}
                       {outputId === "monthly" ? "月" : ""}
@@ -581,6 +620,10 @@ export function InteractiveResultView({
     [zoom, setZoom] = useState(remembered?.zoom ?? "1"),
     [month, setMonth] = useState(remembered?.month ?? "all");
   const [visibleIec, setVisibleIec] = useState(iecFields);
+  const [densityAxis, setDensityAxis] = useState<AxisMinimumSetting>({
+    mode: "default",
+    custom: "0.5",
+  });
   const [minimumSamples, setMinimumSamples] = useState(
     String(run.config.turbulence_minimum_samples ?? 20),
   );
@@ -1389,8 +1432,10 @@ export function InteractiveResultView({
               });
             }
             const densityValues = subset
-              .map((r) => Number(r.density))
+              .map((r) => (r.density == null ? NaN : Number(r.density)))
               .filter((v) => Number.isFinite(v));
+            const { lower: densityMinimum, invalid: invalidDensityMinimum } =
+              getAxisMinimum(densityAxis, densityValues, 0.5);
             const meanOf = (key: string) => {
               const values = subset
                 .map((r) => Number(r[key]))
@@ -1505,6 +1550,18 @@ export function InteractiveResultView({
                               ))}
                           </div>
                         )}
+                        {!exportMode &&
+                          outputId === "density" &&
+                          densityValues.length > 0 && (
+                            <AxisMinimum
+                              setting={densityAxis}
+                              onChange={setDensityAxis}
+                              unit="kg/m³"
+                              minimum={Math.min(...densityValues)}
+                              fallback={0.5}
+                              invalid={invalidDensityMinimum}
+                            />
+                          )}
                         <Plot
                           rows={subset}
                           fields={fields.filter((f) => isVisible(c, f))}
@@ -1515,6 +1572,7 @@ export function InteractiveResultView({
                           }
                           outputId={outputId}
                           density={outputId === "density"}
+                          densityMinimum={densityMinimum}
                           fit={
                             outputId === "weibull"
                               ? (

@@ -4,6 +4,9 @@ import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
+import { AxisMinimum } from "./AxisMinimum";
+import { getAxisMinimum } from "./axisRange";
+import type { AxisMinimumSetting } from "./axisRange";
 
 const palette = EXCEL.series;
 const labels: Record<string, string> = {
@@ -255,6 +258,99 @@ function RosePlot({
   );
 }
 
+function MovableMeanLabel({
+  x,
+  y,
+  size,
+  width,
+  height,
+  label,
+}: {
+  x: number;
+  y: number;
+  size: number;
+  width: number;
+  height: number;
+  label: string;
+}) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ id: number; x: number; y: number } | null>(null);
+  const move = (text: SVGTextElement, nextX: number, nextY: number) => {
+    const textWidth = text.getBBox().width;
+    setOffset({
+      x: Math.min(width - 8, Math.max(textWidth + 8, nextX)) - x,
+      y: Math.min(height - 8, Math.max(size + 4, nextY)) - y,
+    });
+  };
+  const toSvg = (text: SVGTextElement, clientX: number, clientY: number) => {
+    const matrix = text.ownerSVGElement?.getScreenCTM();
+    return (
+      matrix && new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse())
+    );
+  };
+  return (
+    <text
+      x={x + offset.x}
+      y={y + offset.y}
+      textAnchor="end"
+      fontSize={size}
+      fill="#a9332b"
+      stroke="white"
+      strokeWidth="3"
+      paintOrder="stroke"
+      className="ww-movable-mean"
+      tabIndex={0}
+      aria-label={`${label}，拖动或使用方向键移动，按 Home 复位`}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || drag.current) return;
+        const point = toSvg(event.currentTarget, event.clientX, event.clientY);
+        if (!point) return;
+        drag.current = {
+          id: event.pointerId,
+          x: point.x - x - offset.x,
+          y: point.y - y - offset.y,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const origin = drag.current;
+        if (origin?.id !== event.pointerId) return;
+        const point = toSvg(event.currentTarget, event.clientX, event.clientY);
+        if (point)
+          move(event.currentTarget, point.x - origin.x, point.y - origin.y);
+      }}
+      onLostPointerCapture={() => {
+        drag.current = null;
+      }}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 20 : 5;
+        switch (event.key) {
+          case "Home":
+            setOffset({ x: 0, y: 0 });
+            break;
+          case "ArrowLeft":
+            move(event.currentTarget, x + offset.x - step, y + offset.y);
+            break;
+          case "ArrowRight":
+            move(event.currentTarget, x + offset.x + step, y + offset.y);
+            break;
+          case "ArrowUp":
+            move(event.currentTarget, x + offset.x, y + offset.y - step);
+            break;
+          case "ArrowDown":
+            move(event.currentTarget, x + offset.x, y + offset.y + step);
+            break;
+          default:
+            return;
+        }
+        event.preventDefault();
+      }}
+    >
+      {label}
+    </text>
+  );
+}
+
 function CartesianPlot({
   rows,
   outputId,
@@ -262,6 +358,8 @@ function CartesianPlot({
   bars = true,
   showConcurrent = true,
   compact = false,
+  annualMinimum = 0,
+  showMeanLabel = false,
 }: {
   rows: Record<string, unknown>[];
   outputId: string;
@@ -269,6 +367,8 @@ function CartesianPlot({
   bars?: boolean;
   showConcurrent?: boolean;
   compact?: boolean;
+  annualMinimum?: number;
+  showMeanLabel?: boolean;
 }) {
   const textSize = useChartTextSize();
   const isAnnual = outputId === "reference-years";
@@ -312,7 +412,9 @@ function CartesianPlot({
         : []),
     ) * 1.15;
   const minFor = (key: string) =>
-    Math.min(0, ...rows.map((r) => Number(r[key]) || 0));
+    isAnnual
+      ? annualMinimum
+      : Math.min(0, ...rows.map((r) => Number(r[key]) || 0));
   const x = (i: number) => left + ((i + 0.5) / rows.length) * (right - left);
   const y = (value: number, key: string) =>
     bottom -
@@ -369,7 +471,9 @@ function CartesianPlot({
               {(
                 maxFor(used[0]) -
                 (n / 4) * (maxFor(used[0]) - minFor(used[0]))
-              ).toFixed(isTI || isShear ? 3 : 1)}
+              ).toFixed(
+                isTI || isShear ? 3 : isAnnual && annualMinimum > 0 ? 2 : 1,
+              )}
             </text>
             {dual && (
               <text
@@ -487,7 +591,7 @@ function CartesianPlot({
         {means
           .filter((m) => numeric(m.mean_speed))
           .map((m, i) => (
-            <g key={i}>
+            <g key={String(m.years ?? i)}>
               <line
                 x1={left}
                 x2={right}
@@ -496,20 +600,18 @@ function CartesianPlot({
                 stroke="#c0392b"
                 strokeWidth="2"
               />
-              {isAnnual && (
-                <text
+              {isAnnual && showMeanLabel && (
+                <MovableMeanLabel
                   x={right - 4}
-                  y={y(Number(m.mean_speed), "mean_speed") - 7}
-                  textAnchor="end"
-                  fontSize={axisSize}
-                  fill="#a9332b"
-                  stroke="white"
-                  strokeWidth="3"
-                  paintOrder="stroke"
-                >
-                  {String(m.years)} 年中尺度均值{" "}
-                  {Number(m.mean_speed).toFixed(3)} m/s
-                </text>
+                  y={Math.max(
+                    axisSize + 4,
+                    y(Number(m.mean_speed), "mean_speed") - 7,
+                  )}
+                  size={axisSize}
+                  width={w}
+                  height={h}
+                  label={`${String(m.years)} 年中尺度均值 ${Number(m.mean_speed).toFixed(3)} m/s`}
+                />
               )}
             </g>
           ))}
@@ -532,33 +634,13 @@ function CartesianPlot({
                     : undefined
                 }
                 textAnchor={isAnnual ? "end" : "middle"}
-                fill={isAnnual && row.concurrent ? "#79570d" : EXCEL.text}
+                fill={EXCEL.text}
                 fontSize={axisSize}
               >
                 {isAnnual ? label(row).slice(0, 4) : label(row)}
               </text>
             ),
         )}
-        {isAnnual &&
-          bars &&
-          showConcurrent &&
-          rows.map(
-            (row, i) =>
-              row.concurrent === true &&
-              numeric(row.mean_speed) && (
-                <text
-                  key={i}
-                  data-concurrent-axis-marker
-                  x={Math.min(w - 16, x(i) + 18)}
-                  y={bottom + 2 * axisSize + 25}
-                  textAnchor="end"
-                  fill="#79570d"
-                  fontSize={axisSize}
-                >
-                  同期（{label(row).slice(0, 4)}）
-                </text>
-              ),
-          )}
         {!compact && (
           <>
             <text
@@ -941,6 +1023,11 @@ export function BaseResultView({
   const [roseZoom, setRoseZoom] = useState("1");
   const [ltWindow, setLtWindow] = useState("30");
   const [ltBars, setLtBars] = useState(true);
+  const [annualAxis, setAnnualAxis] = useState<AxisMinimumSetting>({
+    mode: "default",
+    custom: "0",
+  });
+  const [showMeanLabel, setShowMeanLabel] = useState(false);
   const [ltConcurrent, setLtConcurrent] = useState(true);
   const [ltLine, setLtLine] = useState(true);
   const [monthScope, setMonthScope] = useState("q1");
@@ -1083,6 +1170,18 @@ export function BaseResultView({
           .map((m) => ({ ...m, color: meanColor() }))
       : []
     : visibleMeans;
+  const annualValues = isAnnual
+    ? [
+        ...(ltBars
+          ? annualRows.filter((row) => ltConcurrent || !row.concurrent)
+          : []),
+        ...chartMeans,
+      ]
+        .map((row) => row.mean_speed)
+        .filter(numeric)
+    : [];
+  const { lower: annualMinimum, invalid: invalidAnnualMinimum } =
+    getAxisMinimum(annualAxis, annualValues, 0);
   const exportPlots = () => {
     container.current
       ?.querySelectorAll("svg")
@@ -1230,7 +1329,28 @@ export function BaseResultView({
                 />
                 均值线
               </label>
-              <small>只绘制所选窗口的年际柱与水平均值线。</small>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={showMeanLabel}
+                  disabled={!ltLine}
+                  onChange={(event) => setShowMeanLabel(event.target.checked)}
+                />
+                均值标注
+              </label>
+              {showMeanLabel && ltLine && (
+                <small className="ww-mean-position-hint">图中标注可拖动</small>
+              )}
+              {!exportMode && annualValues.length > 0 && (
+                <AxisMinimum
+                  setting={annualAxis}
+                  onChange={setAnnualAxis}
+                  unit="m/s"
+                  minimum={Math.min(...annualValues)}
+                  fallback={0}
+                  invalid={invalidAnnualMinimum}
+                />
+              )}
             </div>
           )}
           {!isAnnual && means.length > 0 && (
@@ -1369,6 +1489,8 @@ export function BaseResultView({
                 means={chartMeans}
                 bars={isAnnual ? ltBars : true}
                 showConcurrent={ltConcurrent}
+                annualMinimum={annualMinimum}
+                showMeanLabel={showMeanLabel}
               />
             )}
           </div>

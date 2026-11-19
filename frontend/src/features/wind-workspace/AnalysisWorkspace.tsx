@@ -11,7 +11,7 @@ import "./workspace.css";
 
 interface Props extends WorkspaceViewProps {
   projectName: string;
-  onOpenGallery: () => void;
+  onOpenGallery: (concurrentJobId?: string) => void;
 }
 
 export default function AnalysisWorkspace(props: Props) {
@@ -126,14 +126,16 @@ export default function AnalysisWorkspace(props: Props) {
           {state.activeTab === "data" && <DataSources {...props} />}
           {state.activeTab === "analysis" && <AnalysisSetup {...props} />}
           {state.activeTab === "correlation" && <CorrelationSetup {...props} />}
-          {state.activeTab === "concurrent" && <ConcurrentSetup {...props} />}
+          {state.activeTab === "concurrent" && (
+            <ConcurrentSetup {...props} onViewResult={onOpenGallery} />
+          )}
           {state.activeTab === "long-term" && <LongTermSetup {...props} />}
           {state.activeTab === "tools" && <AlgorithmTools {...props} />}
         </div>
       </div>
       <div className="ww-workspace-footer">
         <span>本机计算 · 来源与版本可追溯 · 每项结果独立提示适用条件</span>
-        <button className="ww-text-button" onClick={onOpenGallery}>
+        <button className="ww-text-button" onClick={() => onOpenGallery()}>
           查看计算图表 →
         </button>
       </div>

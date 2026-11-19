@@ -44,6 +44,7 @@ function loadReadingSettings(): ReadingSettings {
 interface ResultsProps extends WorkspaceViewProps {
   onConfigure: (tab: WorkspaceTab) => void;
   projectId?: number;
+  concurrentJobId?: string;
 }
 type GalleryFilter = SourceKind | "all" | "correlation" | "concurrent";
 const gallerySelection = new Map<
@@ -124,9 +125,16 @@ export function ResultsWorkspace({
   onChange,
   onConfigure,
   projectId,
+  concurrentJobId,
 }: ResultsProps) {
-  const selection =
-    projectId === undefined ? undefined : gallerySelection.get(projectId);
+  const requested = state.concurrentJobs?.find(
+    (job) => job.id === concurrentJobId,
+  );
+  const selection = requested
+    ? { filter: "concurrent" as const, activeId: requested.id, pairIndex: 0 }
+    : projectId === undefined
+      ? undefined
+      : gallerySelection.get(projectId);
   const [filter, setFilter] = useState<GalleryFilter>(
     selection?.filter ?? "all",
   );
@@ -185,6 +193,12 @@ export function ResultsWorkspace({
     update();
     return () => observer.disconnect();
   }, []);
+  useEffect(() => {
+    const panel = stage.current;
+    if (!requested || !panel) return;
+    panel.focus({ preventScroll: true });
+    panel.scrollIntoView({ block: "start" });
+  }, [requested]);
   function showStage() {
     const panel = stage.current;
     const bar = filterBar.current;
@@ -379,7 +393,11 @@ export function ResultsWorkspace({
                 ))}
         </aside>
         <ChartTextScale.Provider value={reading.axis / 100}>
-          <section className="ww-panel ww-chart-stage" ref={stage}>
+          <section
+            className="ww-panel ww-chart-stage"
+            ref={stage}
+            tabIndex={-1}
+          >
             {filter === "concurrent" ? (
               concurrentJob ? (
                 <ConcurrentGalleryResult

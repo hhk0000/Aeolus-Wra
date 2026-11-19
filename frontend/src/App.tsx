@@ -180,6 +180,7 @@ function WorkspaceApp() {
     }
   });
   const [page, setPage] = useState(0);
+  const [galleryJobId, setGalleryJobId] = useState<string>();
   const [pageHistory, setPageHistory] = useState<number[]>([]);
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -376,8 +377,9 @@ function WorkspaceApp() {
     if (selected === project.id) setSelected(remaining[0]?.id ?? -1);
     setNotice("已删除项目「" + project.name + "」");
   }
-  const go = (i: number) => {
+  const go = (i: number, jobId?: string) => {
     if (i !== page) setPageHistory((v) => [...v, page]);
+    setGalleryJobId(jobId);
     setPage(i);
     setQuery("");
   };
@@ -456,6 +458,7 @@ function WorkspaceApp() {
             className="ww-button"
             disabled={!pageHistory.length}
             onClick={() => {
+              setGalleryJobId(undefined);
               setPage(pageHistory.at(-1) ?? 0);
               setPageHistory((v) => v.slice(0, -1));
             }}
@@ -673,13 +676,14 @@ function WorkspaceApp() {
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
-                  onOpenGallery={() => setPage(2)}
+                  onOpenGallery={(jobId) => go(2, jobId)}
                 />
               )}
               {page === 2 && (
                 <ResultsWorkspace
                   key={selected}
                   projectId={selected}
+                  concurrentJobId={galleryJobId}
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}

@@ -29,7 +29,8 @@ export default function ConcurrentSetup({
   state,
   onChange,
   onNotice,
-}: WorkspaceViewProps) {
+  onViewResult,
+}: WorkspaceViewProps & { onViewResult: (id: string) => void }) {
   const files = state.files.filter((file) => file.dataset);
   const [a, setA] = useState<Choice>({});
   const [b, setB] = useState<Choice>({});
@@ -40,6 +41,19 @@ export default function ConcurrentSetup({
   const [result, setResult] = useState<ConcurrentComparison>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const resultId = result?.id ?? state.concurrentJobs?.at(-1)?.id;
+  const viewResult = (
+    <button
+      type="button"
+      className="ww-button"
+      disabled={!resultId}
+      onClick={() => {
+        if (resultId) onViewResult(resultId);
+      }}
+    >
+      查看同期结果 →
+    </button>
+  );
   const fileA =
     files.find((f) => f.id === a.fileId) ??
     files.find((f) => f.kind === "qc") ??
@@ -242,11 +256,15 @@ export default function ConcurrentSetup({
                 <button type="submit" className="ww-button primary">
                   开始同期分析
                 </button>
+                {viewResult}
               </div>
             </fieldset>
           </form>
         ) : (
-          <p>请先在数据资料中导入并识别所需文件。</p>
+          <>
+            <p>请先在数据资料中导入并识别所需文件。</p>
+            {viewResult}
+          </>
         )}
         {busy && <p role="status">正在对齐两个数据源…</p>}
         {error && (

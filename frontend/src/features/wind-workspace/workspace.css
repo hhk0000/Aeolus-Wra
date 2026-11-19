@@ -1930,6 +1930,9 @@
   top: var(--ww-gallery-top);
   z-index: 4;
 }
+.ww-results .ww-chart-stage {
+  scroll-margin-top: var(--ww-catalog-top);
+}
 .ww-results .ww-chart-list {
   position: sticky;
   top: var(--ww-catalog-top);

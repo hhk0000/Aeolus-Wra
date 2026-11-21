@@ -302,22 +302,12 @@ export function ResultsWorkspace({
             </strong>
             <span>成果可用</span>
           </div>
-          <button
-            className="ww-button"
-            onClick={() =>
-              onConfigure(
-                filter === "correlation"
-                  ? "correlation"
-                  : filter === "concurrent"
-                    ? "concurrent"
-                    : filter === "reference" || active?.kind === "reference"
-                      ? "long-term"
-                      : "analysis",
-              )
-            }
-          >
-            调整分析配置 →
-          </button>
+          <div>
+            <strong>
+              {state.analysis.aggregation === "10min" ? "10min" : "1h"}
+            </strong>
+            <span>统计步长</span>
+          </div>
         </div>
       </section>
       <div className="ww-gallery-filter" ref={filterBar}>
@@ -391,6 +381,23 @@ export function ResultsWorkspace({
               ))}
             </select>
           </label>
+          <button
+            type="button"
+            className="ww-button ww-configure-jump"
+            onClick={() =>
+              onConfigure(
+                filter === "correlation"
+                  ? "correlation"
+                  : filter === "concurrent"
+                    ? "concurrent"
+                    : filter === "reference" || active?.kind === "reference"
+                      ? "long-term"
+                      : "analysis",
+              )
+            }
+          >
+            调整分析配置 →
+          </button>
         </div>
       </div>
       <div className="ww-gallery-layout">

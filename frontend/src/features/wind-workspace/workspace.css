@@ -2783,6 +2783,19 @@
   margin: 4px 0 0;
   background: var(--ui-paper);
 }
+.ww-gallery-filter .ww-configure-jump {
+  border: 1px solid var(--ui-sage);
+  background: var(--ui-sage-soft);
+  color: var(--ui-sage-deep);
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.ww-gallery-filter .ww-configure-jump:hover {
+  background: var(--ui-sage);
+  color: var(--ui-on-sage);
+}
 .ww-save-actions {
   display: flex;
   align-items: center;

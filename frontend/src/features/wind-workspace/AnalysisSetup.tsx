@@ -1,4 +1,5 @@
 import { dateTimeInput } from "./autoSetup";
+import type { GalleryTarget } from "./ResultsWorkspace";
 import { OUTPUTS, SOURCE_TYPES, outputStatus } from "./model";
 import type { WorkspaceViewProps } from "./model";
 import CalculationPanel from "./CalculationPanel";
@@ -7,8 +8,15 @@ export default function AnalysisSetup({
   state,
   onChange,
   onNotice,
-}: WorkspaceViewProps) {
+  onOpenGallery,
+}: WorkspaceViewProps & {
+  onOpenGallery?: (target?: GalleryTarget) => void;
+}) {
   const tower = state.towers.find((t) => t.id === state.activeTowerId)!;
+  const outputMap = {
+    ...(state.analysisRuns[tower.id]?.outputs ?? {}),
+    ...(state.longTermRuns[tower.id]?.outputs ?? {}),
+  };
   function changeAnalysis(
     key: "analysisStart" | "analysisEnd" | "hubHeight",
     value: string,
@@ -99,7 +107,12 @@ export default function AnalysisSetup({
           </select>
         </label>
       </details>
-      <CalculationPanel state={state} onChange={onChange} onNotice={onNotice} />
+      <CalculationPanel
+        state={state}
+        onChange={onChange}
+        onNotice={onNotice}
+        onOpenGallery={onOpenGallery}
+      />
       <div className="ww-section-heading">
         <div>
           <h2>选择需要查阅的图表与表格</h2>
@@ -119,35 +132,54 @@ export default function AnalysisSetup({
           </div>
           <div className="ww-output-grid">
             {OUTPUTS.filter((output) => output.kind === source.id).map(
-              (output) => (
-                <label
-                  className={`ww-output-option ${state.selectedOutputs.includes(output.id) ? "is-selected" : ""}`}
-                  key={output.id}
-                >
-                  <input
-                    type="checkbox"
-                    checked={state.selectedOutputs.includes(output.id)}
-                    onChange={(e) =>
-                      onChange((current) => ({
-                        ...current,
-                        selectedOutputs: e.target.checked
-                          ? [...current.selectedOutputs, output.id]
-                          : current.selectedOutputs.filter(
-                              (id) => id !== output.id,
-                            ),
-                        planSaved: false,
-                      }))
-                    }
-                  />
-                  <span>
-                    <strong>{output.title}</strong>
-                    <span>{output.description}</span>
-                    <small>
-                      {output.form} <i>·</i> {outputStatus(output, state)}
-                    </small>
-                  </span>
-                </label>
-              ),
+              (output) => {
+                const isReady = outputMap[output.id]?.status === "ready";
+                return (
+                  <label
+                    className={`ww-output-option ${state.selectedOutputs.includes(output.id) ? "is-selected" : ""}`}
+                    key={output.id}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.selectedOutputs.includes(output.id)}
+                      onChange={(e) =>
+                        onChange((current) => ({
+                          ...current,
+                          selectedOutputs: e.target.checked
+                            ? [...current.selectedOutputs, output.id]
+                            : current.selectedOutputs.filter(
+                                (id) => id !== output.id,
+                              ),
+                          planSaved: false,
+                        }))
+                      }
+                    />
+                    <span>
+                      <strong>{output.title}</strong>
+                      <span>{output.description}</span>
+                      <small>
+                        {output.form} <i>·</i> {outputStatus(output, state)}
+                      </small>
+                    </span>
+                    {isReady && onOpenGallery && (
+                      <button
+                        type="button"
+                        className="ww-output-jump"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onOpenGallery({
+                            filter: output.kind,
+                            activeId: output.id,
+                          });
+                        }}
+                      >
+                        直达图表 ↗
+                      </button>
+                    )}
+                  </label>
+                );
+              },
             )}
           </div>
         </section>

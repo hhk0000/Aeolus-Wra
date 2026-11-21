@@ -5,13 +5,14 @@ import ConcurrentSetup from "./ConcurrentSetup";
 import DataSources from "./DataSources";
 import AlgorithmTools from "./AlgorithmTools";
 import LongTermSetup from "./LongTermSetup";
+import type { GalleryTarget } from "./ResultsWorkspace";
 import { SOURCE_TYPES, configurationSnapshot, filesForTower } from "./model";
 import type { WorkspaceTab, WorkspaceViewProps } from "./model";
 import "./workspace.css";
 
 interface Props extends WorkspaceViewProps {
   projectName: string;
-  onOpenGallery: (concurrentJobId?: string) => void;
+  onOpenGallery: (target?: string | GalleryTarget) => void;
 }
 
 export default function AnalysisWorkspace(props: Props) {

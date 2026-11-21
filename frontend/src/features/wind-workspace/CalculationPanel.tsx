@@ -2,8 +2,9 @@ import { useState } from "react";
 import { applySourceDefaults, useErrorFocus } from "./autoSetup";
 import { api, means } from "./api";
 import type { Channel, Run } from "./api";
+import type { GalleryTarget } from "./ResultsWorkspace";
 import type { SourceKind, WorkspaceViewProps } from "./model";
-import { filesForTower } from "./model";
+import { OUTPUTS, filesForTower } from "./model";
 
 export function ChannelOptions({ channels }: { channels: Channel[] }) {
   return (
@@ -22,7 +23,10 @@ export default function CalculationPanel({
   state,
   onChange,
   onNotice,
-}: WorkspaceViewProps) {
+  onOpenGallery,
+}: WorkspaceViewProps & {
+  onOpenGallery?: (target?: GalleryTarget) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const errorRef = useErrorFocus<HTMLParagraphElement>(error);
@@ -97,6 +101,21 @@ export default function CalculationPanel({
     }
   }
   const latest = state.analysisRuns[tower.id];
+  const readyOutputs = latest
+    ? OUTPUTS.filter((o) => latest.outputs[o.id]?.status === "ready")
+    : [];
+  const monthlyChannels = (
+    Array.isArray(latest?.outputs["monthly"]?.summary?.channels)
+      ? latest.outputs["monthly"].summary?.channels
+      : []
+  ) as Record<string, unknown>[];
+  const topChannel =
+    monthlyChannels.find((c) => String(c.height) === String(tower.hubHeight)) ??
+    [...monthlyChannels].sort(
+      (a, b) => Number(b.height ?? 0) - Number(a.height ?? 0),
+    )[0];
+  const densityVal = latest?.outputs["density"]?.summary?.density;
+  const shearVal = latest?.outputs["shear"]?.summary?.alpha;
   return (
     <section className="ww-panel ww-calculation-panel">
       <div className="ww-section-heading">
@@ -311,20 +330,121 @@ export default function CalculationPanel({
         </p>
       )}
       {latest && (
-        <p className="ww-inline-note">
-          最近运行：{new Date(latest.created_at).toLocaleString()} ·{" "}
-          {
-            Object.values(latest.outputs).filter((o) => o.status === "ready")
-              .length
-          }
-          组可用 · 运行标识 {latest.id.slice(0, 10)}。修改配置后需重新计算。
-        </p>
+        <div
+          className="ww-inline-feedback"
+          role="region"
+          aria-label="当前测风塔计算成果速览"
+        >
+          <div className="ww-inline-feedback-head">
+            <div>
+              <strong>当前测风塔计算成果已就绪</strong>
+              <span>
+                最近运行：{new Date(latest.created_at).toLocaleString()} ·{" "}
+                {readyOutputs.length} 组可用 · 运行标识 {latest.id.slice(0, 10)}
+              </span>
+            </div>
+            {onOpenGallery && (
+              <button
+                type="button"
+                className="ww-text-button"
+                onClick={() =>
+                  onOpenGallery({
+                    filter: "all",
+                    activeId:
+                      readyOutputs.find((o) => o.kind === "result")?.id ??
+                      readyOutputs[0]?.id,
+                  })
+                }
+              >
+                打开图表中心 →
+              </button>
+            )}
+          </div>
+          <div className="ww-inline-metrics">
+            <div>
+              <span>
+                代表高度平均风速
+                {topChannel?.height ? ` (${String(topChannel.height)}m)` : ""}
+              </span>
+              <strong>
+                {typeof topChannel?.mean_speed === "number"
+                  ? `${topChannel.mean_speed.toFixed(2)} m/s`
+                  : "—"}
+              </strong>
+            </div>
+            <div>
+              <span>
+                风功率密度
+                {topChannel?.height ? ` (${String(topChannel.height)}m)` : ""}
+              </span>
+              <strong>
+                {typeof topChannel?.power_density === "number"
+                  ? `${topChannel.power_density.toFixed(1)} W/m²`
+                  : "—"}
+              </strong>
+            </div>
+            <div>
+              <span>计算空气密度</span>
+              <strong>
+                {typeof densityVal === "number"
+                  ? `${densityVal.toFixed(3)} kg/m³`
+                  : "—"}
+              </strong>
+            </div>
+            <div>
+              <span>综合风切变指数 α</span>
+              <strong>
+                {typeof shearVal === "number" ? shearVal.toFixed(4) : "—"}
+              </strong>
+            </div>
+          </div>
+          {onOpenGallery && readyOutputs.length > 0 && (
+            <div className="ww-inline-pills" aria-label="快捷打开已生成图表">
+              <span>直达图表：</span>
+              {readyOutputs.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="ww-inline-pill"
+                  onClick={() =>
+                    onOpenGallery({ filter: item.kind, activeId: item.id })
+                  }
+                >
+                  {item.title} ↗
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       )}
       <div className="ww-save-bar">
         <span>自动生成当前数据可计算的图表；缺少资料的项目会单独说明。</span>
-        <button className="primary" disabled={busy} onClick={() => void run()}>
-          {busy ? "正在计算…" : "开始分析 →"}
-        </button>
+        <div className="ww-save-actions">
+          {onOpenGallery && (
+            <button
+              type="button"
+              className="ww-button"
+              disabled={!latest}
+              onClick={() =>
+                onOpenGallery({
+                  filter: "all",
+                  activeId:
+                    readyOutputs.find((o) => o.kind === "result")?.id ??
+                    readyOutputs[0]?.id,
+                })
+              }
+            >
+              查看风资源图表 →
+            </button>
+          )}
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => void run()}
+          >
+            {busy ? "正在计算…" : "开始分析 →"}
+          </button>
+        </div>
       </div>
     </section>
   );

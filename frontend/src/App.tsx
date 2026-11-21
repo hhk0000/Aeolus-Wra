@@ -8,6 +8,7 @@ import {
   ResultsWorkspace,
   ReportOutline,
 } from "./features/wind-workspace/ResultsWorkspace";
+import type { GalleryTarget } from "./features/wind-workspace/ResultsWorkspace";
 import {
   StandardsLibrary,
   ReviewWorkspace,
@@ -241,6 +242,7 @@ function WorkspaceApp() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [page, setPage] = useState(0);
   const [galleryJobId, setGalleryJobId] = useState<string>();
+  const [galleryTarget, setGalleryTarget] = useState<GalleryTarget>();
   const [pageHistory, setPageHistory] = useState<number[]>([]);
   const [projects, setProjects] = useState<Project[]>(() => {
     try {
@@ -461,9 +463,15 @@ function WorkspaceApp() {
     if (selected === project.id) setSelected(remaining[0]?.id ?? -1);
     setNotice("已删除项目「" + project.name + "」");
   }
-  const go = (i: number, jobId?: string) => {
+  const go = (i: number, target?: string | GalleryTarget) => {
     if (i !== page) setPageHistory((v) => [...v, page]);
-    setGalleryJobId(jobId);
+    if (typeof target === "string") {
+      setGalleryJobId(target);
+      setGalleryTarget(undefined);
+    } else {
+      setGalleryJobId(undefined);
+      setGalleryTarget(target);
+    }
     setPage(i);
     setQuery("");
   };
@@ -589,6 +597,7 @@ function WorkspaceApp() {
             disabled={!pageHistory.length}
             onClick={() => {
               setGalleryJobId(undefined);
+              setGalleryTarget(undefined);
               setPage(pageHistory.at(-1) ?? 0);
               setPageHistory((v) => v.slice(0, -1));
             }}
@@ -881,7 +890,7 @@ function WorkspaceApp() {
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
-                  onOpenGallery={(jobId) => go(2, jobId)}
+                  onOpenGallery={(target) => go(2, target)}
                 />
               )}
               {page === 2 && (
@@ -889,6 +898,7 @@ function WorkspaceApp() {
                   key={selected}
                   projectId={selected}
                   concurrentJobId={galleryJobId}
+                  galleryTarget={galleryTarget}
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
@@ -897,7 +907,7 @@ function WorkspaceApp() {
                       ...current,
                       activeTab: tab,
                     }));
-                    setPage(1);
+                    go(1);
                   }}
                 />
               )}

@@ -41,12 +41,19 @@ function loadReadingSettings(): ReadingSettings {
   return settings;
 }
 
+export type GalleryFilter = SourceKind | "all" | "correlation" | "concurrent";
+export type GalleryTarget = {
+  filter?: GalleryFilter;
+  activeId?: string;
+  pairIndex?: number;
+};
+
 interface ResultsProps extends WorkspaceViewProps {
   onConfigure: (tab: WorkspaceTab) => void;
   projectId?: number;
   concurrentJobId?: string;
+  galleryTarget?: GalleryTarget;
 }
-type GalleryFilter = SourceKind | "all" | "correlation" | "concurrent";
 const gallerySelection = new Map<
   number,
   { filter: GalleryFilter; activeId: string; pairIndex: number }
@@ -126,15 +133,23 @@ export function ResultsWorkspace({
   onConfigure,
   projectId,
   concurrentJobId,
+  galleryTarget,
 }: ResultsProps) {
   const requested = state.concurrentJobs?.find(
     (job) => job.id === concurrentJobId,
   );
-  const selection = requested
+  const explicitTarget = requested
     ? { filter: "concurrent" as const, activeId: requested.id, pairIndex: 0 }
-    : projectId === undefined
-      ? undefined
-      : gallerySelection.get(projectId);
+    : galleryTarget?.filter || galleryTarget?.activeId
+      ? {
+          filter: galleryTarget.filter ?? ("all" as const),
+          activeId: galleryTarget.activeId ?? "",
+          pairIndex: galleryTarget.pairIndex ?? 0,
+        }
+      : undefined;
+  const selection =
+    explicitTarget ??
+    (projectId === undefined ? undefined : gallerySelection.get(projectId));
   const [filter, setFilter] = useState<GalleryFilter>(
     selection?.filter ?? "all",
   );
@@ -195,10 +210,10 @@ export function ResultsWorkspace({
   }, []);
   useEffect(() => {
     const panel = stage.current;
-    if (!requested || !panel) return;
+    if ((!requested && !galleryTarget) || !panel) return;
     panel.focus({ preventScroll: true });
     panel.scrollIntoView({ block: "start" });
-  }, [requested]);
+  }, [requested, galleryTarget]);
   function showStage() {
     const panel = stage.current;
     const bar = filterBar.current;
@@ -287,7 +302,20 @@ export function ResultsWorkspace({
             </strong>
             <span>成果可用</span>
           </div>
-          <button className="ww-button" onClick={() => onConfigure("analysis")}>
+          <button
+            className="ww-button"
+            onClick={() =>
+              onConfigure(
+                filter === "correlation"
+                  ? "correlation"
+                  : filter === "concurrent"
+                    ? "concurrent"
+                    : filter === "reference" || active?.kind === "reference"
+                      ? "long-term"
+                      : "analysis",
+              )
+            }
+          >
             调整分析配置 →
           </button>
         </div>

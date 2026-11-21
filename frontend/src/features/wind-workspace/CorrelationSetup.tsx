@@ -8,6 +8,7 @@ import {
   windSpeedHeights,
 } from "./model";
 import type { CorrelationDraft, WorkspaceViewProps } from "./model";
+import type { GalleryTarget } from "./ResultsWorkspace";
 import { api, means } from "./api";
 import type { Run, Dataset } from "./api";
 
@@ -37,7 +38,10 @@ export default function CorrelationSetup({
   state,
   onChange,
   onNotice,
-}: WorkspaceViewProps) {
+  onOpenGallery,
+}: WorkspaceViewProps & {
+  onOpenGallery?: (target?: GalleryTarget) => void;
+}) {
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -657,11 +661,145 @@ export default function CorrelationSetup({
           {apiError}
         </p>
       )}
+      {state.correlationJobs.length > 0 &&
+        (() => {
+          const latestJob = state.correlationJobs.at(-1)!;
+          const firstRun = latestJob.runs?.[0]?.outputs?.["correlation"];
+          const rows = (firstRun?.rows ?? []) as Record<string, unknown>[];
+          const bestRow =
+            [...rows]
+              .filter((r) => typeof r.r === "number")
+              .sort((a, b) => Number(b.count ?? 0) - Number(a.count ?? 0))[0] ??
+            rows[0];
+          const pairedCount = firstRun?.summary?.paired_count;
+          return (
+            <div
+              className="ww-inline-feedback"
+              role="region"
+              aria-label="已生成相关性分析速览"
+            >
+              <div className="ww-inline-feedback-head">
+                <div>
+                  <strong>
+                    已完成 {state.correlationJobs.length} 项相关性分析任务
+                  </strong>
+                  <span>
+                    最近任务：{latestJob.sourceLabels.join(" ↔ ")} ·{" "}
+                    {latestJob.pairs.map(([y, x]) => `${y}m↔${x}m`).join("、")}
+                  </span>
+                </div>
+                {onOpenGallery && (
+                  <button
+                    type="button"
+                    className="ww-text-button"
+                    onClick={() =>
+                      onOpenGallery({
+                        filter: "correlation",
+                        activeId: latestJob.id,
+                        pairIndex: 0,
+                      })
+                    }
+                  >
+                    打开相关性图表 →
+                  </button>
+                )}
+              </div>
+              <div className="ww-inline-metrics">
+                <div>
+                  <span>同期有效配对样本</span>
+                  <strong>
+                    {typeof pairedCount === "number"
+                      ? `${pairedCount.toLocaleString()} 条`
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>
+                    代表扇区相关系数 r
+                    {bestRow?.label ? ` (${String(bestRow.label)})` : ""}
+                  </span>
+                  <strong>
+                    {typeof bestRow?.r === "number"
+                      ? bestRow.r.toFixed(4)
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>决定系数 R²</span>
+                  <strong>
+                    {typeof bestRow?.r_squared === "number"
+                      ? bestRow.r_squared.toFixed(4)
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>回归斜率 / 扇区数</span>
+                  <strong>
+                    {typeof bestRow?.slope === "number"
+                      ? `k=${bestRow.slope.toFixed(3)} · ${latestJob.sectors}扇区`
+                      : `${latestJob.sectors} 扇区`}
+                  </strong>
+                </div>
+              </div>
+              {onOpenGallery && (
+                <div
+                  className="ww-inline-pills"
+                  aria-label="快捷打开相关性任务"
+                >
+                  <span>直达任务：</span>
+                  {state.correlationJobs.map((job, index) => (
+                    <button
+                      key={job.id}
+                      type="button"
+                      className="ww-inline-pill"
+                      onClick={() =>
+                        onOpenGallery({
+                          filter: "correlation",
+                          activeId: job.id,
+                          pairIndex: 0,
+                        })
+                      }
+                    >
+                      任务 {index + 1}（
+                      {job.pairs
+                        .slice(0, 2)
+                        .map(([y, x]) => `${y}m↔${x}m`)
+                        .join("、")}
+                      ）↗
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       <div className="ww-save-bar">
         <p>每组高度对独立成页，回归使用全部同期样本；图上最多显示1200个点。</p>
-        <button className="primary" disabled={busy} onClick={() => void save()}>
-          {busy ? "正在对齐与拟合…" : "执行相关性分析 →"}
-        </button>
+        <div className="ww-save-actions">
+          {onOpenGallery && (
+            <button
+              type="button"
+              className="ww-button"
+              disabled={!state.correlationJobs.length}
+              onClick={() =>
+                onOpenGallery({
+                  filter: "correlation",
+                  activeId: state.correlationJobs.at(-1)?.id,
+                  pairIndex: 0,
+                })
+              }
+            >
+              查看相关性图表 →
+            </button>
+          )}
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => void save()}
+          >
+            {busy ? "正在对齐与拟合…" : "执行相关性分析 →"}
+          </button>
+        </div>
       </div>
     </div>
   );

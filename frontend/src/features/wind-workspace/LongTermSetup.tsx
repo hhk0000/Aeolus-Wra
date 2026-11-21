@@ -6,6 +6,7 @@ import {
 import { useState } from "react";
 import { filesForTower, longTermErrors } from "./model";
 import type { WorkspaceViewProps } from "./model";
+import type { GalleryTarget } from "./ResultsWorkspace";
 import { api, means } from "./api";
 import type { Run } from "./api";
 import { ChannelOptions } from "./CalculationPanel";
@@ -14,7 +15,10 @@ export default function LongTermSetup({
   state,
   onChange,
   onNotice,
-}: WorkspaceViewProps) {
+  onOpenGallery,
+}: WorkspaceViewProps & {
+  onOpenGallery?: (target?: GalleryTarget) => void;
+}) {
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -288,11 +292,161 @@ export default function LongTermSetup({
           {apiError}
         </p>
       )}
+      {state.longTermRuns[tower.id] &&
+        (() => {
+          const latest = state.longTermRuns[tower.id];
+          const annual = latest.outputs["reference-years"];
+          const rows = (annual?.rows ?? []) as Record<string, unknown>[];
+          const concurrentRow = rows.find((r) => r.concurrent === true);
+          const concurrentSpeed =
+            typeof concurrentRow?.mean_speed === "number"
+              ? concurrentRow.mean_speed
+              : undefined;
+          const windowMeans = (
+            Array.isArray(annual?.summary?.means) ? annual.summary?.means : []
+          ) as { years: number; mean_speed: number | null }[];
+          const baselineWindow = windowMeans.find(
+            (m) => typeof m.mean_speed === "number" && m.mean_speed > 0,
+          );
+          const deviation =
+            concurrentSpeed !== undefined &&
+            concurrentRow?.complete === true &&
+            typeof baselineWindow?.mean_speed === "number"
+              ? ((concurrentSpeed - baselineWindow.mean_speed) /
+                  baselineWindow.mean_speed) *
+                100
+              : undefined;
+          const windYearClass =
+            deviation === undefined
+              ? "—"
+              : Math.abs(deviation) <= 2
+                ? `平风年 (${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%)`
+                : deviation > 2
+                  ? `大风年 (+${deviation.toFixed(2)}%)`
+                  : `小风年 (${deviation.toFixed(2)}%)`;
+          const roseReady =
+            latest.outputs["reference-rose"]?.status === "ready";
+          return (
+            <div
+              className="ww-inline-feedback"
+              role="region"
+              aria-label="长期参考计算成果速览"
+            >
+              <div className="ww-inline-feedback-head">
+                <div>
+                  <strong>长期参考与同期风况成果已就绪</strong>
+                  <span>
+                    最近运行：{new Date(latest.created_at).toLocaleString()} ·
+                    运行标识 {latest.id.slice(0, 10)}
+                  </span>
+                </div>
+                {onOpenGallery && (
+                  <button
+                    type="button"
+                    className="ww-text-button"
+                    onClick={() =>
+                      onOpenGallery({
+                        filter: "reference",
+                        activeId: "reference-years",
+                      })
+                    }
+                  >
+                    打开长期年际图 →
+                  </button>
+                )}
+              </div>
+              <div className="ww-inline-metrics">
+                <div>
+                  <span>测风同期中尺度风速</span>
+                  <strong>
+                    {concurrentSpeed !== undefined
+                      ? `${concurrentSpeed.toFixed(2)} m/s`
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>
+                    长期基准均值
+                    {baselineWindow ? ` (${baselineWindow.years}年)` : ""}
+                  </span>
+                  <strong>
+                    {typeof baselineWindow?.mean_speed === "number"
+                      ? `${baselineWindow.mean_speed.toFixed(2)} m/s`
+                      : "—"}
+                  </strong>
+                </div>
+                <div>
+                  <span>测风年风年判定</span>
+                  <strong>{windYearClass}</strong>
+                </div>
+                <div>
+                  <span>已统计周年序列</span>
+                  <strong>{rows.length} 个分析年</strong>
+                </div>
+              </div>
+              {onOpenGallery && (
+                <div
+                  className="ww-inline-pills"
+                  aria-label="快捷打开长期参考图表"
+                >
+                  <span>直达图表：</span>
+                  <button
+                    type="button"
+                    className="ww-inline-pill"
+                    onClick={() =>
+                      onOpenGallery({
+                        filter: "reference",
+                        activeId: "reference-years",
+                      })
+                    }
+                  >
+                    长期年际风速变化 ↗
+                  </button>
+                  {roseReady && (
+                    <button
+                      type="button"
+                      className="ww-inline-pill"
+                      onClick={() =>
+                        onOpenGallery({
+                          filter: "reference",
+                          activeId: "reference-rose",
+                        })
+                      }
+                    >
+                      长期累计风向玫瑰 ↗
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       <div className="ww-save-bar">
         <p>配置同时用于长期年际柱图、均值线和累计风向图。</p>
-        <button className="primary" disabled={busy} onClick={() => void run()}>
-          {busy ? "正在统计周年与长期窗口…" : "执行长期参考分析 →"}
-        </button>
+        <div className="ww-save-actions">
+          {onOpenGallery && (
+            <button
+              type="button"
+              className="ww-button"
+              disabled={!state.longTermRuns[tower.id]}
+              onClick={() =>
+                onOpenGallery({
+                  filter: "reference",
+                  activeId: "reference-years",
+                })
+              }
+            >
+              查看长期参考图表 →
+            </button>
+          )}
+          <button
+            className="primary"
+            disabled={busy}
+            onClick={() => void run()}
+          >
+            {busy ? "正在统计周年与长期窗口…" : "执行长期参考分析 →"}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -2655,3 +2655,116 @@
     transition: none;
   }
 }
+
+/* Inline calculation feedback & quick gallery navigation */
+.ww-inline-feedback {
+  margin: 18px 0;
+  padding: 18px 20px;
+  border: 1px solid var(--ui-line);
+  border-radius: 14px;
+  background: var(--ui-soft);
+  box-shadow: var(--ui-shadow-card);
+  display: grid;
+  gap: 14px;
+}
+.ww-inline-feedback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.ww-inline-feedback-head > div {
+  display: grid;
+  gap: 4px;
+}
+.ww-inline-feedback-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-sage-deep);
+}
+.ww-inline-feedback-head span {
+  font-size: 11px;
+  color: var(--ui-muted);
+}
+.ww-inline-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.ww-inline-metrics > div {
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: var(--ui-paper);
+  border: 1px solid var(--ui-line);
+  display: grid;
+  gap: 5px;
+}
+.ww-inline-metrics span {
+  font-size: 10px;
+  color: var(--ui-muted);
+}
+.ww-inline-metrics strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+}
+.ww-inline-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 4px;
+}
+.ww-inline-pills > span {
+  font-size: 11px;
+  color: var(--ui-muted);
+  margin-right: 2px;
+}
+.ww-inline-pill {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-paper);
+  color: var(--ui-sage-deep);
+  font-size: 11px;
+  font-weight: 500;
+}
+.ww-inline-pill:hover {
+  border-color: var(--ui-sage);
+  background: var(--ui-sage-soft);
+  transform: translateY(-1px);
+}
+.ww-save-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ww-output-jump {
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-soft);
+  color: var(--ui-sage-deep);
+  font-size: 10px;
+  font-weight: 600;
+}
+.ww-output-jump:hover {
+  border-color: var(--ui-sage);
+  background: var(--ui-sage-soft);
+}
+@media (max-width: 900px) {
+  .ww-inline-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 540px) {
+  .ww-inline-metrics {
+    grid-template-columns: 1fr;
+  }
+}

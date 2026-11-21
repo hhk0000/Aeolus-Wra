@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { Registry } from "./api";
-import type { WorkspaceState } from "./model";
+import type { GalleryTarget } from "./ResultsWorkspace";
+import { OUTPUTS } from "./model";
+import type { WorkspaceState, WorkspaceTab } from "./model";
 import "./workspace.css";
 
 export function StandardsLibrary() {
@@ -99,7 +101,18 @@ export function StandardsLibrary() {
   );
 }
 
-export function ReviewWorkspace({ state }: { state: WorkspaceState }) {
+export function ReviewWorkspace({
+  state,
+  onConfigure,
+  onOpenGallery,
+}: {
+  state: WorkspaceState;
+  onConfigure?: (tab: WorkspaceTab) => void;
+  onOpenGallery?: (target?: GalleryTarget) => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "ready">(
+    "all",
+  );
   const runs = [
     ...Object.values(state.analysisRuns),
     ...Object.values(state.longTermRuns),
@@ -108,6 +121,16 @@ export function ReviewWorkspace({ state }: { state: WorkspaceState }) {
   ];
   const outputs = runs.flatMap((run) =>
     Object.entries(run.outputs).map(([id, output]) => ({ id, output, run })),
+  );
+  const readyCount = outputs.filter((o) => o.output.status === "ready").length;
+  const pendingCount = outputs.filter(
+    (o) => o.output.status !== "ready",
+  ).length;
+  const visibleOutputs = outputs.filter(
+    (item) =>
+      statusFilter === "all" ||
+      (statusFilter === "ready" && item.output.status === "ready") ||
+      (statusFilter === "pending" && item.output.status !== "ready"),
   );
   return (
     <div className="ww-workspace">
@@ -125,18 +148,39 @@ export function ReviewWorkspace({ state }: { state: WorkspaceState }) {
           <span>已解析资料</span>
         </article>
         <article>
-          <strong>
-            {outputs.filter((o) => o.output.status === "ready").length}
-          </strong>
+          <strong>{readyCount}</strong>
           <span>可用输出</span>
         </article>
         <article>
-          <strong>
-            {outputs.filter((o) => o.output.status !== "ready").length}
-          </strong>
+          <strong>{pendingCount}</strong>
           <span>缺项 / 待补条件</span>
         </article>
       </div>
+      {outputs.length > 0 && (
+        <div
+          className="ww-mapper-filters"
+          role="group"
+          aria-label="审查项状态筛选"
+        >
+          {(
+            [
+              ["all", `全部核查项 (${outputs.length})`],
+              ["pending", `待补充条件 (${pendingCount})`],
+              ["ready", `计算已完成 (${readyCount})`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={statusFilter === id}
+              className={`ww-inline-pill ${statusFilter === id ? "active" : ""}`}
+              onClick={() => setStatusFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {!runs.length && (
         <div className="ww-panel ww-simple-empty">
           <h3>还没有运行记录</h3>
@@ -153,27 +197,58 @@ export function ReviewWorkspace({ state }: { state: WorkspaceState }) {
         )),
       )}
       <div className="ww-method-list">
-        {outputs.map(({ id, output, run }) => (
-          <article className="ww-panel" key={`${run.id}-${id}`}>
-            <div className="ww-section-heading">
-              <h3>{output.title}</h3>
-              <span
-                className={`ww-status ${output.status === "ready" ? "ready" : "pending"}`}
-              >
-                {output.status === "ready" ? "计算已完成" : "待补充条件"}
-              </span>
-            </div>
-            <p>
-              {output.reason ??
-                "结果可查阅，适用性与输入质量仍需结合方法条件核对。"}
-            </p>
-            <small>
-              {new Date(run.created_at).toLocaleString()} · 引擎{" "}
-              {run.engine_version} · 方法 {output.method} · 运行{" "}
-              {run.id.slice(0, 12)}
-            </small>
-          </article>
-        ))}
+        {visibleOutputs.map(({ id, output, run }) => {
+          const spec = OUTPUTS.find((o) => o.id === id);
+          const targetTab: WorkspaceTab =
+            run.kind === "long-term" || spec?.kind === "reference"
+              ? "long-term"
+              : run.kind === "correlation"
+                ? "correlation"
+                : "analysis";
+          return (
+            <article className="ww-panel" key={`${run.id}-${id}`}>
+              <div className="ww-section-heading">
+                <h3>{output.title}</h3>
+                <div className="ww-save-actions">
+                  <span
+                    className={`ww-status ${output.status === "ready" ? "ready" : "pending"}`}
+                  >
+                    {output.status === "ready" ? "计算已完成" : "待补充条件"}
+                  </span>
+                  {output.status === "ready" && onOpenGallery && spec && (
+                    <button
+                      type="button"
+                      className="ww-output-jump"
+                      onClick={() =>
+                        onOpenGallery({ filter: spec.kind, activeId: spec.id })
+                      }
+                    >
+                      查阅图表 ↗
+                    </button>
+                  )}
+                  {output.status !== "ready" && onConfigure && (
+                    <button
+                      type="button"
+                      className="ww-output-jump"
+                      onClick={() => onConfigure(targetTab)}
+                    >
+                      前往补充配置 →
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p>
+                {output.reason ??
+                  "结果可查阅，适用性与输入质量仍需结合方法条件核对。"}
+              </p>
+              <small>
+                {new Date(run.created_at).toLocaleString()} · 引擎{" "}
+                {run.engine_version} · 方法 {output.method} · 运行{" "}
+                {run.id.slice(0, 12)}
+              </small>
+            </article>
+          );
+        })}
       </div>
       <div className="ww-callout">
         现场布设、仪器检定与变更一致性、复杂地形推算、极端风况与台风专题、最终报告审签需要相应资料与人工复核。

@@ -2736,6 +2736,53 @@
   background: var(--ui-sage-soft);
   transform: translateY(-1px);
 }
+.ww-inline-pill.active {
+  border-color: var(--ui-sage);
+  background: var(--ui-sage);
+  color: var(--ui-on-sage);
+  font-weight: 600;
+}
+.ww-mapper-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--ui-line);
+  border-radius: 12px;
+  background: var(--ui-soft);
+}
+.ww-mapper-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ww-mapper-batch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ui-muted);
+}
+.ww-mapper-batch input {
+  width: 96px !important;
+  padding: 6px 9px !important;
+  font-size: 11px !important;
+}
+.ww-mapping-table tr.ww-row-pending td {
+  background: #fff9eb;
+}
+.ww-report-digest {
+  margin: 16px 0 22px;
+}
+.ww-report-digest .ww-table-scroll {
+  margin: 4px 0 0;
+  background: var(--ui-paper);
+}
 .ww-save-actions {
   display: flex;
   align-items: center;

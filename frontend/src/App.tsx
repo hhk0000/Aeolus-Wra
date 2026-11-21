@@ -917,6 +917,7 @@ function WorkspaceApp() {
                   state={workspace}
                   projectName={current.name}
                   onChange={updateWorkspace}
+                  onOpenGallery={(target) => go(2, target)}
                   onAnalyze={() => {
                     updateWorkspace((current) => ({
                       ...current,
@@ -926,7 +927,19 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === 4 && <ReviewWorkspace state={workspace} />}
+              {page === 4 && (
+                <ReviewWorkspace
+                  state={workspace}
+                  onOpenGallery={(target) => go(2, target)}
+                  onConfigure={(tab) => {
+                    updateWorkspace((current) => ({
+                      ...current,
+                      activeTab: tab,
+                    }));
+                    go(1);
+                  }}
+                />
+              )}
               {page === 5 && <StandardsLibrary />}
             </>
           )}

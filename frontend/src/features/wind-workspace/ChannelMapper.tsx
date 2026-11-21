@@ -65,9 +65,53 @@ export default function ChannelMapper({
     preview.detected?.timestamp_position ?? "start",
   );
   const [missing, setMissing] = useState("-9999, -999, NaN");
+  const [channelFilter, setChannelFilter] = useState<
+    "all" | "pending" | "wind" | "thermo"
+  >("all");
+  const [batchArm, setBatchArm] = useState("N");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const errorRef = useErrorFocus<HTMLParagraphElement>(error);
+  function isRowPending(m: Mapping, index: number) {
+    if (!m.quantity || index === stampColumn || String(index) === timeColumn)
+      return false;
+    return (
+      Boolean(m.ambiguous) ||
+      !m.statistic ||
+      !m.unit ||
+      m.height === null ||
+      m.height <= 0 ||
+      (m.quantity === "speed" && !m.arm.trim())
+    );
+  }
+  const pendingCount = maps.filter((m, i) => isRowPending(m, i)).length;
+  const windCount = maps.filter(
+    (m) => m.quantity === "speed" || m.quantity === "direction",
+  ).length;
+  const thermoCount = maps.filter((m) =>
+    ["temperature", "pressure", "humidity"].includes(m.quantity),
+  ).length;
+  const emptySpeedArmCount = maps.filter(
+    (m, i) =>
+      m.quantity === "speed" &&
+      i !== stampColumn &&
+      String(i) !== timeColumn &&
+      !m.arm.trim(),
+  ).length;
+  function fillEmptySpeedArms(armValue: string) {
+    const clean = armValue.trim();
+    if (!clean) return;
+    setMaps((current) =>
+      current.map((m, i) =>
+        m.quantity === "speed" &&
+        i !== stampColumn &&
+        String(i) !== timeColumn &&
+        !m.arm.trim()
+          ? { ...m, arm: clean }
+          : m,
+      ),
+    );
+  }
   function map(index: number, changes: Partial<Mapping>) {
     setMaps((current) =>
       current.map((m, i) => (i === index ? { ...m, ...changes } : m)),
@@ -287,6 +331,51 @@ export default function ChannelMapper({
           <small>空单元格按缺测处理；未声明的文字标记会阻止解析。</small>
         </label>
       </div>
+      <div className="ww-mapper-toolbar">
+        <div
+          className="ww-mapper-filters"
+          role="group"
+          aria-label="通道列表筛选"
+        >
+          {(
+            [
+              ["all", `全部列 (${maps.length})`],
+              ["pending", `待确认 / 缺支臂 (${pendingCount})`],
+              ["wind", `风速 / 风向 (${windCount})`],
+              ["thermo", `温压湿 (${thermoCount})`],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={channelFilter === id}
+              className={`ww-inline-pill ${channelFilter === id ? "active" : ""}`}
+              onClick={() => setChannelFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {emptySpeedArmCount > 0 && (
+          <div className="ww-mapper-batch">
+            <span>{emptySpeedArmCount} 个风速通道未填支臂：</span>
+            <input
+              aria-label="批量支臂标识"
+              value={batchArm}
+              maxLength={12}
+              onChange={(e) => setBatchArm(e.target.value)}
+              placeholder="如 N 或 A"
+            />
+            <button
+              type="button"
+              className="ww-button"
+              onClick={() => fillEmptySpeedArms(batchArm)}
+            >
+              一键补全空白风速支臂
+            </button>
+          </div>
+        )}
+      </div>
       <div className="ww-table-scroll">
         <table className="ww-mapping-table">
           <thead>
@@ -301,83 +390,96 @@ export default function ChannelMapper({
             </tr>
           </thead>
           <tbody>
-            {maps.map((m, i) => (
-              <tr key={i}>
-                <td title={preview.headers[i]}>
-                  {i + 1} · {preview.headers[i]}
-                </td>
-                <td>{preview.sample_rows[0]?.[i] ?? "—"}</td>
-                <td>
-                  <select
-                    aria-label={`第${i + 1}列要素`}
-                    value={m.quantity}
-                    onChange={(e) =>
-                      map(i, {
-                        quantity: e.target.value,
-                        unit: units[e.target.value]?.[0] ?? "",
-                      })
-                    }
-                  >
-                    {quantities.map(([v, label]) => (
-                      <option key={v} value={v}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    aria-label={`第${i + 1}列统计类型`}
-                    value={m.statistic}
-                    disabled={!m.quantity}
-                    onChange={(e) => map(i, { statistic: e.target.value })}
-                  >
-                    <option value="">待确认</option>
-                    <option value="mean">平均值</option>
-                    <option value="sd">标准差</option>
-                    <option value="max">最大值</option>
-                    <option value="min">最小值</option>
-                  </select>
-                </td>
-                <td>
-                  <input
-                    aria-label={`第${i + 1}列高度`}
-                    type="number"
-                    min="0.1"
-                    step="any"
-                    disabled={!m.quantity}
-                    value={m.height ?? ""}
-                    onChange={(e) =>
-                      map(i, {
-                        height: e.target.value ? Number(e.target.value) : null,
-                      })
-                    }
-                  />
-                </td>
-                <td>
-                  <select
-                    aria-label={`第${i + 1}列单位`}
-                    value={m.unit}
-                    disabled={!m.quantity}
-                    onChange={(e) => map(i, { unit: e.target.value })}
-                  >
-                    <option value="">待确认</option>
-                    {(units[m.quantity] ?? []).map((u) => (
-                      <option key={u}>{u}</option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    aria-label={`第${i + 1}列支臂`}
-                    disabled={!m.quantity}
-                    value={m.arm}
-                    onChange={(e) => map(i, { arm: e.target.value })}
-                    placeholder="如 NNE，切变必填"
-                  />
-                </td>
-              </tr>
-            ))}
+            {maps.map((m, i) => {
+              const pending = isRowPending(m, i);
+              const visible =
+                channelFilter === "all" ||
+                (channelFilter === "pending" && pending) ||
+                (channelFilter === "wind" &&
+                  (m.quantity === "speed" || m.quantity === "direction")) ||
+                (channelFilter === "thermo" &&
+                  ["temperature", "pressure", "humidity"].includes(m.quantity));
+              if (!visible) return null;
+              return (
+                <tr key={i} className={pending ? "ww-row-pending" : undefined}>
+                  <td title={preview.headers[i]}>
+                    {i + 1} · {preview.headers[i]}
+                  </td>
+                  <td>{preview.sample_rows[0]?.[i] ?? "—"}</td>
+                  <td>
+                    <select
+                      aria-label={`第${i + 1}列要素`}
+                      value={m.quantity}
+                      onChange={(e) =>
+                        map(i, {
+                          quantity: e.target.value,
+                          unit: units[e.target.value]?.[0] ?? "",
+                        })
+                      }
+                    >
+                      {quantities.map(([v, label]) => (
+                        <option key={v} value={v}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      aria-label={`第${i + 1}列统计类型`}
+                      value={m.statistic}
+                      disabled={!m.quantity}
+                      onChange={(e) => map(i, { statistic: e.target.value })}
+                    >
+                      <option value="">待确认</option>
+                      <option value="mean">平均值</option>
+                      <option value="sd">标准差</option>
+                      <option value="max">最大值</option>
+                      <option value="min">最小值</option>
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`第${i + 1}列高度`}
+                      type="number"
+                      min="0.1"
+                      step="any"
+                      disabled={!m.quantity}
+                      value={m.height ?? ""}
+                      onChange={(e) =>
+                        map(i, {
+                          height: e.target.value
+                            ? Number(e.target.value)
+                            : null,
+                        })
+                      }
+                    />
+                  </td>
+                  <td>
+                    <select
+                      aria-label={`第${i + 1}列单位`}
+                      value={m.unit}
+                      disabled={!m.quantity}
+                      onChange={(e) => map(i, { unit: e.target.value })}
+                    >
+                      <option value="">待确认</option>
+                      {(units[m.quantity] ?? []).map((u) => (
+                        <option key={u}>{u}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`第${i + 1}列支臂`}
+                      disabled={!m.quantity}
+                      value={m.arm}
+                      onChange={(e) => map(i, { arm: e.target.value })}
+                      placeholder="如 NNE，切变必填"
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -671,13 +671,90 @@ export function ReportOutline({
   onChange,
   projectName,
   onAnalyze,
+  onOpenGallery,
 }: {
   state: WorkspaceViewProps["state"];
   onChange: WorkspaceViewProps["onChange"];
   projectName: string;
   onAnalyze: () => void;
+  onOpenGallery?: (target?: GalleryTarget) => void;
 }) {
   const [chapter, setChapter] = useState<2 | 5>(2);
+  function summarizeTower(towerId: string, hubHeight: string) {
+    const run = state.analysisRuns[towerId];
+    const ltRun = state.longTermRuns[towerId];
+    const monthlyChannels = (
+      Array.isArray(run?.outputs["monthly"]?.summary?.channels)
+        ? run.outputs["monthly"].summary?.channels
+        : []
+    ) as Record<string, unknown>[];
+    const topChannel =
+      monthlyChannels.find((c) => String(c.height) === String(hubHeight)) ??
+      [...monthlyChannels].sort(
+        (a, b) => Number(b.height ?? 0) - Number(a.height ?? 0),
+      )[0];
+    const density = run?.outputs["density"]?.summary?.density;
+    const alpha = run?.outputs["shear"]?.summary?.alpha;
+    const tiRows = (run?.outputs["turbulence"]?.rows ?? []) as Record<
+      string,
+      unknown
+    >[];
+    const ti15 = tiRows
+      .filter(
+        (r) => Number(r.bin) === 15 && typeof r.representative === "number",
+      )
+      .sort(
+        (a, b) => Number(b.height ?? 0) - Number(a.height ?? 0),
+      )[0]?.representative;
+    const annual = ltRun?.outputs["reference-years"];
+    const ltRows = (annual?.rows ?? []) as Record<string, unknown>[];
+    const concurrentRow = ltRows.find((r) => r.concurrent === true);
+    const windowMeans = (
+      Array.isArray(annual?.summary?.means) ? annual.summary?.means : []
+    ) as { years: number; mean_speed: number | null }[];
+    const baseWin = windowMeans.find(
+      (m) => typeof m.mean_speed === "number" && m.mean_speed > 0,
+    );
+    const deviation =
+      typeof concurrentRow?.mean_speed === "number" &&
+      concurrentRow.complete === true &&
+      typeof baseWin?.mean_speed === "number"
+        ? ((concurrentRow.mean_speed - baseWin.mean_speed) /
+            baseWin.mean_speed) *
+          100
+        : undefined;
+    const windYear =
+      deviation === undefined
+        ? "—"
+        : Math.abs(deviation) <= 2
+          ? `平风年 (${deviation >= 0 ? "+" : ""}${deviation.toFixed(1)}%)`
+          : deviation > 2
+            ? `大风年 (+${deviation.toFixed(1)}%)`
+            : `小风年 (${deviation.toFixed(1)}%)`;
+    return {
+      hasRun: Boolean(run || ltRun),
+      height: topChannel?.height
+        ? `${String(topChannel.height)} m`
+        : hubHeight
+          ? `${hubHeight} m`
+          : "—",
+      meanSpeed:
+        typeof topChannel?.mean_speed === "number"
+          ? `${topChannel.mean_speed.toFixed(2)} m/s`
+          : "—",
+      powerDensity:
+        typeof topChannel?.power_density === "number"
+          ? `${topChannel.power_density.toFixed(1)} W/m²`
+          : "—",
+      density:
+        typeof density === "number" ? `${density.toFixed(3)} kg/m³` : "—",
+      alpha: typeof alpha === "number" ? alpha.toFixed(4) : "—",
+      ti15: typeof ti15 === "number" ? ti15.toFixed(3) : "—",
+      windYear,
+    };
+  }
+  const activeTower = state.towers.find((t) => t.id === state.activeTowerId)!;
+  const activeSummary = summarizeTower(activeTower.id, activeTower.hubHeight);
   return (
     <div className="ww-report-layout">
       <aside className="ww-panel ww-report-navigation">
@@ -723,6 +800,90 @@ export function ReportOutline({
                 ))}
               </select>
             </label>
+            <div
+              className="ww-inline-feedback ww-report-digest"
+              role="region"
+              aria-label="项目测风塔工程结论总览"
+            >
+              <div className="ww-inline-feedback-head">
+                <div>
+                  <strong>{activeTower.name} · 工程核心指标一页纸摘要</strong>
+                  <span>
+                    汇集当前运行快照的轮毂/最高层风况、空气密度、综合切变、15m/s
+                    代表湍流及长期风年判定
+                  </span>
+                </div>
+                {onOpenGallery && activeSummary.hasRun && (
+                  <button
+                    type="button"
+                    className="ww-text-button"
+                    onClick={() => onOpenGallery({ filter: "all" })}
+                  >
+                    在图表中心查看 →
+                  </button>
+                )}
+              </div>
+              <div className="ww-inline-metrics">
+                <div>
+                  <span>代表高度平均风速 ({activeSummary.height})</span>
+                  <strong>{activeSummary.meanSpeed}</strong>
+                </div>
+                <div>
+                  <span>风功率密度 ({activeSummary.height})</span>
+                  <strong>{activeSummary.powerDensity}</strong>
+                </div>
+                <div>
+                  <span>空气密度 / 综合切变 α</span>
+                  <strong>
+                    {activeSummary.density} · α={activeSummary.alpha}
+                  </strong>
+                </div>
+                <div>
+                  <span>15m/s 代表 TI / 长期风年</span>
+                  <strong>
+                    {activeSummary.ti15} · {activeSummary.windYear}
+                  </strong>
+                </div>
+              </div>
+              <div className="ww-table-scroll">
+                <table
+                  className="ww-result-table"
+                  aria-label="全项目测风塔核心指标汇总表"
+                >
+                  <thead>
+                    <tr>
+                      <th>测风塔</th>
+                      <th>代表高度</th>
+                      <th>平均风速</th>
+                      <th>风功率密度</th>
+                      <th>空气密度</th>
+                      <th>综合切变 α</th>
+                      <th>15m/s 代表 TI</th>
+                      <th>长期风年判定</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.towers.map((t) => {
+                      const s = summarizeTower(t.id, t.hubHeight);
+                      return (
+                        <tr key={t.id}>
+                          <td>
+                            <strong>{t.name}</strong>
+                          </td>
+                          <td>{s.height}</td>
+                          <td>{s.meanSpeed}</td>
+                          <td>{s.powerDensity}</td>
+                          <td>{s.density}</td>
+                          <td>{s.alpha}</td>
+                          <td>{s.ti15}</td>
+                          <td>{s.windYear}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <WorkspaceReportExport
               key={state.activeTowerId}
               state={state}

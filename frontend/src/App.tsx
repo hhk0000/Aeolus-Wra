@@ -46,6 +46,30 @@ type Project = {
 };
 const profileKey = "aeolus.profile.v1";
 const avatarKey = "aeolus.profile.avatar";
+const themeKey = "aeolus.theme.v1";
+type ThemeId = "fir" | "mint" | "ocean" | "pine";
+const themeOptions: { id: ThemeId; label: string; swatch: string }[] = [
+  { id: "fir", label: "浅杉绿", swatch: "#4c9e6e" },
+  { id: "mint", label: "清透薄荷", swatch: "#2f9e88" },
+  { id: "ocean", label: "海盐蓝", swatch: "#3c8fb0" },
+  { id: "pine", label: "深林松墨", swatch: "#2d6a4f" },
+];
+function loadTheme(): ThemeId {
+  try {
+    const saved = localStorage.getItem(themeKey);
+    if (
+      saved === "fir" ||
+      saved === "mint" ||
+      saved === "ocean" ||
+      saved === "pine"
+    ) {
+      return saved;
+    }
+  } catch {
+    /* Ignore storage access issues */
+  }
+  return "fir";
+}
 type Profile = { nickname: string; avatar: string };
 const defaultProfile: Profile = { nickname: "HHK", avatar: "" };
 
@@ -203,6 +227,15 @@ function WorkspaceApp() {
   const profileDialog = useRef<HTMLDialogElement>(null);
   const avatarRequest = useRef(0);
   const [profile, setProfile] = useState(loadProfile);
+  const [theme, setTheme] = useState<ThemeId>(loadTheme);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem(themeKey, theme);
+    } catch {
+      /* Ignore storage access issues */
+    }
+  }, [theme]);
   const [draftProfile, setDraftProfile] = useState(defaultProfile);
   const [profileError, setProfileError] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
@@ -434,6 +467,41 @@ function WorkspaceApp() {
     setPage(i);
     setQuery("");
   };
+  const allWorkspaces = projects.map((p) => workspaces[p.id]).filter(Boolean);
+  const totalFiles = allWorkspaces.reduce(
+    (sum, ws) => sum + (ws?.files.length ?? 0),
+    0,
+  );
+  const totalTowers = allWorkspaces.reduce(
+    (sum, ws) => sum + (ws?.towers.length ?? 0),
+    0,
+  );
+  const totalRuns = allWorkspaces.reduce(
+    (sum, ws) =>
+      sum +
+      Object.keys(ws?.analysisRuns ?? {}).length +
+      Object.keys(ws?.longTermRuns ?? {}).length +
+      (ws?.correlationJobs.length ?? 0) +
+      (ws?.concurrentJobs?.length ?? 0) +
+      (ws?.toolRuns.length ?? 0),
+    0,
+  );
+  const totalOutputs = allWorkspaces.reduce((sum, ws) => {
+    const runs = [
+      ...Object.values(ws?.analysisRuns ?? {}),
+      ...Object.values(ws?.longTermRuns ?? {}),
+    ];
+    return (
+      sum +
+      runs.reduce(
+        (acc, run) =>
+          acc +
+          Object.values(run.outputs ?? {}).filter((o) => o.status === "ready")
+            .length,
+        0,
+      )
+    );
+  }, 0);
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -532,6 +600,25 @@ function WorkspaceApp() {
             <strong>{sections[page]}</strong>
           </span>
           <div className="topbar-right">
+            <div
+              className="theme-switcher"
+              role="group"
+              aria-label="界面配色方案"
+            >
+              {themeOptions.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`theme-chip ${theme === item.id ? "active" : ""}`}
+                  onClick={() => setTheme(item.id)}
+                  aria-pressed={theme === item.id}
+                  title={`切换至${item.label}主题`}
+                >
+                  <i style={{ background: item.swatch }} aria-hidden="true" />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
             <span className="service">
               <i className={health === "分析服务已连接" ? "connected" : ""} />
               {health}
@@ -594,9 +681,32 @@ function WorkspaceApp() {
                     "集中管理你的分析项目",
                     "grid",
                   ],
-                  ["测风数据", "—", "等待接入真实测风数据", "wind"],
-                  ["分析任务", "—", "按项目配置分析流程", "chart"],
-                  ["成果报告", "—", "从图表到完整报告", "file"],
+                  [
+                    "测风数据",
+                    totalFiles > 0 ? String(totalFiles).padStart(2, "0") : "—",
+                    totalFiles > 0
+                      ? `已接入 ${totalTowers} 座测风塔数据资料`
+                      : "等待接入真实测风数据",
+                    "wind",
+                  ],
+                  [
+                    "分析任务",
+                    totalRuns > 0 ? String(totalRuns).padStart(2, "0") : "—",
+                    totalRuns > 0
+                      ? "本机计算快照已存档可追溯"
+                      : "按项目配置分析流程",
+                    "chart",
+                  ],
+                  [
+                    "成果报告",
+                    totalOutputs > 0
+                      ? String(totalOutputs).padStart(2, "0")
+                      : "—",
+                    totalOutputs > 0
+                      ? "图表与 Word 报告随时可导出"
+                      : "从图表到完整报告",
+                    "file",
+                  ],
                 ].map(([title, value, desc, icon], i) => (
                   <div className="stat" key={title}>
                     <div>
@@ -649,46 +759,65 @@ function WorkspaceApp() {
                       (filter === "全部项目" || filter === p.type) &&
                       (p.name + p.region).includes(query),
                   )
-                  .map((p) => (
-                    <article
-                      className={`project-card project-${p.index % 3}`}
-                      key={p.id}
-                    >
-                      <button
-                        className="project-open"
-                        onClick={() => {
-                          setSelected(p.id);
-                          go(1);
-                        }}
+                  .map((p) => {
+                    const pWs = workspaces[p.id];
+                    const pFiles = pWs?.files.length ?? 0;
+                    const pRuns =
+                      Object.keys(pWs?.analysisRuns ?? {}).length +
+                      Object.keys(pWs?.longTermRuns ?? {}).length +
+                      (pWs?.correlationJobs.length ?? 0) +
+                      (pWs?.concurrentJobs?.length ?? 0);
+                    return (
+                      <article
+                        className={`project-card project-${p.index % 3} ${p.id === selected ? "is-selected" : ""}`}
+                        key={p.id}
                       >
-                        <div className="project-art">
-                          <WindScene />
-                          <span className="project-tag">
-                            {p.demo ? "示例项目" : "本地草稿"}
-                          </span>
-                        </div>
-                        <div className="project-info">
-                          <span className="project-type">{p.type}</span>
-                          <h3>{p.name}</h3>
-                          <p>{p.region || "地区待填写"}</p>
-                          <div className="project-bottom">
-                            <span>
-                              <i /> {p.demo ? "探索示例工作流" : "等待导入数据"}
+                        <button
+                          className="project-open"
+                          onClick={() => {
+                            setSelected(p.id);
+                            go(1);
+                          }}
+                        >
+                          <div className="project-art">
+                            <WindScene />
+                            <span className="project-tag">
+                              {p.demo ? "示例项目" : "本地草稿"}
+                              {p.id === selected ? " · 当前" : ""}
                             </span>
-                            <span>进入项目 →</span>
                           </div>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        className="project-delete"
-                        aria-label={`删除项目 ${p.name}`}
-                        onClick={() => setDeleteCandidate(p)}
-                      >
-                        删除
-                      </button>
-                    </article>
-                  ))}
+                          <div className="project-info">
+                            <span className="project-type">{p.type}</span>
+                            <h3>{p.name}</h3>
+                            <p>{p.region || "地区待填写"}</p>
+                            <div className="project-bottom">
+                              <span>
+                                <i
+                                  className={
+                                    pFiles > 0 || pRuns > 0 ? "is-ready" : ""
+                                  }
+                                />{" "}
+                                {pFiles > 0 || pRuns > 0
+                                  ? `已导入 ${pFiles} 份资料${pRuns > 0 ? ` · ${pRuns} 项分析` : ""}`
+                                  : p.demo
+                                    ? "探索示例工作流"
+                                    : "等待导入数据"}
+                              </span>
+                              <span>进入项目 →</span>
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          className="project-delete"
+                          aria-label={`删除项目 ${p.name}`}
+                          onClick={() => setDeleteCandidate(p)}
+                        >
+                          删除
+                        </button>
+                      </article>
+                    );
+                  })}
                 <button className="new-card" onClick={() => setModal(true)}>
                   <span>
                     <Icon name="plus" size={26} />
@@ -731,6 +860,16 @@ function WorkspaceApp() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="context-badges">
+                  <span className="context-pill">{current.type}</span>
+                  {current.region && (
+                    <span className="context-pill">{current.region}</span>
+                  )}
+                  <span className="context-pill">
+                    {workspace.towers.length} 塔 · {workspace.files.length}{" "}
+                    份资料
+                  </span>
                 </div>
                 <span className="context-status">
                   {current.demo ? "示例工作空间" : "本地项目草稿"}

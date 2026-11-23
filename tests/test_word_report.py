@@ -42,10 +42,9 @@ def source(tmp_path):
         yield client, run
 
 
-def export(client, section, *, template=None, image=None):
-    parts = [
-        ("manifest", (None, json.dumps({"title": "测试风场", "sections": [section]}))),
-    ]
+def export(client, section, *, template=None, image=None, **options):
+    manifest = {"title": "测试风场", "sections": [section], **options}
+    parts = [("manifest", (None, json.dumps(manifest)))]
     if template is not None:
         parts.append(("template", ("模板.docx", template)))
     if image is not None:
@@ -86,6 +85,23 @@ def test_default_docx_uses_archived_values_and_embeds_chart(source):
     assert "100 m 风速" in text
     assert run["id"] in text
     assert client.get(f"/api/v1/runs/{run['id']}").json() == run
+
+
+def test_word_picture_width_is_applied_to_an_independent_image(source):
+    client, run = source
+    section = {
+        "run_id": run["id"],
+        "output_id": "monthly",
+        "figures": [{"index": 0, "caption": "风速月变化"}],
+    }
+    response = export(client, section, image=PNG, figure_width_percent=50)
+    assert response.status_code == 200, response.text[:300]
+    doc = Document(BytesIO(response.content))
+    page = doc.sections[0]
+    available = page.page_width - page.left_margin - page.right_margin
+    (picture,) = doc.inline_shapes
+    assert picture.width == available // 2
+    assert picture.height == picture.width
 
 
 def test_template_inserts_at_split_marker_and_preserves_surroundings(source):

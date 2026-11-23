@@ -86,6 +86,7 @@ export async function downloadWord(
   title: string,
   sections: ReportSection[],
   template: File | null,
+  figureWidthPercent: number,
   progress: (message: string) => void,
 ) {
   const form = new FormData();
@@ -115,7 +116,14 @@ export async function downloadWord(
     });
   }
   if (template) form.set("template", template);
-  form.set("manifest", JSON.stringify({ title, sections: manifest }));
+  form.set(
+    "manifest",
+    JSON.stringify({
+      title,
+      sections: manifest,
+      figure_width_percent: figureWidthPercent,
+    }),
+  );
   progress("正在生成 Word 文件…");
   const response = await fetch("/api/v1/reports/docx", {
     method: "POST",

@@ -249,32 +249,58 @@ export function ResultsWorkspace({
     concurrentJobs.at(-1);
   const taskDialog = useRef<HTMLDialogElement>(null);
   const [taskAction, setTaskAction] = useState<"rename" | "delete">("rename");
-  const [editingTask, setEditingTask] = useState<ConcurrentJob>();
+  const [editingTask, setEditingTask] = useState<{
+    id: string;
+    kind: "concurrent" | "correlation";
+  }>();
   const [taskTitle, setTaskTitle] = useState("");
   useEffect(() => {
     if (editingTask && !taskDialog.current?.open)
       taskDialog.current?.showModal();
   }, [editingTask]);
-  function editTask(task: ConcurrentJob, action: "rename" | "delete") {
-    setEditingTask(task);
+  const taskKind = filter === "correlation" ? "correlation" : "concurrent";
+  const currentTask = taskKind === "correlation" ? job : concurrentJob;
+  const taskLabel =
+    (editingTask?.kind ?? taskKind) === "correlation" ? "相关性" : "同期";
+  function editTask(action: "rename" | "delete") {
+    if (!currentTask) return;
+    setEditingTask({ id: currentTask.id, kind: taskKind });
     setTaskAction(action);
-    setTaskTitle(task.title || `同期分析 ${concurrentJobs.indexOf(task) + 1}`);
+    const index =
+      taskKind === "correlation"
+        ? state.correlationJobs.findIndex(
+            (entry) => entry.id === currentTask.id,
+          )
+        : concurrentJobs.findIndex((entry) => entry.id === currentTask.id);
+    setTaskTitle(
+      currentTask.title ||
+        `${taskKind === "correlation" ? "相关性任务" : "同期分析"} ${index + 1}`,
+    );
   }
   function confirmTask() {
     if (!editingTask) return;
     const id = editingTask.id;
     const name = taskTitle.trim();
     if (taskAction === "rename" && !name) return;
-    onChange((current) => ({
-      ...current,
-      concurrentJobs:
-        taskAction === "rename"
-          ? (current.concurrentJobs ?? []).map((entry) =>
-              entry.id === id ? { ...entry, title: name } : entry,
-            )
-          : (current.concurrentJobs ?? []).filter((entry) => entry.id !== id),
-    }));
-    if (taskAction === "delete" && activeId === id) setActiveId("");
+    function updateJobs<T extends { id: string; title?: string }>(jobs: T[]) {
+      return taskAction === "rename"
+        ? jobs.map((entry) =>
+            entry.id === id ? { ...entry, title: name } : entry,
+          )
+        : jobs.filter((entry) => entry.id !== id);
+    }
+    onChange((current) =>
+      editingTask.kind === "correlation"
+        ? { ...current, correlationJobs: updateJobs(current.correlationJobs) }
+        : {
+            ...current,
+            concurrentJobs: updateJobs(current.concurrentJobs ?? []),
+          },
+    );
+    if (taskAction === "delete") {
+      setActiveId("");
+      setPairIndex(0);
+    }
     taskDialog.current?.close();
   }
   const groupCount =
@@ -432,7 +458,7 @@ export function ResultsWorkspace({
                     }}
                   >
                     <span>
-                      <strong>相关性任务 {i + 1}</strong>
+                      <strong>{j.title || `相关性任务 ${i + 1}`}</strong>
                       <small>
                         {j.pairs.length}组高度对 · {j.sectors}扇区
                       </small>
@@ -456,26 +482,21 @@ export function ResultsWorkspace({
                     <span className="ww-chevron">›</span>
                   </button>
                 ))}
-          {filter === "concurrent" && concurrentJob && (
-            <div
-              className="ww-concurrent-task-actions"
-              aria-label="管理当前同期任务"
-              role="group"
-            >
-              <button
-                type="button"
-                onClick={() => editTask(concurrentJob, "rename")}
+          {(filter === "concurrent" || filter === "correlation") &&
+            currentTask && (
+              <div
+                className="ww-concurrent-task-actions"
+                aria-label={`管理当前${taskLabel}任务`}
+                role="group"
               >
-                编辑标题
-              </button>
-              <button
-                type="button"
-                onClick={() => editTask(concurrentJob, "delete")}
-              >
-                删除任务
-              </button>
-            </div>
-          )}
+                <button type="button" onClick={() => editTask("rename")}>
+                  编辑标题
+                </button>
+                <button type="button" onClick={() => editTask("delete")}>
+                  删除任务
+                </button>
+              </div>
+            )}
         </aside>
         <ChartTextScale.Provider value={reading.axis / 100}>
           <section
@@ -505,7 +526,7 @@ export function ResultsWorkspace({
                 <>
                   <div className="ww-section-heading">
                     <div>
-                      <h2>同期相关性散点图组</h2>
+                      <h2>{job.title || "同期相关性散点图组"}</h2>
                       <p>{job.sourceLabels.join(" ↔ ")}</p>
                     </div>
                   </div>
@@ -622,7 +643,9 @@ export function ResultsWorkspace({
         onClose={() => setEditingTask(undefined)}
       >
         <h2 id="ww-concurrent-task-heading">
-          {taskAction === "rename" ? "编辑同期任务标题" : "删除同期任务"}
+          {taskAction === "rename"
+            ? `编辑${taskLabel}任务标题`
+            : `删除${taskLabel}任务`}
         </h2>
         <form
           onSubmit={(event) => {

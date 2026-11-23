@@ -54,6 +54,7 @@ class ReportSection(BaseModel):
 
 class ReportManifest(BaseModel):
     title: SHORT = "风资源分析报告"
+    figure_width_percent: int = Field(default=100, ge=25, le=100)
     sections: list[ReportSection] = Field(min_length=1, max_length=128)
 
 
@@ -265,7 +266,11 @@ def build_report(
         document.add_paragraph(f"计算方法　{method}　　运行编号　{section.run_id}")
         for figure in section.figures:
             _add_figure(
-                document, images[figure.index], figure.caption or output["title"], width, height
+                document,
+                images[figure.index],
+                figure.caption or output["title"],
+                width * manifest.figure_width_percent / 100,
+                height,
             )
         tables = section.tables if section.tables is not None else _snapshot_table(output)
         for table in tables:

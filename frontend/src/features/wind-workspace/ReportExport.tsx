@@ -27,6 +27,7 @@ export default function ReportExport({
   const [selected, setSelected] = useState<string[]>([]);
   const [template, setTemplate] = useState<File | null>(null);
   const [customTemplate, setCustomTemplate] = useState(false);
+  const [figureWidthPercent, setFigureWidthPercent] = useState(100);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -163,6 +164,7 @@ export default function ReportExport({
           title,
           sections,
           customTemplate ? template : null,
+          figureWidthPercent,
           setStatus,
         );
       else downloadHtml(title, sections);
@@ -278,6 +280,21 @@ export default function ReportExport({
           </>
         )}
       </div>
+      <div className="ww-report-template">
+        <label htmlFor={`${controlId}-figure-width`}>Word 图片初始宽度</label>
+        <select
+          id={`${controlId}-figure-width`}
+          value={figureWidthPercent}
+          onChange={(event) =>
+            setFigureWidthPercent(Number(event.target.value))
+          }
+        >
+          <option value={100}>适应正文宽度</option>
+          <option value={75}>正文宽度的 75%</option>
+          <option value={50}>正文宽度的 50%</option>
+        </select>
+        <small>图表在 Word 中可逐张缩放和调整布局，正文与表格也可编辑。</small>
+      </div>
       <div className="ww-report-actions">
         <button
           type="button"
@@ -285,7 +302,7 @@ export default function ReportExport({
           className="ww-button primary"
           onClick={() => void save("docx")}
         >
-          导出 Word 报告
+          导出可编辑 Word（.docx）
         </button>
         <button
           type="button"

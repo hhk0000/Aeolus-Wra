@@ -29,7 +29,9 @@ export default function WorkspaceReportExport({
       const sources = job.sourceLabels.join(" ↔ ");
       runs.push({
         run,
-        label: `${sources}${pair ? ` · ${pair[0]}m ↔ ${pair[1]}m` : ""}`,
+        label: [job.title, sources, pair && `${pair[0]}m ↔ ${pair[1]}m`]
+          .filter(Boolean)
+          .join(" · "),
       });
     });
   }

@@ -760,7 +760,7 @@ export default function CorrelationSetup({
                         })
                       }
                     >
-                      任务 {index + 1}（
+                      {job.title || `任务 ${index + 1}`}（
                       {job.pairs
                         .slice(0, 2)
                         .map(([y, x]) => `${y}m↔${x}m`)

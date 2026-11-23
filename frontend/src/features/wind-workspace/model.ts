@@ -96,6 +96,7 @@ export interface CorrelationDraft {
 
 export interface CorrelationJob extends CorrelationDraft {
   id: string;
+  title?: string;
   pairs: [number, number][];
   sourceLabels: string[];
   runs?: Run[];

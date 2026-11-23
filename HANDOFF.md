@@ -1,8 +1,14 @@
 # Aeolus-Wra 开发接续入口
 
-更新于 2026-11-19，由 GPT 核对图表中心改动及 DSH 交接记录。
+更新于 2026-11-23，记录从 Gemini 接续及离线版桌面图标选定结果。
 
 收到“在 DSH 的基础上继续开发”“在 GPT 的基础上继续开发”或“继续开发”，先读本文件和 [协作检索规则](docs/COLLABORATION.md)，自行查找交接和提取需求。
+
+## 2026-11-23 Gemini 接续与桌面图标
+
+- 基于 Gemini 本地分支 gemini/gui-optimize-20261121 的 6aac35a，继续在本地分支 codex/desktop-icon-20261123 开发。Gemini 的详细交接见 .local/handoffs/2026-11-21/Gemini接续记录.md。
+- 用户选定第 09 款「风机＋Weibull 曲线」。桌面「Aeolus-Wra 离线版」已应用该图标，仓库内有 [PNG 预览](assets/branding/aeolus-desktop-weibull-09.png) 和 [Windows ICO](assets/branding/aeolus-desktop-weibull-09.ico)。
+- 已验证 ICO 的九个尺寸（16 至 256 px）均可由 Windows 加载，并回读快捷方式配置。详细记录见 .local/handoffs/2026-11-23/Codex接续记录.md。
 
 ## 2026-11-19 接续分支（DSH）
 

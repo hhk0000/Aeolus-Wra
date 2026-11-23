@@ -1,6 +1,13 @@
 # Aeolus-Wra 开发接续入口
 
-更新于 2026-11-19，由 GPT 核对图表中心改动及 DSH 交接记录。
+更新于 2026-11-23，由 Codex 接续 Gemini，更新 Windows 离线版桌面图标。
+
+## 2026-11-23 接续分支（Codex）
+
+- 基于 Gemini 本地分支 gemini/gui-optimize-20261121 的 6aac35a，在 codex/desktop-icon-20261123 提交桌面图标。两个分支均在本地。
+- 设计预览与 Windows 图标保存在 [PNG](assets/branding/aeolus-desktop-fir.png) 和 [ICO](assets/branding/aeolus-desktop-fir.ico)。图形采用浅杉绿渐变、白色风机和简化的风场流线。
+- 本机「Aeolus-Wra 离线版」快捷方式已绑定本地安装的 ICO，启动目标为仓库内的 Start-Aeolus-Offline.cmd。用 Windows 原生接口验证了 16 至 256 px 的九个尺寸，并回读了快捷方式配置。
+- Gemini 的改动和验证记录见 .local/handoffs/2026-11-21/Gemini接续记录.md。本轮详细记录见 .local/handoffs/2026-11-23/Codex接续记录.md。
 
 收到“在 DSH 的基础上继续开发”“在 GPT 的基础上继续开发”或“继续开发”，先读本文件和 [协作检索规则](docs/COLLABORATION.md)，自行查找交接和提取需求。
 

@@ -26,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "wind_platform.core" = ["*.json"]
+"wind_platform" = ["report_templates/catalog.json", "report_templates/*/*.docx"]
 
 [tool.pytest.ini_options]
 testpaths = ["../tests"]

@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from wind_platform.core.calculations import CalculationError
+from wind_platform.services.report_catalog import catalog, release
 from wind_platform.services.word_report import MAX_FIGURES, MIB, ReportManifest, build_report
 
 router = APIRouter(tags=["reports"])
@@ -54,4 +55,75 @@ async def export_word(request: Request):
         report,
         media_type=DOCX,
         headers={"Content-Disposition": 'attachment; filename="wind-resource-report.docx"'},
+    )
+
+
+@router.get("/reports/templates")
+def report_templates():
+    return [
+        {"id": key, "title": item["title"], "version": item["active"]}
+        for key, item in catalog().items()
+    ]
+
+
+@router.get("/reports/templates/{key}/{version}/source")
+def report_template_source(key: str, version: str):
+    data, _ = release(key, version)
+    return Response(
+        data,
+        media_type=DOCX,
+        headers={"Content-Disposition": 'attachment; filename="template.docx"'},
+    )
+
+
+@router.post("/reports/templates/{key}/{version}/export")
+async def export_registered(key: str, version: str, request: Request):
+    data, render = release(key, version)
+    async with request.form(max_files=2, max_fields=8) as form:
+        upload = form.get("data")
+        if not isinstance(upload, UploadFile) or upload.size is None or upload.size > 64 * MIB:
+            raise CalculationError("请选择不超过64 MB的逐小时中尺度TXT。")
+        try:
+            density = float(str(form.get("density", "")))
+            factor = float(str(form.get("factor", "75")))
+        except ValueError as exc:
+            raise CalculationError("请填写有效的空气密度和综合修正系数。") from exc
+        if not 0 < density < 3 or not 0 < factor <= 100:
+            raise CalculationError("空气密度须在0至3之间，综合修正系数须大于0且不超过100%。")
+        energy = form.get("energy")
+        if energy is not None and (
+            not isinstance(energy, UploadFile) or energy.size is None or energy.size > 4 * MIB
+        ):
+            raise CalculationError("发电量表不得超过4 MB。")
+        location = {}
+        for key, label, lo, hi in (
+            ("lat", "纬度", -90, 90),
+            ("lon", "经度", -180, 180),
+            ("alt", "海拔高度", -500, 9000),
+        ):
+            value = str(form.get(key, "")).strip()
+            if value:
+                try:
+                    if not lo <= float(value) <= hi:
+                        raise ValueError()
+                except ValueError as exc:
+                    raise CalculationError(f"{label}超出有效范围。") from exc
+                location[label] = value
+        result = await run_in_threadpool(
+            render,
+            data,
+            await upload.read(),
+            density,
+            str(form.get("project", "")).strip()[:120],
+            factor,
+            await energy.read() if energy else None,
+            location,
+        )
+    return Response(
+        result,
+        media_type=DOCX,
+        headers={
+            "Content-Disposition": 'attachment; filename="mesoscale-report.docx"',
+            "X-Report-Template": f"{key}/{version}",
+        },
     )

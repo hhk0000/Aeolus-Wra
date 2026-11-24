@@ -4,6 +4,10 @@
 
 收到“在 DSH 的基础上继续开发”“在 GPT 的基础上继续开发”或“继续开发”，先读本文件和 [协作检索规则](docs/COLLABORATION.md)，自行查找交接和提取需求。
 
+## 2026-11-24 首个内置 Word 模板
+
+分支 codex/mesoscale-template-v1。首版前期中尺度模板为 mesoscale/1.0.0，详见 [模板发布与回退](docs/REPORT_TEMPLATES.md)。接入前、模板发布、平台集成三个节点分别为 report-mesoscale/pre-v1、report-mesoscale/template-v1.0.0、report-mesoscale/platform-v1.0.0。
+
 ## 2026-11-23 相关性任务管理与 Word 导出
 
 - 接续分支 codex/correlation-word-20261123，基于桌面图标提交 f680fc3。相关性任务沿用同期任务的编辑及删除确认，标题同步到配置快捷入口和报告，删除只移除当前项目的任务引用。

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getHealth } from "./api";
 import HeroFormulaCards from "./HeroFormulaCards";
+import MesoscaleExport from "./features/wind-workspace/MesoscaleExport";
 import SavedRunPreview from "./features/wind-workspace/SavedRunPreview";
 import AnalysisWorkspace from "./features/wind-workspace/AnalysisWorkspace";
 import {
@@ -240,6 +241,7 @@ function WorkspaceApp() {
   const [draftProfile, setDraftProfile] = useState(defaultProfile);
   const [profileError, setProfileError] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
+  const [reportType, setReportType] = useState("feasibility");
   const [page, setPage] = useState(0);
   const [galleryJobId, setGalleryJobId] = useState<string>();
   const [galleryTarget, setGalleryTarget] = useState<GalleryTarget>();
@@ -912,6 +914,21 @@ function WorkspaceApp() {
                 />
               )}
               {page === 3 && (
+                <label>
+                  报告类型{" "}
+                  <select
+                    value={reportType}
+                    onChange={(e) => setReportType(e.target.value)}
+                  >
+                    <option value="feasibility">可研风资源分析</option>
+                    <option value="mesoscale">前期中尺度评估</option>
+                  </select>
+                </label>
+              )}
+              {page === 3 && reportType === "mesoscale" && (
+                <MesoscaleExport key={selected} project={current.name} />
+              )}
+              {page === 3 && reportType === "feasibility" && (
                 <ReportOutline
                   key={selected}
                   state={workspace}

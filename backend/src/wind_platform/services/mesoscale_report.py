@@ -21,8 +21,26 @@ from wind_platform.core.calculations import (
 )
 from wind_platform.core.ingestion import decode_text, preview, split_line
 
+DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
+DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
+
+
+def density_metadata(preamble):
+    values = re.findall(
+        rf"^\s*(?:{DENSITY_NAME})(?:\s*[（(\[]\s*{DENSITY_UNIT}\s*[）)\]])?"
+        rf"\s*[:=：]\s*([0-9]+(?:\.[0-9]+)?)(?:\s*{DENSITY_UNIT})?\s*$",
+        preamble,
+        re.I | re.M,
+    )
+    return float(values[0]) if len(values) == 1 and 0 < float(values[0]) < 3 else None
+
 
 def hourly_records(raw):
+    height, records, _, _ = _read_hourly(raw)
+    return height, records
+
+
+def _read_hourly(raw, source_details=False):
     detected = preview(raw)
     ti = detected["detected"]["timestamp_column"]
     if detected["detected"]["time_column"] is not None:
@@ -57,8 +75,21 @@ def hourly_records(raw):
     text, _ = decode_text(raw)
     header_line = detected["header_line"]
     delimiter = detected["delimiter"]
+    lines = text.splitlines()
+    preamble = "\n".join(lines[: header_line - 1]) if source_details else ""
+    density_columns = (
+        [
+            i
+            for i, label in enumerate(detected["headers"])
+            if re.match(DENSITY_NAME, label.strip(), re.I) and re.search(DENSITY_UNIT, label, re.I)
+        ]
+        if source_details
+        else []
+    )
+    density_index = density_columns[0] if len(density_columns) == 1 else None
+    densities = {}
     records = {}
-    for n, line in enumerate(text.splitlines()[header_line:], header_line + 1):
+    for n, line in enumerate(lines[header_line:], header_line + 1):
         if not line.strip():
             continue
         try:
@@ -73,9 +104,22 @@ def hourly_records(raw):
             records[dt] = (v, d)
         except (IndexError, ValueError) as exc:
             raise CalculationError(f"第 {n} 行时间重复、非整点或数值无效。") from exc
+        if density_index is not None and density_index < len(row):
+            try:
+                value = float(row[density_index])
+            except ValueError:
+                continue
+            if 0 < value < 3:
+                total, count = densities.get(dt.year, (0.0, 0))
+                densities[dt.year] = (total + value, count + 1)
     if not records:
         raise CalculationError("TXT 无数据。")
-    return f"{height:g}", records
+    return (
+        f"{height:g}",
+        records,
+        preamble,
+        {str(year): total / count for year, (total, count) in densities.items()},
+    )
 
 
 def natural_window(records):
@@ -110,19 +154,7 @@ def select_year(height, records):
 
 
 def assessment_source(raw):
-    height, records = hourly_records(raw)
-    content, _ = decode_text(raw)
-    lines = content.splitlines()
-    header = next(
-        (
-            i
-            for i, line in enumerate(lines[:200])
-            if re.search(r"date|timestamp|日期|时间", line, re.I)
-            and any(separator in line for separator in ("\t", ",", ";"))
-        ),
-        0,
-    )
-    preamble = "\n".join(lines[:header])
+    height, records, preamble, densities = _read_hourly(raw, source_details=True)
     coordinates = {}
     for label, key, positive, negative in (
         ("Latitude", "lat", "N", "S"),
@@ -141,6 +173,8 @@ def assessment_source(raw):
         "first": min(records).isoformat(),
         "last": max(records).isoformat(),
         "coordinates": coordinates,
+        "density_by_year": densities,
+        "density_constant": density_metadata(preamble),
     }
     try:
         _, _, _, _, _, start, annual, mean, year = select_year(height, records)
@@ -342,7 +376,7 @@ def build(
         "10年平均风速": fmt(np.nanmean(v[years >= start + 10])),
         "相对偏差": fmt(deviation * 100),
         "代表年选取说明": selection_note,
-        "轮毂高度空气密度": str(rho),
+        "轮毂高度空气密度": f"{rho:.10g}",
         "年平均风速": fmt(stats["mean_speed"]),
         "年平均风功率密度": fmt(stats["power_density"]),
         "大风月": f"{np.nanargmax(months[:, 0]) + 1}月",

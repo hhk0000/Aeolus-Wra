@@ -111,6 +111,20 @@ async def upload_assessment_file(kind: str, request: Request):
         )
 
 
+@router.get("/reports/assessment/files/source/{file_id}")
+def get_assessment_source(file_id: str, request: Request):
+    local = request.app.state.wind_store
+    record = local.get("assessment-files", file_id)
+    if record["kind"] != "source":
+        raise CalculationError("上传文件用途不匹配。")
+    if "density_by_year" in record:
+        return record
+    return {
+        **record,
+        **mesoscale_report.assessment_source(local.read_original(record["sha256"])),
+    }
+
+
 class AssessmentOptions(BaseModel):
     source_id: str
     density: float = Field(gt=0, lt=3)

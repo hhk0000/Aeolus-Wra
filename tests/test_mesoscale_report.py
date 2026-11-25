@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
-from wind_platform.services.mesoscale_report import hourly_records
+from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 
 
 def test_versioned_mesoscale_download_and_export(tmp_path):
@@ -164,3 +164,51 @@ def test_hourly_report_does_not_pair_different_heights():
     raw = b"Date/Time\tSpeed_100m [m/s]\tDirection_125m [Deg]\n2022-01-01 00:00\t4\t90"
     with pytest.raises(CalculationError, match="高度不同"):
         hourly_records(raw)
+
+
+def test_assessment_recognizes_density_per_natural_year_without_requiring_valid_density_rows():
+    raw = (
+        "Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tAir_Density_100m [kg/m³]\n"
+        "2021-12-31 23:00\t4\t90\t1.08\n"
+        "2022-01-01 00:00\t5\t95\t1.20\n"
+        "2022-01-01 01:00\t6\t96\t1.24\n"
+        "2022-01-01 02:00\t7\t97\t-999\n"
+        "2022-01-01 03:00\t8\t98\t"
+    ).encode()
+    source = assessment_source(raw)
+    assert source["density_by_year"] == {"2021": 1.08, "2022": pytest.approx(1.22)}
+    assert source["density_constant"] is None
+    assert source["last"] == "2022-01-01T03:00:00"
+
+
+def test_assessment_uses_explicit_density_metadata_but_not_pressure_and_temperature():
+    raw = (
+        "Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tPressure_0m [kPa]"
+        "\tTemperature_2m [°C]\n2022-01-01 00:00\t4\t90\t89.9\t4.1"
+    ).encode()
+    source = assessment_source(raw)
+    assert source["density_by_year"] == {}
+    assert source["density_constant"] is None
+    assert assessment_source(b"Air Density = 1.078 kg/m^3\n" + raw)["density_constant"] == 1.078
+    assert assessment_source("空气密度（kg/m³）：1.08\n".encode() + raw)["density_constant"] == 1.08
+
+
+def test_assessment_source_lookup_recognizes_density_in_older_upload(tmp_path):
+    app = create_app(tmp_path)
+    client = TestClient(app)
+    raw = (
+        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tRho [kg/m3]\n"
+        b"2022-01-01 00:00\t4\t90\t1.09"
+    )
+    store = app.state.wind_store
+    saved = store.put(
+        "assessment-files",
+        {
+            "kind": "source",
+            "name": "legacy.txt",
+            "sha256": store.original(raw),
+        },
+    )
+    response = client.get("/api/v1/reports/assessment/files/source/" + saved["id"])
+    assert response.status_code == 200
+    assert response.json()["density_by_year"] == {"2022": 1.09}

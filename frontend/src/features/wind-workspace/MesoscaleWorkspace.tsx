@@ -17,6 +17,8 @@ type Source = {
   mean_speed?: number;
   annual?: number[];
   deviation?: number;
+  density_by_year?: Record<string, number>;
+  density_constant?: number | null;
 };
 type Assessment = {
   source?: Source;
@@ -31,6 +33,17 @@ type Assessment = {
   analysisYear?: number;
   hidden: string[];
 };
+function identifiedDensity(
+  source: Source | undefined,
+  year: number | undefined,
+) {
+  return (
+    (year === undefined ? undefined : source?.density_by_year?.[year]) ??
+    source?.density_constant ??
+    undefined
+  );
+}
+
 type Result = {
   year: number;
   height: number;
@@ -118,6 +131,13 @@ export default function MesoscaleWorkspace({
   const [resultError, setResultError] = useState("");
   const [busy, setBusy] = useState(false);
   const removeDialog = useRef<HTMLDialogElement>(null);
+  const source = state.source;
+  const sourceId = source?.id;
+  const analysisYear = state.analysisYear ?? source?.year;
+  const sourceDensity = identifiedDensity(source, analysisYear);
+  const density = sourceDensity ?? Number(state.density);
+  const needsDensityLookup =
+    !!sourceId && source?.density_by_year === undefined;
 
   useEffect(() => {
     try {
@@ -127,12 +147,41 @@ export default function MesoscaleWorkspace({
     }
   }, [state, storage]);
   useEffect(() => {
+    if (!sourceId || !needsDensityLookup) return;
+    const controller = new AbortController();
+    void api<Source>(
+      "/reports/assessment/files/source/" + sourceId,
+      undefined,
+      controller.signal,
+    )
+      .then((fresh) => {
+        if (controller.signal.aborted) return;
+        setState((current) => {
+          if (current.source?.id !== sourceId) return current;
+          const automatic = identifiedDensity(
+            fresh,
+            current.analysisYear ?? fresh.year,
+          );
+          return {
+            ...current,
+            source: fresh,
+            runId:
+              automatic !== undefined && automatic !== Number(current.density)
+                ? undefined
+                : current.runId,
+          };
+        });
+      })
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted) setError(cause.message);
+      });
+    return () => controller.abort();
+  }, [sourceId, needsDensityLookup]);
+  useEffect(() => {
     if (page !== 2 || !state.runId) return;
     const controller = new AbortController();
     const runId = state.runId;
-    const sourceId = state.source?.id;
-    const density = Number(state.density);
-    const analysisYear = state.analysisYear;
+    const chosenYear = state.analysisYear;
     void api<Result>(
       "/reports/assessment/runs/" + runId,
       undefined,
@@ -152,7 +201,7 @@ export default function MesoscaleWorkspace({
             {
               source_id: sourceId,
               density,
-              analysis_year: analysisYear,
+              analysis_year: chosenYear,
             },
             controller.signal,
           );
@@ -160,8 +209,11 @@ export default function MesoscaleWorkspace({
             setState((current) =>
               current.runId === runId &&
               current.source?.id === sourceId &&
-              Number(current.density) === density &&
-              current.analysisYear === analysisYear
+              current.analysisYear === chosenYear &&
+              (identifiedDensity(
+                current.source,
+                current.analysisYear ?? current.source?.year,
+              ) ?? Number(current.density)) === density
                 ? { ...current, runId: refreshed.id }
                 : current,
             );
@@ -175,7 +227,7 @@ export default function MesoscaleWorkspace({
         if (!controller.signal.aborted) setResultError(cause.message);
       });
     return () => controller.abort();
-  }, [page, state.runId, state.source?.id, state.density, state.analysisYear]);
+  }, [page, state.runId, sourceId, density, state.analysisYear]);
   useEffect(() => {
     if (page !== 3) return;
     const controller = new AbortController();
@@ -187,11 +239,9 @@ export default function MesoscaleWorkspace({
     return () => controller.abort();
   }, [page]);
 
-  const source = state.source;
   const analysisYears = source?.start_year
     ? (source.annual ?? []).map((_, index) => source.start_year! + index)
     : [];
-  const analysisYear = state.analysisYear ?? source?.year;
   const yearMean =
     analysisYear !== undefined && source?.start_year !== undefined
       ? source.annual?.[analysisYear - source.start_year]
@@ -206,8 +256,8 @@ export default function MesoscaleWorkspace({
   const canRun =
     analysisYear !== undefined &&
     analysisYears.includes(analysisYear) &&
-    Number(state.density) > 0 &&
-    Number(state.density) < 3;
+    density > 0 &&
+    density < 3;
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -249,6 +299,7 @@ export default function MesoscaleWorkspace({
         setResult(undefined);
         change({
           source: next,
+          density: "",
           runId: undefined,
           analysisYear: undefined,
           manualLocation: false,
@@ -272,7 +323,7 @@ export default function MesoscaleWorkspace({
     try {
       const run = await api<{ id: string }>("/reports/assessment/runs", {
         source_id: source.id,
-        density: Number(state.density),
+        density,
         analysis_year: state.analysisYear,
       });
       setResult(undefined);
@@ -293,7 +344,7 @@ export default function MesoscaleWorkspace({
     try {
       const form = new FormData();
       form.set("source_id", source.id);
-      form.set("density", state.density);
+      form.set("density", String(density));
       if (state.analysisYear !== undefined) {
         form.set("analysis_year", String(state.analysisYear));
       }
@@ -517,14 +568,21 @@ export default function MesoscaleWorkspace({
                   <fieldset disabled={busy} className="ww-report-controls">
                     <div className="ww-fields ww-fields-two">
                       <label>
-                        轮毂高度空气密度（kg/m³）
+                        空气密度
                         <input
+                          aria-label="空气密度"
+                          aria-describedby="assessment-density-note"
                           required
+                          readOnly={sourceDensity !== undefined}
                           type="number"
                           step="any"
                           min="0.001"
                           max="2.999"
-                          value={state.density}
+                          value={
+                            sourceDensity === undefined
+                              ? state.density
+                              : Number(sourceDensity.toPrecision(10))
+                          }
                           onChange={(event) => {
                             setResult(undefined);
                             setResultError("");
@@ -534,6 +592,15 @@ export default function MesoscaleWorkspace({
                             });
                           }}
                         />
+                        <small
+                          id="assessment-density-note"
+                          className="ww-inline-note"
+                        >
+                          kg/m³ ·{" "}
+                          {sourceDensity !== undefined
+                            ? "从源文件自动识别"
+                            : "未识别到密度，请手动填写"}
+                        </small>
                       </label>
                       <label>
                         综合修正系数（%）

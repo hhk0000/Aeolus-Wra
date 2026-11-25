@@ -94,6 +94,8 @@ export function Plot({
   zoom = "1",
   outputId = "",
   fit,
+  fitMethod,
+  axisSteps,
 }: {
   rows: Row[];
   fields: string[];
@@ -107,6 +109,8 @@ export function Plot({
   zoom?: string;
   outputId?: string;
   fit?: Row;
+  fitMethod?: string;
+  axisSteps?: Record<string, number>;
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
@@ -117,7 +121,13 @@ export function Plot({
     h = rose ? 680 : dualAxis ? 540 : 340,
     L = dualAxis ? Math.max(90, 5 * axisSize + 12) : 65,
     R = dualAxis ? w - Math.max(90, 4 * axisSize + 16) : 725,
-    T = fit ? 54 : dualAxis ? 3 * axisSize + 24 : 35,
+    T = fitMethod
+      ? Math.max(68, 4 * axisSize)
+      : fit
+        ? 54
+        : dualAxis
+          ? 3 * axisSize + 24
+          : 35,
     B = dualAxis ? 440 : 275;
   const cx = rose ? 450 : 400,
     cy = rose ? 310 : 165;
@@ -139,6 +149,9 @@ export function Plot({
         shared.map((key) => (r[key] == null ? NaN : Number(r[key]))),
       )
       .filter(Number.isFinite);
+    const step = axisSteps?.[f];
+    if (step)
+      return [0, Math.max(step, Math.ceil(Math.max(0, ...vals) / step) * step)];
     const lo = density ? densityMinimum : Math.min(0, ...vals);
     const hi = density
       ? (densityMaximum ??
@@ -146,9 +159,10 @@ export function Plot({
       : Math.max(0.001, ...vals) * 1.1;
     return [lo, hi];
   };
+  const domains = new Map(fields.map((field) => [field, limits(field)]));
   const x = (i: number) => L + ((i + 0.5) / Math.max(1, rows.length)) * (R - L);
   const y = (v: number, f: string) => {
-    const [lo, hi] = limits(f);
+    const [lo, hi] = domains.get(f) ?? [0, 1];
     return B - ((v - lo) / (hi - lo || 1)) * (B - T);
   };
   const highlightedBin =
@@ -183,15 +197,32 @@ export function Plot({
             {hover}
           </text>
           {fit && typeof fit.k === "number" && typeof fit.c === "number" && (
-            <text
-              x={R}
-              y={textSize(17) + 5}
-              textAnchor="end"
-              fontSize={textSize(17)}
-              fill={EXCEL.text}
-            >
-              k = {fit.k.toFixed(4)} · A = {fit.c.toFixed(4)} m/s
-            </text>
+            <>
+              {fitMethod && (
+                <text
+                  x={R}
+                  y={textSize(12) + 5}
+                  textAnchor="end"
+                  fontSize={textSize(12)}
+                  fill="#52665b"
+                >
+                  {fitMethod}
+                </text>
+              )}
+              <text
+                x={R}
+                y={
+                  fitMethod
+                    ? textSize(12) + textSize(17) + 10
+                    : textSize(17) + 5
+                }
+                textAnchor="end"
+                fontSize={textSize(17)}
+                fill={EXCEL.text}
+              >
+                k = {fit.k.toFixed(4)} · A = {fit.c.toFixed(4)} m/s
+              </text>
+            </>
           )}
           {rose ? (
             <>
@@ -301,37 +332,80 @@ export function Plot({
                     strokeWidth="1"
                   />
                 ))}
-              {[0, 1, 2, 3, 4].map((i) => (
-                <g key={i}>
-                  <line
-                    x1={L}
-                    x2={R}
-                    y1={T + (i * (B - T)) / 4}
-                    y2={T + (i * (B - T)) / 4}
-                    stroke={EXCEL.grid}
-                    strokeWidth="1"
-                  />
-                  {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
-                    (f, j) => {
-                      const [lo, hi] = limits(f);
-                      return (
-                        <text
-                          key={f}
-                          x={j ? R + 6 : L - 6}
-                          y={T + (i * (B - T)) / 4}
-                          textAnchor={j ? "start" : "end"}
-                          fill={seriesColor(f, j)}
-                          fontSize={textSize(13)}
-                        >
-                          {(hi - (i * (hi - lo)) / 4).toFixed(
-                            density && hi - lo < 0.04 ? 3 : 2,
-                          )}
-                        </text>
+              {axisSteps
+                ? (dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
+                    (field, side) => {
+                      const [lo, hi] = domains.get(field) ?? [0, 1];
+                      const step = axisSteps[field] ?? (hi - lo) / 4;
+                      return Array.from(
+                        { length: Math.round((hi - lo) / step) + 1 },
+                        (_, i) => {
+                          const tick = lo + i * step;
+                          const position = y(tick, field);
+                          return (
+                            <g key={`${field}-${i}`} data-axis-tick={field}>
+                              {side === 0 ? (
+                                <line
+                                  x1={L}
+                                  x2={R}
+                                  y1={position}
+                                  y2={position}
+                                  stroke={EXCEL.grid}
+                                />
+                              ) : (
+                                <line
+                                  x1={R}
+                                  x2={R + 4}
+                                  y1={position}
+                                  y2={position}
+                                  stroke={EXCEL.axis}
+                                />
+                              )}
+                              <text
+                                x={side ? R + 7 : L - 6}
+                                y={position}
+                                textAnchor={side ? "start" : "end"}
+                                fill={seriesColor(field, side)}
+                              >
+                                {axisSteps[field] ? tick : tick.toFixed(2)}
+                              </text>
+                            </g>
+                          );
+                        },
                       );
                     },
-                  )}
-                </g>
-              ))}
+                  )
+                : [0, 1, 2, 3, 4].map((i) => (
+                    <g key={i}>
+                      <line
+                        x1={L}
+                        x2={R}
+                        y1={T + (i * (B - T)) / 4}
+                        y2={T + (i * (B - T)) / 4}
+                        stroke={EXCEL.grid}
+                        strokeWidth="1"
+                      />
+                      {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
+                        (f, j) => {
+                          const [lo, hi] = domains.get(f) ?? [0, 1];
+                          return (
+                            <text
+                              key={f}
+                              x={j ? R + 6 : L - 6}
+                              y={T + (i * (B - T)) / 4}
+                              textAnchor={j ? "start" : "end"}
+                              fill={seriesColor(f, j)}
+                              fontSize={textSize(13)}
+                            >
+                              {(hi - (i * (hi - lo)) / 4).toFixed(
+                                density && hi - lo < 0.04 ? 3 : 2,
+                              )}
+                            </text>
+                          );
+                        },
+                      )}
+                    </g>
+                  ))}
               {fields.map((f, j) => (
                 <g key={f}>
                   {isBar(f) &&

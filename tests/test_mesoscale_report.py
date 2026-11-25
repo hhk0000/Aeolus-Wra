@@ -182,6 +182,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         "/api/v1/reports/assessment/runs/" + selected_run.json()["id"]
     ).json()["extreme"]
     assert selected_result["pressure_standard"] == pytest.approx(26.83281573)
+    assert selected_result["pressure_site"] == pytest.approx(26.83281573 * (1.225 / 1.2) ** 0.5)
     assert selected_result["site_speed"] == 25.5
     assert selected_result["multiplier_standard"] == pytest.approx(25.5 * (1.2 / 1.225) ** 0.5)
     assert selected_result["adopted"] == selected_result["pressure_standard"]
@@ -197,6 +198,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert archive_export.status_code == 200
     extracted = "\n".join(p.text for p in Document(BytesIO(archive_export.content)).paragraphs)
     assert "繁峙县" in extracted and "0.45 kN/m²" in extracted and "26.83 m/s" in extracted
+    assert "等效参考风速为 27.11 m/s" in extracted
     assert "较大值 29.69 m/s" in extracted and "五日雷暴法" not in extracted
     registry = client.get("/api/v1/standards").json()
     transfer = next(m for m in registry["methods"] if m["id"] == "assessment-density-transfer")

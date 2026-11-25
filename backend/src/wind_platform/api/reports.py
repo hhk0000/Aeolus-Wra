@@ -213,7 +213,13 @@ def run_assessment(options: AssessmentOptions, request: Request):
 
 @router.get("/reports/assessment/runs/{run_id}")
 def get_assessment(run_id: str, request: Request):
-    return request.app.state.wind_store.get("assessment-runs", run_id)
+    run = request.app.state.wind_store.get("assessment-runs", run_id)
+    extreme = run.get("extreme")
+    if extreme and "pressure_site" not in extreme:
+        extreme["pressure_site"] = assessment_extreme.pressure_site_speed(
+            extreme["pressure_standard"], extreme["density"]
+        )
+    return run
 
 
 @router.post("/reports/templates/{key}/{version}/export")

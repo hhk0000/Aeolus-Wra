@@ -1,5 +1,6 @@
 """Single-point hourly mesoscale statistics and in-place v1 Word bindings."""
 
+import math
 import re
 from copy import deepcopy
 from datetime import datetime
@@ -201,6 +202,8 @@ def figure(title, labels, series, kind):
         font = ImageFont.load_default(size=17)
     colors = ["#4F81BD", "#C0504D"]
     draw.text((45, 12), title, font=font, fill="black")
+    if kind == "fit":
+        draw.text((920, 12), "二参数最大似然法（MLE）", font=font, fill="#52665b", anchor="rt")
     if kind == "rose":
         vals = series[0][1]
         angles = np.arange(16) * np.pi / 8
@@ -230,13 +233,25 @@ def figure(title, labels, series, kind):
             if kind in ("annual", "freq", "fit"):
                 limit = max(1, max(max(s[1]) for s in series))
             draw.text((50 + j * 470, 45), name, font=font, fill=colors[j])
-            for i in range(6):
-                y = 465 - 74 * i
+            step = (
+                1
+                if kind == "annual" or kind == "line" and j == 0
+                else 100
+                if kind == "line"
+                else None
+            )
+            if step:
+                limit = math.ceil(limit / step) * step
+                ticks = range(0, limit + step, step)
+            else:
+                ticks = np.linspace(0, limit, 6)
+            for tick in ticks:
+                y = 465 - 370 * tick / limit
                 if j == 0:
                     draw.line((70, y, 920, y), fill="#dddddd")
                 draw.text(
                     (65 if j == 0 else 925, y),
-                    f"{limit * i / 5:.1f}",
+                    f"{tick:g}" if step else f"{tick:.1f}",
                     anchor="rm" if j == 0 else "lm",
                     font=font,
                     fill=colors[j],
@@ -316,7 +331,7 @@ def assessment_charts(series, fit):
         }
 
 
-def pressure_result_text(station, speed):
+def pressure_result_text(station, speed, site_speed, density):
     if station is None:
         return "尚未取得基本风压，风压法结果待补。"
     name = station["name"]
@@ -335,7 +350,8 @@ def pressure_result_text(station, speed):
         )
     return (
         f"{source}50 年一遇基本风压为 {station['pressure']:g} kN/m²，"
-        f"换算参考风速为 {speed:.2f} m/s。"
+        f"标准空气密度参考风速为 {speed:.2f} m/s。按场址空气密度 {density:g} kg/m³ "
+        f"反算的等效参考风速为 {site_speed:.2f} m/s。"
     )
 
 
@@ -597,7 +613,9 @@ def build(
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
-    fields["风压法结果"] = pressure_result_text(pressure_station, extreme["pressure_standard"])
+    fields["风压法结果"] = pressure_result_text(
+        pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
+    )
     fields["倍数法结果"] = (
         f"{year} 年分析高度 {height} m 的年平均风速为 {extreme['mean_speed']:.2f} m/s，"
         f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"

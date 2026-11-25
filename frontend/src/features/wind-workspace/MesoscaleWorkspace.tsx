@@ -77,6 +77,7 @@ type Result = {
     site_speed: number;
     multiplier_standard: number;
     pressure_standard: number | null;
+    pressure_site?: number | null;
     adopted: number | null;
   };
   tables?: Record<
@@ -100,6 +101,7 @@ type Result = {
 type Template = { id: string; version: string; title: string };
 
 const tabs = ["数据资料", "风资源分析", "长期参考"];
+const assessmentAxisSteps = { mean_speed: 1, power_density: 100 };
 const titles = [
   "风速和风功率密度月变化图",
   "风速和风功率密度日变化图",
@@ -1105,6 +1107,16 @@ export default function MesoscaleWorkspace({
                       title={chart.title}
                       outputId={chart.plot}
                       fit={chart.fit}
+                      fitMethod={
+                        chart.plot === "weibull"
+                          ? "二参数最大似然法（MLE）"
+                          : undefined
+                      }
+                      axisSteps={
+                        chart.plot === "monthly" || chart.plot === "hourly"
+                          ? assessmentAxisSteps
+                          : undefined
+                      }
                     />
                   ) : chart.image ? (
                     <img
@@ -1217,34 +1229,67 @@ function ExtremeWindResult({
   result: NonNullable<Result["extreme"]>;
 }) {
   const station = result.station;
+  const pressureSource = station?.manual
+    ? "手动填写"
+    : station
+      ? [
+          station.level && pressureLevels[station.level],
+          (station.province ?? "") + station.name,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "待补充基本风压";
   return (
     <>
-      <div className="ww-table-scroll ww-assessment-table">
-        <table className="ww-table">
+      <div className="ww-extreme-summary">
+        <div>
+          <span>前期采用值 · 标准空气密度</span>
+          <strong>
+            {result.adopted === null
+              ? "待确定"
+              : `${result.adopted.toFixed(2)} m/s`}
+          </strong>
+        </div>
+        <span>场址空气密度 {result.density} kg/m³</span>
+      </div>
+      <div className="ww-table-scroll ww-assessment-table ww-extreme-table">
+        <table
+          className="ww-result-table"
+          aria-label="两种极大风速估算方法对比"
+        >
           <thead>
             <tr>
               <th scope="col">方法</th>
-              <th scope="col">输入</th>
-              <th scope="col">场址估算（m/s）</th>
-              <th scope="col">标准密度口径（m/s）</th>
+              <th scope="col">计算依据</th>
+              <th scope="col">
+                场址密度
+                <br />
+                m/s
+              </th>
+              <th scope="col">
+                标准密度
+                <br />
+                m/s
+              </th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <th scope="row">风压法</th>
               <td>
-                {station
-                  ? `${station.manual ? "手动填写" : [station.level && pressureLevels[station.level], (station.province ?? "") + station.name].filter(Boolean).join(" · ")} · ${station.pressure} kN/m²`
-                  : "待补充基本风压"}
+                {station && <strong>{station.pressure} kN/m²</strong>}
+                <small>{pressureSource}</small>
               </td>
-              <td>—</td>
+              <td>{result.pressure_site?.toFixed(2) ?? "—"}</td>
               <td>{result.pressure_standard?.toFixed(2) ?? "—"}</td>
             </tr>
             <tr>
               <th scope="row">平均风速倍数法</th>
               <td>
-                {result.mean_speed.toFixed(2)} m/s × {result.multiplier} ·{" "}
-                {result.density} kg/m³
+                <strong>
+                  {result.mean_speed.toFixed(2)} m/s × {result.multiplier}
+                </strong>
+                <small>分析年平均风速 × 倍数</small>
               </td>
               <td>{result.site_speed.toFixed(2)}</td>
               <td>{result.multiplier_standard.toFixed(2)}</td>
@@ -1252,19 +1297,10 @@ function ExtremeWindResult({
           </tbody>
         </table>
       </div>
-      <p>
-        {result.adopted === null ? (
-          "待补齐风压法结果后取两种方法的较大值。"
-        ) : (
-          <>
-            前期采用值 <strong>{result.adopted.toFixed(2)} m/s</strong>
-            （标准空气密度）
-          </>
-        )}
-      </p>
       <p className="ww-inline-note">
-        风压法按站点基本风压换算。倍数法按标准密度 1.225 kg/m³
-        折算。结果用于前期评估。
+        {result.adopted === null && "待补齐风压法结果后取两种方法的较大值。"}
+        风压法的场址值由参考风速按场址密度反算，沿用站点基准高度。标准空气密度取
+        1.225 kg/m³。
       </p>
     </>
   );

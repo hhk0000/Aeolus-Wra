@@ -49,6 +49,10 @@ def pressure_stations(raw):
     return stations
 
 
+def pressure_site_speed(standard_speed, density):
+    return standard_speed * sqrt(STANDARD_DENSITY / density) if standard_speed is not None else None
+
+
 def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None):
     site_speed = mean_speed * multiplier
     multiplier_standard = site_speed * sqrt(density / STANDARD_DENSITY)
@@ -64,5 +68,6 @@ def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=Non
         "site_speed": site_speed,
         "multiplier_standard": multiplier_standard,
         "pressure_standard": pressure_standard,
+        "pressure_site": pressure_site_speed(pressure_standard, density),
         "adopted": adopted,
     }

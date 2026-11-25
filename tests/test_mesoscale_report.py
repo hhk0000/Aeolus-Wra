@@ -92,6 +92,36 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     )
 
 
+def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    rows = ["Date & Time Stamp\tCH1Anem125m m/s\tCH2Vane125m Deg"]
+    for year in range(2003, 2023):
+        speed = 8 if year == 2004 else 5
+        rows.extend(f"{year}/{month:02}/01 00:00\t{speed}\t0" for month in range(1, 13))
+        rows.append(f"{year}/12/31 23:00\t{speed}\t90")
+    source = client.post(
+        "/api/v1/reports/assessment/files/source",
+        files={"file": ("greenwich.txt", "\n".join(rows).encode())},
+    ).json()
+    assert source["year"] == 2003
+    options = {"source_id": source["id"], "density": 1.2, "analysis_year": 2004}
+    run_url = "/api/v1/reports/assessment/runs"
+    run = client.post(run_url, json=options)
+    assert run.status_code == 200
+    result = client.get(run_url + "/" + run.json()["id"]).json()
+    assert result["year"] == 2004
+    assert result["tables"]["风速和风功率密度月变化图"]["rows"][0][1] == "8.00"
+    export_url = "/api/v1/reports/templates/mesoscale/1.0.0/export"
+    word = client.post(export_url, data=options)
+    assert word.status_code == 200
+    report = Document(BytesIO(word.content))
+    assert report.tables[1].rows[1].cells[1].text == "8.00"
+    assert "手动选择分析年，系统推荐年份为2003年" in "".join(p.text for p in report.paragraphs)
+    options["analysis_year"] = 2023
+    assert client.post(run_url, json=options).status_code == 422
+    assert client.post(export_url, data=options).status_code == 422
+
+
 @pytest.mark.parametrize(
     ("header", "data", "height"),
     [

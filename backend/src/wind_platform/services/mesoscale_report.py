@@ -236,8 +236,13 @@ def figure(title, labels, series, kind):
     return buf.getvalue()
 
 
-def build(template, raw, rho, project, factor=75.0, energy_file=None, location=None):
-    height, times, v, d, years, start, annual, avg, year = hourly(raw)
+def build(
+    template, raw, rho, project, factor=75.0, energy_file=None, location=None, analysis_year=None
+):
+    height, times, v, d, years, start, annual, avg, recommended_year = hourly(raw)
+    if analysis_year is not None and not start <= analysis_year < start + 20:
+        raise CalculationError("分析年须在最近20个完整自然年窗口内。")
+    year = recommended_year if analysis_year is None else analysis_year
     mask = years == year
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, rho, 60)
@@ -276,6 +281,13 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
     def fmt(x):
         return f"{x:.2f}" if np.isfinite(x) else "—"
 
+    if analysis_year is not None:
+        selection_note = f"手动选择分析年，系统推荐年份为{recommended_year}年"
+    elif deviation <= 0.02 + 1e-12:
+        selection_note = "平风年中偏差最小"
+    else:
+        selection_note = "无平风年，取偏差最小年份"
+
     fields = {
         "分析高度": height,
         "时间步长": "1 h",
@@ -284,9 +296,7 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
         "20年平均风速": fmt(avg),
         "10年平均风速": fmt(np.nanmean(v[years >= start + 10])),
         "相对偏差": fmt(deviation * 100),
-        "代表年选取说明": "平风年中偏差最小"
-        if deviation <= 0.02 + 1e-12
-        else "无平风年，取偏差最小年份",
+        "代表年选取说明": selection_note,
         "轮毂高度空气密度": str(rho),
         "年平均风速": fmt(stats["mean_speed"]),
         "年平均风功率密度": fmt(stats["power_density"]),

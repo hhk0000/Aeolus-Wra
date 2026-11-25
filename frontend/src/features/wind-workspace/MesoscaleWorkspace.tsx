@@ -26,6 +26,7 @@ type Assessment = {
   lon: string;
   alt: string;
   runId?: string;
+  analysisYear?: number;
   hidden: string[];
 };
 type Result = {
@@ -121,6 +122,7 @@ export default function MesoscaleWorkspace({
     const runId = state.runId;
     const sourceId = state.source?.id;
     const density = Number(state.density);
+    const analysisYear = state.analysisYear;
     void api<Result>(
       "/reports/assessment/runs/" + runId,
       undefined,
@@ -134,6 +136,7 @@ export default function MesoscaleWorkspace({
             {
               source_id: sourceId,
               density,
+              analysis_year: analysisYear,
             },
             controller.signal,
           );
@@ -141,7 +144,8 @@ export default function MesoscaleWorkspace({
             setState((current) =>
               current.runId === runId &&
               current.source?.id === sourceId &&
-              Number(current.density) === density
+              Number(current.density) === density &&
+              current.analysisYear === analysisYear
                 ? { ...current, runId: refreshed.id }
                 : current,
             );
@@ -155,7 +159,7 @@ export default function MesoscaleWorkspace({
         if (!controller.signal.aborted) setResultError(cause.message);
       });
     return () => controller.abort();
-  }, [page, state.runId, state.source?.id, state.density]);
+  }, [page, state.runId, state.source?.id, state.density, state.analysisYear]);
   useEffect(() => {
     if (page !== 3) return;
     const controller = new AbortController();
@@ -168,12 +172,26 @@ export default function MesoscaleWorkspace({
   }, [page]);
 
   const source = state.source;
-  const deviation = source?.deviation;
+  const analysisYears = source?.start_year
+    ? (source.annual ?? []).map((_, index) => source.start_year! + index)
+    : [];
+  const analysisYear = state.analysisYear ?? source?.year;
+  const yearMean =
+    analysisYear !== undefined && source?.start_year !== undefined
+      ? source.annual?.[analysisYear - source.start_year]
+      : undefined;
+  const deviation =
+    yearMean !== undefined && source?.mean_speed
+      ? (yearMean / source.mean_speed - 1) * 100
+      : source?.deviation;
   const automaticLocation =
     source?.coordinates.lat !== undefined &&
     source?.coordinates.lon !== undefined;
   const canRun =
-    !!source?.year && Number(state.density) > 0 && Number(state.density) < 3;
+    analysisYear !== undefined &&
+    analysisYears.includes(analysisYear) &&
+    Number(state.density) > 0 &&
+    Number(state.density) < 3;
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -190,6 +208,7 @@ export default function MesoscaleWorkspace({
     change({
       source: undefined,
       runId: undefined,
+      analysisYear: undefined,
       manualLocation: false,
       lat: "",
       lon: "",
@@ -215,6 +234,7 @@ export default function MesoscaleWorkspace({
         change({
           source: next,
           runId: undefined,
+          analysisYear: undefined,
           manualLocation: false,
           lat: "",
           lon: "",
@@ -237,6 +257,7 @@ export default function MesoscaleWorkspace({
       const run = await api<{ id: string }>("/reports/assessment/runs", {
         source_id: source.id,
         density: Number(state.density),
+        analysis_year: state.analysisYear,
       });
       setResult(undefined);
       setResultError("");
@@ -257,6 +278,9 @@ export default function MesoscaleWorkspace({
       const form = new FormData();
       form.set("source_id", source.id);
       form.set("density", state.density);
+      if (state.analysisYear !== undefined) {
+        form.set("analysis_year", String(state.analysisYear));
+      }
       form.set("factor", state.factor);
       form.set("project", project);
       if (state.energy) form.set("energy_id", state.energy.id);
@@ -302,19 +326,44 @@ export default function MesoscaleWorkspace({
     </p>
   );
 
-  const period = source?.year && (
-    <div className="ww-fields ww-fields-three">
+  const period = source?.year && analysisYear !== undefined && (
+    <div className="ww-fields ww-fields-two">
       <label>
-        分析年起点
-        <input readOnly value={source.year + "-01-01 00:00"} />
-      </label>
-      <label>
-        分析年终点（不含）
-        <input readOnly value={source.year + 1 + "-01-01 00:00"} />
+        分析年
+        <select
+          aria-label="分析年"
+          disabled={busy}
+          value={state.analysisYear ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            setError("");
+            setResult(undefined);
+            setResultError("");
+            change({
+              analysisYear: value ? Number(value) : undefined,
+              runId: undefined,
+            });
+          }}
+        >
+          <option value="">自动推荐（{source.year} 年）</option>
+          {analysisYears.map((year) => (
+            <option key={year} value={year}>
+              {year} 年
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         分析高度（m）
         <input readOnly value={source.height} />
+      </label>
+      <label>
+        分析年起点
+        <input readOnly value={analysisYear + "-01-01 00:00"} />
+      </label>
+      <label>
+        分析年终点（不含）
+        <input readOnly value={analysisYear + 1 + "-01-01 00:00"} />
       </label>
     </div>
   );
@@ -443,10 +492,12 @@ export default function MesoscaleWorkspace({
                 {source?.year && (
                   <p className="ww-inline-note">
                     {source.start_year}–{source.end_year} 年基准 · 选定{" "}
-                    {source.year} 年 · 偏差 {deviation?.toFixed(2)}%
-                    {Math.abs(deviation ?? 0) > 2
-                      ? " · 无平风年，采用最小偏差年"
-                      : " · 平风年中偏差最小"}
+                    {analysisYear} 年 · 偏差 {deviation?.toFixed(2)}%
+                    {state.analysisYear !== undefined
+                      ? " · 手动选择"
+                      : Math.abs(deviation ?? 0) > 2
+                        ? " · 无平风年，采用最小偏差年"
+                        : " · 平风年中偏差最小"}
                   </p>
                 )}
                 <form
@@ -655,7 +706,12 @@ export default function MesoscaleWorkspace({
                               <tr key={year}>
                                 <td>
                                   {year}
-                                  {year === source.year ? "（代表年）" : ""}
+                                  {year === analysisYear
+                                    ? "（当前分析年）"
+                                    : ""}
+                                  {year === source.year && year !== analysisYear
+                                    ? "（推荐）"
+                                    : ""}
                                 </td>
                                 <td>{value.toFixed(3)}</td>
                                 <td>
@@ -804,7 +860,7 @@ export default function MesoscaleWorkspace({
       )}
       {source?.year && (
         <p>
-          {source.name} · {source.year} 代表年 · {source.height} m
+          {source.name} · {analysisYear} 分析年 · {source.height} m
         </p>
       )}
       {!state.runId && <p>请在分析配置上传资料、填写空气密度并运行分析。</p>}

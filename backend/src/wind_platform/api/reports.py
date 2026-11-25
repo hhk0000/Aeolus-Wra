@@ -114,13 +114,16 @@ async def upload_assessment_file(kind: str, request: Request):
 class AssessmentOptions(BaseModel):
     source_id: str
     density: float = Field(gt=0, lt=3)
+    analysis_year: int | None = None
 
 
 @router.post("/reports/assessment/runs")
 def run_assessment(options: AssessmentOptions, request: Request):
     local = request.app.state.wind_store
     raw = assessment_file(local, options.source_id, "source")
-    results = mesoscale_report.build(None, raw, options.density, "")
+    results = mesoscale_report.build(
+        None, raw, options.density, "", analysis_year=options.analysis_year
+    )
     saved = local.put("assessment-runs", results)
     return {"id": saved["id"]}
 
@@ -133,7 +136,7 @@ def get_assessment(run_id: str, request: Request):
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
-    async with request.form(max_files=2, max_fields=8) as form:
+    async with request.form(max_files=2, max_fields=9) as form:
         upload = form.get("data")
         source_id = form.get("source_id")
         local = request.app.state.wind_store
@@ -150,6 +153,11 @@ async def export_registered(key: str, version: str, request: Request):
             raise CalculationError("请填写有效的空气密度和综合修正系数。") from exc
         if not 0 < density < 3 or not 0 < factor <= 100:
             raise CalculationError("空气密度须在0至3之间，综合修正系数须大于0且不超过100%。")
+        year_text = str(form.get("analysis_year", "")).strip()
+        try:
+            analysis_year = int(year_text) if year_text else None
+        except ValueError as exc:
+            raise CalculationError("分析年须为自然年年份。") from exc
         energy = form.get("energy")
         if energy is not None and (
             not isinstance(energy, UploadFile) or energy.size is None or energy.size > 4 * MIB
@@ -183,6 +191,7 @@ async def export_registered(key: str, version: str, request: Request):
             factor,
             energy_bytes,
             location,
+            analysis_year=analysis_year,
         )
     return Response(
         result,

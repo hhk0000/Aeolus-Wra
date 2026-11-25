@@ -39,11 +39,13 @@ const subtitles = [
   "让每一个结论，都有据可循。",
 ];
 const icons = ["grid", "sliders", "chart", "file", "shield", "book"];
-const reportTypes = ["可研", "初设", "风资源评估"] as const;
+const engineeringReport = "可研 / 初设";
+const reportTypes = [engineeringReport, "风资源评估"] as const;
 type ReportType = (typeof reportTypes)[number];
+type EngineeringSource = "feasibility" | "initial";
 
 function reportTypeFor(value?: string): ReportType {
-  return value === "初设" || value === "风资源评估" ? value : "可研";
+  return value === "风资源评估" ? value : engineeringReport;
 }
 
 type Project = {
@@ -52,7 +54,25 @@ type Project = {
   region: string;
   type: string;
   demo: boolean;
+  engineeringSource?: EngineeringSource;
 };
+
+function engineeringWorkspaceFor(
+  project: Project | undefined,
+  workspaces: Record<number, WorkspaceState>,
+  draftSource: EngineeringSource = "feasibility",
+) {
+  const feasibility = project?.id ?? -2;
+  const initial = project ? -project.id - 10 : -3;
+  const preferred = project ? project.engineeringSource : draftSource;
+  if (
+    workspaces[initial] &&
+    (!workspaces[feasibility] || preferred === "initial")
+  ) {
+    return initial;
+  }
+  return feasibility;
+}
 const profileKey = "aeolus.profile.v1";
 const avatarKey = "aeolus.profile.avatar";
 const themeKey = "aeolus.theme.v1";
@@ -249,6 +269,8 @@ function WorkspaceApp() {
   const [profileError, setProfileError] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
   const [draftReportType, setDraftReportType] = useState<ReportType>();
+  const [draftEngineeringSource, setDraftEngineeringSource] =
+    useState<EngineeringSource>("feasibility");
   const [page, setPage] = useState(0);
   const [galleryJobId, setGalleryJobId] = useState<string>();
   const [galleryTarget, setGalleryTarget] = useState<GalleryTarget>();
@@ -272,6 +294,10 @@ function WorkspaceApp() {
           // Older projects use their original index as the workspace key.
           id: Number.isSafeInteger(p.id) ? p.id : index,
           type: reportTypeFor(p.type),
+          engineeringSource:
+            p.engineeringSource === "initial" || p.type === "初设"
+              ? "initial"
+              : "feasibility",
         }));
     } catch {
       /* A corrupt browser cache must not prevent opening the application. */
@@ -281,21 +307,21 @@ function WorkspaceApp() {
         id: 0,
         name: "张北风电场风资源评估",
         region: "河北 · 张家口",
-        type: "可研",
+        type: engineeringReport,
         demo: true,
       },
       {
         id: 1,
         name: "沿海风电项目可行性研究",
         region: "江苏 · 盐城",
-        type: "可研",
+        type: engineeringReport,
         demo: true,
       },
       {
         id: 2,
         name: "山地风电场测风数据分析",
         region: "云南 · 曲靖",
-        type: "可研",
+        type: engineeringReport,
         demo: true,
       },
     ];
@@ -321,13 +347,15 @@ function WorkspaceApp() {
   const deletedProjects = useRef(new Set<number>());
   const current = projects.find((project) => project.id === selected);
   const reportType = current ? reportTypeFor(current.type) : draftReportType;
-  const workspaceId = current
-    ? reportType === "初设"
-      ? -current.id - 10
-      : current.id
-    : reportType === "初设"
-      ? -3
-      : -2;
+  const workspaceId = engineeringWorkspaceFor(
+    current,
+    workspaces,
+    draftEngineeringSource,
+  );
+  const feasibilityWorkspaceId = current?.id ?? -2;
+  const initialWorkspaceId = current ? -current.id - 10 : -3;
+  const hasBothEngineeringHistories =
+    !!workspaces[feasibilityWorkspaceId] && !!workspaces[initialWorkspaceId];
   const workspace = workspaces[workspaceId] ?? createWorkspace();
   const updateWorkspace = (update: (s: WorkspaceState) => WorkspaceState) =>
     setWorkspaces((current) =>
@@ -345,7 +373,7 @@ function WorkspaceApp() {
   const [deleteCandidate, setDeleteCandidate] = useState<Project>();
   const [name, setName] = useState("");
   const [region, setRegion] = useState("");
-  const [type, setType] = useState<ReportType>("可研");
+  const [type, setType] = useState<ReportType>(engineeringReport);
   const [notice, setNotice] = useState("");
   function openProfile() {
     setDraftProfile(profile);
@@ -793,7 +821,8 @@ function WorkspaceApp() {
                       (p.name + p.region).includes(query),
                   )
                   .map((p) => {
-                    const pWs = workspaces[p.id];
+                    const pWs =
+                      workspaces[engineeringWorkspaceFor(p, workspaces)];
                     const pFiles = pWs?.files.length ?? 0;
                     const pRuns =
                       Object.keys(pWs?.analysisRuns ?? {}).length +
@@ -927,6 +956,41 @@ function WorkspaceApp() {
                     </label>
                   ))}
                 </div>
+                {reportType === engineeringReport &&
+                  hasBothEngineeringHistories && (
+                    <label className="field">
+                      历史资料来源
+                      <select
+                        value={
+                          workspaceId === initialWorkspaceId
+                            ? "initial"
+                            : "feasibility"
+                        }
+                        onChange={(event) => {
+                          const engineeringSource =
+                            event.target.value === "initial"
+                              ? "initial"
+                              : "feasibility";
+                          if (current) {
+                            setProjects((previous) =>
+                              previous.map((project) =>
+                                project.id === current.id
+                                  ? { ...project, engineeringSource }
+                                  : project,
+                              ),
+                            );
+                          } else {
+                            setDraftEngineeringSource(engineeringSource);
+                          }
+                          setGalleryJobId(undefined);
+                          setGalleryTarget(undefined);
+                        }}
+                      >
+                        <option value="feasibility">原可研资料</option>
+                        <option value="initial">原初设资料</option>
+                      </select>
+                    </label>
+                  )}
               </fieldset>
               {reportType === "风资源评估" && page <= 3 && (
                 <MesoscaleWorkspace
@@ -951,7 +1015,6 @@ function WorkspaceApp() {
               {reportType && reportType !== "风资源评估" && page === 2 && (
                 <ResultsWorkspace
                   key={workspaceId}
-                  includeExtremePlaceholder={reportType === "初设"}
                   projectId={workspaceId}
                   concurrentJobId={galleryJobId}
                   galleryTarget={galleryTarget}

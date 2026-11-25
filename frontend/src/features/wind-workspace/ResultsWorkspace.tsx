@@ -53,7 +53,6 @@ interface ResultsProps extends WorkspaceViewProps {
   projectId?: number;
   concurrentJobId?: string;
   galleryTarget?: GalleryTarget;
-  includeExtremePlaceholder?: boolean;
 }
 const gallerySelection = new Map<
   number,
@@ -135,7 +134,6 @@ export function ResultsWorkspace({
   projectId,
   concurrentJobId,
   galleryTarget,
-  includeExtremePlaceholder = false,
 }: ResultsProps) {
   const requested = state.concurrentJobs?.find(
     (job) => job.id === concurrentJobId,
@@ -175,23 +173,17 @@ export function ResultsWorkspace({
   } as CSSProperties;
   const selected = OUTPUTS.filter((o) => state.selectedOutputs.includes(o.id));
   const views: OutputSpec[] = [...selected];
-  if (includeExtremePlaceholder) {
-    const monthlyRoseIndex = views.findIndex(
-      (item) => item.id === "monthly-rose",
-    );
-    views.splice(
-      monthlyRoseIndex < 0 ? views.length : monthlyRoseIndex + 1,
-      0,
-      {
-        id: "extreme-wind-placeholder",
-        title: "五十年极大风速",
-        description: "待接入计算算法",
-        kind: "result",
-        required: [],
-        form: "待接入",
-      },
-    );
-  }
+  const monthlyRoseIndex = views.findIndex(
+    (item) => item.id === "monthly-rose",
+  );
+  views.splice(monthlyRoseIndex < 0 ? views.length : monthlyRoseIndex + 1, 0, {
+    id: "extreme-wind-placeholder",
+    title: "五十年极大风速",
+    description: "待接入计算算法",
+    kind: "result",
+    required: [],
+    form: "待接入",
+  });
   const filtered = views.flatMap<OutputSpec>((o) => {
     if (o.id === "completeness" && filter === "raw")
       return [

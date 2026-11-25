@@ -1,0 +1,700 @@
+import { useEffect, useState } from "react";
+import { api } from "./api";
+
+type Source = {
+  id: string;
+  name: string;
+  height: number;
+  first: string;
+  last: string;
+  coordinates: { lat?: number; lon?: number };
+  coverage_error?: string;
+  start_year?: number;
+  end_year?: number;
+  year?: number;
+  mean_speed?: number;
+  annual?: number[];
+  deviation?: number;
+};
+type Assessment = {
+  source?: Source;
+  energy?: { id: string; name: string };
+  density: string;
+  factor: string;
+  manualLocation: boolean;
+  lat: string;
+  lon: string;
+  alt: string;
+  runId?: string;
+  hidden: string[];
+};
+type Result = {
+  year: number;
+  height: number;
+  monthly: [string, string][];
+  charts: { title: string; image: string }[];
+};
+type Template = { id: string; version: string; title: string };
+
+const tabs = ["数据资料", "风资源分析", "长期参考"];
+const titles = [
+  "风速和风功率密度月变化图",
+  "风速和风功率密度日变化图",
+  "风速和风能频率图",
+  "风向频率玫瑰图",
+  "风能频率玫瑰图",
+  "威布尔分布图",
+  "五十年极大风速",
+];
+const initial: Assessment = {
+  density: "",
+  factor: "75",
+  manualLocation: false,
+  lat: "",
+  lon: "",
+  alt: "",
+  hidden: [],
+};
+
+export default function MesoscaleWorkspace({
+  project,
+  workspaceId,
+  page,
+  onNavigate,
+}: {
+  project: string;
+  workspaceId: number;
+  page: number;
+  onNavigate: (page: number) => void;
+}) {
+  const storage = "aeolus.assessment.v1." + workspaceId;
+  const [state, setState] = useState<Assessment>(() => {
+    try {
+      return {
+        ...initial,
+        ...JSON.parse(localStorage.getItem(storage) ?? "{}"),
+      };
+    } catch {
+      return initial;
+    }
+  });
+  const [tab, setTab] = useState(0);
+  const [chosen, setChosen] = useState(titles[0]);
+  const [result, setResult] = useState<Result>();
+  const [template, setTemplate] = useState<Template>();
+  const [error, setError] = useState("");
+  const [resultError, setResultError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storage, JSON.stringify(state));
+    } catch {
+      // Open pages can still use the assessment while storage is unavailable.
+    }
+  }, [state, storage]);
+  useEffect(() => {
+    if (page !== 2 || !state.runId) return;
+    const controller = new AbortController();
+    void api<Result>(
+      "/reports/assessment/runs/" + state.runId,
+      undefined,
+      controller.signal,
+    )
+      .then(setResult)
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted) setResultError(cause.message);
+      });
+    return () => controller.abort();
+  }, [page, state.runId]);
+  useEffect(() => {
+    if (page !== 3) return;
+    const controller = new AbortController();
+    void api<Template[]>("/reports/templates", undefined, controller.signal)
+      .then((list) => setTemplate(list.find((item) => item.id === "mesoscale")))
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted) setError(cause.message);
+      });
+    return () => controller.abort();
+  }, [page]);
+
+  const source = state.source;
+  const deviation = source?.deviation;
+  const automaticLocation =
+    source?.coordinates.lat !== undefined &&
+    source?.coordinates.lon !== undefined;
+  const canRun =
+    !!source?.year && Number(state.density) > 0 && Number(state.density) < 3;
+  const templateUrl =
+    template &&
+    "/api/v1/reports/templates/" + template.id + "/" + template.version;
+
+  function change(values: Partial<Assessment>) {
+    setState((current) => ({ ...current, ...values }));
+  }
+
+  async function upload(file: File | undefined, kind: "source" | "energy") {
+    if (!file || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      if (kind === "energy") {
+        change({ energy: await api("/reports/assessment/files/energy", form) });
+      } else {
+        const next = await api<Source>(
+          "/reports/assessment/files/source",
+          form,
+        );
+        setResult(undefined);
+        change({
+          source: next,
+          runId: undefined,
+          manualLocation: false,
+          lat: "",
+          lon: "",
+          alt: "",
+        });
+        if (next.year) setTab(1);
+      }
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function analyze() {
+    if (!source || !canRun || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const run = await api<{ id: string }>("/reports/assessment/runs", {
+        source_id: source.id,
+        density: Number(state.density),
+      });
+      setResult(undefined);
+      setResultError("");
+      change({ runId: run.id });
+      onNavigate(2);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function download() {
+    if (!templateUrl || !source || !state.runId || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("source_id", source.id);
+      form.set("density", state.density);
+      form.set("factor", state.factor);
+      form.set("project", project);
+      if (state.energy) form.set("energy_id", state.energy.id);
+      if (automaticLocation || state.manualLocation) {
+        form.set(
+          "lat",
+          automaticLocation ? String(source.coordinates.lat) : state.lat,
+        );
+        form.set(
+          "lon",
+          automaticLocation ? String(source.coordinates.lon) : state.lon,
+        );
+        form.set("alt", state.alt);
+      }
+      const response = await fetch(templateUrl + "/export", {
+        method: "POST",
+        body: form,
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(
+          typeof body?.detail === "string"
+            ? body.detail
+            : "无法生成报告，请检查分析配置。",
+        );
+      }
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = (project || "风资源评估") + "中尺度风资源分析报告.docx";
+      anchor.click();
+      setTimeout(() => URL.revokeObjectURL(href), 30000);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const errorNotice = error && (
+    <p className="ww-error" role="alert">
+      {error}
+    </p>
+  );
+
+  const period = source?.year && (
+    <div className="ww-fields ww-fields-three">
+      <label>
+        分析年起点
+        <input readOnly value={source.year + "-01-01 00:00"} />
+      </label>
+      <label>
+        分析年终点（不含）
+        <input readOnly value={source.year + 1 + "-01-01 00:00"} />
+      </label>
+      <label>
+        分析高度（m）
+        <input readOnly value={source.height} />
+      </label>
+    </div>
+  );
+
+  if (page === 1)
+    return (
+      <div className="ww-workspace ww-assessment">
+        <div className="ww-workspace-board">
+          <div className="ww-workspace-toolbar">
+            <div
+              className="ww-primary-tabs"
+              role="tablist"
+              aria-label="资源评估配置"
+            >
+              {tabs.map((title, index) => (
+                <button
+                  key={title}
+                  type="button"
+                  role="tab"
+                  id={"assessment-tab-" + index}
+                  aria-controls="assessment-panel"
+                  aria-selected={tab === index}
+                  className={tab === index ? "active" : ""}
+                  onClick={() => {
+                    setTab(index);
+                    setError("");
+                  }}
+                >
+                  {title}
+                </button>
+              ))}
+            </div>
+          </div>
+          <section
+            id="assessment-panel"
+            role="tabpanel"
+            aria-labelledby={"assessment-tab-" + tab}
+            className="ww-panel"
+          >
+            <h2>{tabs[tab]}</h2>
+            {tab === 0 && (
+              <>
+                <label className="field">
+                  中尺度数据（逐小时 TXT）
+                  <input
+                    type="file"
+                    accept=".txt"
+                    disabled={busy}
+                    onChange={(event) =>
+                      void upload(event.target.files?.[0], "source")
+                    }
+                  />
+                </label>
+                <p className="ww-inline-note">
+                  支持 ERA5 和格林威治，自动识别风速、风向和高度。
+                </p>
+                {busy && <p role="status">正在读取资料…</p>}
+                {source && (
+                  <p>
+                    {source.name} · {source.height} m ·{" "}
+                    {source.first.slice(0, 10)} 至 {source.last.slice(0, 10)}
+                  </p>
+                )}
+                {source?.coverage_error && (
+                  <p className="ww-error" role="alert">
+                    {source.coverage_error}
+                  </p>
+                )}
+                {source?.year && (
+                  <button
+                    className="ww-button primary"
+                    type="button"
+                    onClick={() => setTab(1)}
+                  >
+                    继续风资源分析
+                  </button>
+                )}
+              </>
+            )}
+            {tab === 1 && (
+              <>
+                {period || <p>请先上传覆盖 20 个完整自然年的中尺度资料。</p>}
+                {source?.year && (
+                  <p className="ww-inline-note">
+                    {source.start_year}–{source.end_year} 年基准 · 选定{" "}
+                    {source.year} 年 · 偏差 {deviation?.toFixed(2)}%
+                    {Math.abs(deviation ?? 0) > 2
+                      ? " · 无平风年，采用最小偏差年"
+                      : " · 平风年中偏差最小"}
+                  </p>
+                )}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void analyze();
+                  }}
+                >
+                  <fieldset disabled={busy} className="ww-report-controls">
+                    <div className="ww-fields ww-fields-two">
+                      <label>
+                        轮毂高度空气密度（kg/m³）
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          min="0.001"
+                          max="2.999"
+                          value={state.density}
+                          onChange={(event) => {
+                            setResult(undefined);
+                            setResultError("");
+                            change({
+                              density: event.target.value,
+                              runId: undefined,
+                            });
+                          }}
+                        />
+                      </label>
+                      <label>
+                        综合修正系数（%）
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          min="0.01"
+                          max="100"
+                          value={state.factor}
+                          onChange={(event) =>
+                            change({ factor: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="ww-wide">
+                        机组发电量表（可选，XLSX、CSV 或 TSV）
+                        <input
+                          type="file"
+                          accept=".xlsx,.csv,.tsv,.txt"
+                          onChange={(event) =>
+                            void upload(event.target.files?.[0], "energy")
+                          }
+                        />
+                      </label>
+                    </div>
+                    {state.energy && (
+                      <p>
+                        {state.energy.name}{" "}
+                        <button
+                          type="button"
+                          className="ww-button"
+                          onClick={() => change({ energy: undefined })}
+                        >
+                          移除机组表
+                        </button>
+                      </p>
+                    )}
+                    {source && !automaticLocation && (
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={state.manualLocation}
+                          onChange={(event) =>
+                            change({ manualLocation: event.target.checked })
+                          }
+                        />{" "}
+                        手动填写中尺度选点位置
+                      </label>
+                    )}
+                    {(automaticLocation || state.manualLocation) && (
+                      <div className="ww-fields ww-fields-three">
+                        <label>
+                          纬度（°）
+                          <input
+                            type="number"
+                            step="any"
+                            min="-90"
+                            max="90"
+                            readOnly={automaticLocation}
+                            value={
+                              automaticLocation
+                                ? source!.coordinates.lat
+                                : state.lat
+                            }
+                            onChange={(event) =>
+                              change({ lat: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          经度（°）
+                          <input
+                            type="number"
+                            step="any"
+                            min="-180"
+                            max="180"
+                            readOnly={automaticLocation}
+                            value={
+                              automaticLocation
+                                ? source!.coordinates.lon
+                                : state.lon
+                            }
+                            onChange={(event) =>
+                              change({ lon: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label>
+                          海拔（m）
+                          <input
+                            type="number"
+                            step="any"
+                            min="-500"
+                            max="9000"
+                            value={state.alt}
+                            placeholder="输入选点海拔"
+                            onChange={(event) =>
+                              change({ alt: event.target.value })
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+                    <div
+                      role="group"
+                      aria-label="结果图表选项"
+                      className="ww-output-grid"
+                    >
+                      {titles.map((title) => (
+                        <label key={title}>
+                          <input
+                            type="checkbox"
+                            checked={!state.hidden.includes(title)}
+                            onChange={(event) =>
+                              change({
+                                hidden: event.target.checked
+                                  ? state.hidden.filter(
+                                      (item) => item !== title,
+                                    )
+                                  : [...state.hidden, title],
+                              })
+                            }
+                          />
+                          {title}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="ww-report-actions">
+                      <button
+                        className="ww-button primary"
+                        disabled={!canRun || busy}
+                      >
+                        {busy ? "正在计算…" : "开启风资源分析"}
+                      </button>
+                      {state.runId && (
+                        <button
+                          type="button"
+                          className="ww-button"
+                          onClick={() => onNavigate(2)}
+                        >
+                          查看已有结果
+                        </button>
+                      )}
+                    </div>
+                  </fieldset>
+                </form>
+              </>
+            )}
+            {tab === 2 && (
+              <>
+                {period}
+                {!source?.year ? (
+                  <p>
+                    {source?.coverage_error ||
+                      "上传中尺度资料后自动识别自然年窗口和代表年。"}
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      {source.start_year}–{source.end_year} 年平均风速{" "}
+                      {source.mean_speed?.toFixed(3)} m/s。推荐分析年为{" "}
+                      {source.year} 年。
+                    </p>
+                    <div className="ww-table-scroll">
+                      <table className="ww-result-table">
+                        <thead>
+                          <tr>
+                            <th>自然年</th>
+                            <th>平均风速（m/s）</th>
+                            <th>较长期均值偏差</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {source.annual?.map((value, index) => {
+                            const year = (source.start_year ?? 0) + index;
+                            return (
+                              <tr key={year}>
+                                <td>
+                                  {year}
+                                  {year === source.year ? "（代表年）" : ""}
+                                </td>
+                                <td>{value.toFixed(3)}</td>
+                                <td>
+                                  {(
+                                    (value / (source.mean_speed ?? 1) - 1) *
+                                    100
+                                  ).toFixed(2)}
+                                  %
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {errorNotice}
+          </section>
+        </div>
+      </div>
+    );
+
+  if (page === 2) {
+    const shown = titles.filter((title) => !state.hidden.includes(title));
+    const active = shown.includes(chosen) ? chosen : shown[0];
+    const chart = result?.charts.find((entry) => entry.title === active);
+    return (
+      <div className="ww-results ww-assessment">
+        <div className="ww-gallery-filter">
+          <strong>结果数据</strong>
+          {result && (
+            <span>
+              {result.year} 年 · {result.height} m
+            </span>
+          )}
+        </div>
+        <div className="ww-gallery-layout">
+          <aside className="ww-chart-list">
+            {shown.map((title) => (
+              <button
+                key={title}
+                type="button"
+                className={title === active ? "active" : ""}
+                onClick={() => setChosen(title)}
+              >
+                {title}
+              </button>
+            ))}
+          </aside>
+          <section className="ww-panel ww-chart-stage">
+            {active && <h2>{active}</h2>}
+            {active === "五十年极大风速" ? (
+              <p>待接入计算算法。</p>
+            ) : resultError ? (
+              <p role="alert">{resultError}</p>
+            ) : !state.runId ? (
+              <p>完成风资源分析后查看结果。</p>
+            ) : !result ? (
+              <p role="status">正在读取计算结果…</p>
+            ) : !active ? (
+              <p>请在分析配置选择要显示的图表。</p>
+            ) : !chart ? (
+              <p>当前资料无法生成这张图。</p>
+            ) : (
+              <>
+                <img
+                  src={"data:image/png;base64," + chart.image}
+                  alt={chart.title}
+                />
+                {active === titles[0] && (
+                  <table className="ww-result-table">
+                    <thead>
+                      <tr>
+                        <th>月份</th>
+                        <th>平均风速（m/s）</th>
+                        <th>风功率密度（W/m²）</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.monthly.map(([speed, power], index) => (
+                        <tr key={index}>
+                          <td>{index + 1} 月</td>
+                          <td>{speed}</td>
+                          <td>{power}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+            <button
+              className="ww-button"
+              type="button"
+              onClick={() => {
+                setTab(1);
+                onNavigate(1);
+              }}
+            >
+              调整分析配置
+            </button>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <section className="ww-panel ww-assessment">
+      <h2>风资源评估报告</h2>
+      {templateUrl && (
+        <p>
+          {template.title} · {template.version}{" "}
+          <a href={templateUrl + "/source"}>下载模板</a>
+        </p>
+      )}
+      {source?.year && (
+        <p>
+          {source.name} · {source.year} 代表年 · {source.height} m
+        </p>
+      )}
+      {!state.runId && <p>请在分析配置上传资料、填写空气密度并运行分析。</p>}
+      <div className="ww-report-actions">
+        <button
+          className="ww-button primary"
+          type="button"
+          disabled={!templateUrl || !state.runId || busy}
+          onClick={() => void download()}
+        >
+          {busy ? "正在生成报告…" : "生成 Word 半成品"}
+        </button>
+        <button
+          className="ww-button"
+          type="button"
+          onClick={() => {
+            setTab(1);
+            onNavigate(1);
+          }}
+        >
+          调整分析配置
+        </button>
+      </div>
+      {errorNotice}
+    </section>
+  );
+}

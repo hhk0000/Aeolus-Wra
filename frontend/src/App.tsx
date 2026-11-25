@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getHealth } from "./api";
 import HeroFormulaCards from "./HeroFormulaCards";
-import MesoscaleExport from "./features/wind-workspace/MesoscaleExport";
+import MesoscaleWorkspace from "./features/wind-workspace/MesoscaleWorkspace";
 import SavedRunPreview from "./features/wind-workspace/SavedRunPreview";
 import AnalysisWorkspace from "./features/wind-workspace/AnalysisWorkspace";
 import {
@@ -39,6 +39,13 @@ const subtitles = [
   "让每一个结论，都有据可循。",
 ];
 const icons = ["grid", "sliders", "chart", "file", "shield", "book"];
+const reportTypes = ["可研", "初设", "风资源评估"] as const;
+type ReportType = (typeof reportTypes)[number];
+
+function reportTypeFor(value?: string): ReportType {
+  return value === "初设" || value === "风资源评估" ? value : "可研";
+}
+
 type Project = {
   id: number;
   name: string;
@@ -241,7 +248,7 @@ function WorkspaceApp() {
   const [draftProfile, setDraftProfile] = useState(defaultProfile);
   const [profileError, setProfileError] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
-  const [reportType, setReportType] = useState("feasibility");
+  const [draftReportType, setDraftReportType] = useState<ReportType>();
   const [page, setPage] = useState(0);
   const [galleryJobId, setGalleryJobId] = useState<string>();
   const [galleryTarget, setGalleryTarget] = useState<GalleryTarget>();
@@ -264,6 +271,7 @@ function WorkspaceApp() {
           ...p,
           // Older projects use their original index as the workspace key.
           id: Number.isSafeInteger(p.id) ? p.id : index,
+          type: reportTypeFor(p.type),
         }));
     } catch {
       /* A corrupt browser cache must not prevent opening the application. */
@@ -273,21 +281,21 @@ function WorkspaceApp() {
         id: 0,
         name: "张北风电场风资源评估",
         region: "河北 · 张家口",
-        type: "陆上风电",
+        type: "可研",
         demo: true,
       },
       {
         id: 1,
         name: "沿海风电项目可行性研究",
         region: "江苏 · 盐城",
-        type: "海上风电",
+        type: "可研",
         demo: true,
       },
       {
         id: 2,
         name: "山地风电场测风数据分析",
         region: "云南 · 曲靖",
-        type: "陆上风电",
+        type: "可研",
         demo: true,
       },
     ];
@@ -311,14 +319,23 @@ function WorkspaceApp() {
   const [workspaces, setWorkspaces] =
     useState<Record<number, WorkspaceState>>(loadWorkspaceCache);
   const deletedProjects = useRef(new Set<number>());
-  const workspace = workspaces[selected] ?? createWorkspace();
+  const current = projects.find((project) => project.id === selected);
+  const reportType = current ? reportTypeFor(current.type) : draftReportType;
+  const workspaceId = current
+    ? reportType === "初设"
+      ? -current.id - 10
+      : current.id
+    : reportType === "初设"
+      ? -3
+      : -2;
+  const workspace = workspaces[workspaceId] ?? createWorkspace();
   const updateWorkspace = (update: (s: WorkspaceState) => WorkspaceState) =>
     setWorkspaces((current) =>
       deletedProjects.current.has(selected)
         ? current
         : {
             ...current,
-            [selected]: update(current[selected] ?? createWorkspace()),
+            [workspaceId]: update(current[workspaceId] ?? createWorkspace()),
           },
     );
   const [query, setQuery] = useState("");
@@ -328,7 +345,7 @@ function WorkspaceApp() {
   const [deleteCandidate, setDeleteCandidate] = useState<Project>();
   const [name, setName] = useState("");
   const [region, setRegion] = useState("");
-  const [type, setType] = useState("陆上风电");
+  const [type, setType] = useState<ReportType>("可研");
   const [notice, setNotice] = useState("");
   function openProfile() {
     setDraftProfile(profile);
@@ -448,7 +465,6 @@ function WorkspaceApp() {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [modal]);
-  const current = projects.find((project) => project.id === selected);
   useEffect(() => {
     if (deleteCandidate && !deleteDialog.current?.open)
       deleteDialog.current?.showModal();
@@ -460,8 +476,14 @@ function WorkspaceApp() {
     setWorkspaces((previous) => {
       const next = { ...previous };
       delete next[project.id];
+      delete next[-project.id - 10];
       return next;
     });
+    try {
+      localStorage.removeItem("aeolus.assessment.v1." + project.id);
+    } catch {
+      // The project can still be removed from the active list.
+    }
     if (selected === project.id) setSelected(remaining[0]?.id ?? -1);
     setNotice("已删除项目「" + project.name + "」");
   }
@@ -750,7 +772,7 @@ function WorkspaceApp() {
               </div>
               <div className="filter-row">
                 <div className="segments">
-                  {["全部项目", "陆上风电", "海上风电"].map((s) => (
+                  {["全部项目", ...reportTypes].map((s) => (
                     <button
                       className={filter === s ? "chosen" : ""}
                       key={s}
@@ -838,67 +860,97 @@ function WorkspaceApp() {
                 </button>
               </div>
             </>
-          ) : !current ? (
-            page === 5 ? (
-              <StandardsLibrary />
-            ) : (
-              <section className="ww-panel">
-                <h2>还没有项目</h2>
-                <p>创建项目后即可导入测风数据并开始分析。</p>
-                <button className="primary" onClick={() => setModal(true)}>
-                  新建项目
-                </button>
-              </section>
-            )
+          ) : page === 5 ? (
+            <StandardsLibrary />
           ) : (
             <>
-              <div className="project-context">
-                <span className="context-icon">
-                  <Icon name="grid" />
-                </span>
-                <div>
-                  <small>当前项目</small>
-                  <select
-                    aria-label="当前项目"
-                    value={selected}
-                    onChange={(e) => {
-                      setSelected(Number(e.target.value));
-                    }}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="context-badges">
-                  <span className="context-pill">{current.type}</span>
-                  {current.region && (
-                    <span className="context-pill">{current.region}</span>
-                  )}
-                  <span className="context-pill">
-                    {workspace.towers.length} 塔 · {workspace.files.length}{" "}
-                    份资料
+              {current && (
+                <div className="project-context">
+                  <span className="context-icon">
+                    <Icon name="grid" />
+                  </span>
+                  <div>
+                    <small>当前项目</small>
+                    <select
+                      aria-label="当前项目"
+                      value={selected}
+                      onChange={(e) => {
+                        setSelected(Number(e.target.value));
+                      }}
+                    >
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="context-badges">
+                    <span className="context-pill">{current.type}</span>
+                    {current.region && (
+                      <span className="context-pill">{current.region}</span>
+                    )}
+                    <span className="context-pill">
+                      {workspace.towers.length} 塔 · {workspace.files.length}{" "}
+                      份资料
+                    </span>
+                  </div>
+                  <span className="context-status">
+                    {current.demo ? "示例工作空间" : "本地项目草稿"}
                   </span>
                 </div>
-                <span className="context-status">
-                  {current.demo ? "示例工作空间" : "本地项目草稿"}
-                </span>
-              </div>
-              {page === 1 && (
+              )}
+              <fieldset className="ww-panel ww-report-type-picker">
+                <legend>报告类型</legend>
+                <div className="ww-report-actions">
+                  {reportTypes.map((choice) => (
+                    <label key={choice}>
+                      <input
+                        type="radio"
+                        name="workspace-report-type"
+                        checked={reportType === choice}
+                        onChange={() => {
+                          if (current) {
+                            setProjects((previous) =>
+                              previous.map((p) =>
+                                p.id === current.id
+                                  ? { ...p, type: choice }
+                                  : p,
+                              ),
+                            );
+                          } else {
+                            setDraftReportType(choice);
+                          }
+                        }}
+                      />
+                      {choice}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {reportType === "风资源评估" && page <= 3 && (
+                <MesoscaleWorkspace
+                  key={current?.id ?? "draft"}
+                  workspaceId={current?.id ?? -4}
+                  project={current?.name ?? "风资源评估"}
+                  page={page}
+                  onNavigate={go}
+                />
+              )}
+              {reportType && reportType !== "风资源评估" && page === 1 && (
                 <AnalysisWorkspace
-                  projectName={current.name}
+                  key={workspaceId}
+                  projectName={current?.name ?? reportType + "工作区"}
                   state={workspace}
                   onChange={updateWorkspace}
                   onNotice={setNotice}
                   onOpenGallery={(target) => go(2, target)}
                 />
               )}
-              {page === 2 && (
+              {reportType && reportType !== "风资源评估" && page === 2 && (
                 <ResultsWorkspace
-                  key={selected}
-                  projectId={selected}
+                  key={workspaceId}
+                  projectId={workspaceId}
                   concurrentJobId={galleryJobId}
                   galleryTarget={galleryTarget}
                   state={workspace}
@@ -913,26 +965,11 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === 3 && (
-                <label>
-                  报告类型{" "}
-                  <select
-                    value={reportType}
-                    onChange={(e) => setReportType(e.target.value)}
-                  >
-                    <option value="feasibility">可研风资源分析</option>
-                    <option value="mesoscale">前期中尺度评估</option>
-                  </select>
-                </label>
-              )}
-              {page === 3 && reportType === "mesoscale" && (
-                <MesoscaleExport key={selected} project={current.name} />
-              )}
-              {page === 3 && reportType === "feasibility" && (
+              {reportType && reportType !== "风资源评估" && page === 3 && (
                 <ReportOutline
-                  key={selected}
+                  key={workspaceId}
                   state={workspace}
-                  projectName={current.name}
+                  projectName={current?.name ?? reportType + "工作区"}
                   onChange={updateWorkspace}
                   onOpenGallery={(target) => go(2, target)}
                   onAnalyze={() => {
@@ -944,7 +981,7 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === 4 && (
+              {reportType && reportType !== "风资源评估" && page === 4 && (
                 <ReviewWorkspace
                   state={workspace}
                   onOpenGallery={(target) => go(2, target)}
@@ -957,7 +994,14 @@ function WorkspaceApp() {
                   }}
                 />
               )}
-              {page === 5 && <StandardsLibrary />}
+              {reportType === "风资源评估" && page === 4 && (
+                <section className="ww-panel">
+                  <p>资源评估的资料检查集中在分析配置。</p>
+                  <button className="ww-button" onClick={() => go(1)}>
+                    前往分析配置
+                  </button>
+                </section>
+              )}
             </>
           )}
           <footer className="footer">
@@ -1161,9 +1205,15 @@ function WorkspaceApp() {
               </label>
               <label className="field">
                 项目类型
-                <select value={type} onChange={(e) => setType(e.target.value)}>
-                  <option>陆上风电</option>
-                  <option>海上风电</option>
+                <select
+                  value={type}
+                  onChange={(e) => setType(reportTypeFor(e.target.value))}
+                >
+                  {reportTypes.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {choice === "风资源评估" ? "前期资源评估" : choice}
+                    </option>
+                  ))}
                 </select>
               </label>
               <p className="form-note">

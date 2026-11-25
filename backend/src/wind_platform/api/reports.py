@@ -2,11 +2,12 @@
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from wind_platform.core.calculations import CalculationError
+from wind_platform.services import mesoscale_report
 from wind_platform.services.report_catalog import catalog, release
 from wind_platform.services.word_report import MAX_FIGURES, MIB, ReportManifest, build_report
 
@@ -76,12 +77,71 @@ def report_template_source(key: str, version: str):
     )
 
 
+def assessment_file(local, file_id, kind):
+    record = local.get("assessment-files", file_id)
+    if record["kind"] != kind:
+        raise CalculationError("上传文件用途不匹配。")
+    return local.read_original(record["sha256"])
+
+
+@router.post("/reports/assessment/files/{kind}")
+async def upload_assessment_file(kind: str, request: Request):
+    limits = {"source": 64 * MIB, "energy": 4 * MIB}
+    if kind not in limits:
+        raise CalculationError("资料类型无效。")
+    async with request.form(max_files=1, max_fields=0) as form:
+        file = form.get("file")
+        if not isinstance(file, UploadFile) or not file.size or file.size > limits[kind]:
+            raise CalculationError("请选择有效的资料，逐小时 TXT 不超过64 MB，机组表不超过4 MB。")
+        raw = await file.read()
+        detail = (
+            await run_in_threadpool(mesoscale_report.assessment_source, raw)
+            if kind == "source"
+            else {}
+        )
+        local = request.app.state.wind_store
+        return local.put(
+            "assessment-files",
+            {
+                **detail,
+                "kind": kind,
+                "name": file.filename or "资料",
+                "sha256": local.original(raw),
+            },
+        )
+
+
+class AssessmentOptions(BaseModel):
+    source_id: str
+    density: float = Field(gt=0, lt=3)
+
+
+@router.post("/reports/assessment/runs")
+def run_assessment(options: AssessmentOptions, request: Request):
+    local = request.app.state.wind_store
+    raw = assessment_file(local, options.source_id, "source")
+    results = mesoscale_report.build(None, raw, options.density, "")
+    saved = local.put("assessment-runs", results)
+    return {"id": saved["id"]}
+
+
+@router.get("/reports/assessment/runs/{run_id}")
+def get_assessment(run_id: str, request: Request):
+    return request.app.state.wind_store.get("assessment-runs", run_id)
+
+
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
     async with request.form(max_files=2, max_fields=8) as form:
         upload = form.get("data")
-        if not isinstance(upload, UploadFile) or upload.size is None or upload.size > 64 * MIB:
+        source_id = form.get("source_id")
+        local = request.app.state.wind_store
+        if isinstance(source_id, str) and source_id and key == "mesoscale":
+            raw = assessment_file(local, source_id, "source")
+        elif isinstance(upload, UploadFile) and upload.size is not None and upload.size <= 64 * MIB:
+            raw = await upload.read()
+        else:
             raise CalculationError("请选择不超过64 MB的逐小时中尺度TXT。")
         try:
             density = float(str(form.get("density", "")))
@@ -95,6 +155,11 @@ async def export_registered(key: str, version: str, request: Request):
             not isinstance(energy, UploadFile) or energy.size is None or energy.size > 4 * MIB
         ):
             raise CalculationError("发电量表不得超过4 MB。")
+        energy_id = form.get("energy_id")
+        if isinstance(energy_id, str) and energy_id and key == "mesoscale":
+            energy_bytes = assessment_file(local, energy_id, "energy")
+        else:
+            energy_bytes = await energy.read() if energy else None
         location = {}
         for key, label, lo, hi in (
             ("lat", "纬度", -90, 90),
@@ -112,11 +177,11 @@ async def export_registered(key: str, version: str, request: Request):
         result = await run_in_threadpool(
             render,
             data,
-            await upload.read(),
+            raw,
             density,
             str(form.get("project", "")).strip()[:120],
             factor,
-            await energy.read() if energy else None,
+            energy_bytes,
             location,
         )
     return Response(

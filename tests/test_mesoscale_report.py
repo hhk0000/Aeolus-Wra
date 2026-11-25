@@ -21,6 +21,8 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         for month in range(1, 13):
             rows.append(f"{y}/{month:02}/01 00:00\t4\t0")
             rows.append(f"{y}/{month:02}/01 01:00\t6\t90")
+        rows.append(f"{y}/12/31 22:00	4	0")
+        rows.append(f"{y}/12/31 23:00	6	90")
     rows.append("2023/03/01 00:00\t99\t0")
     energy = "序号,尾流后理论年发电量(MWh),单机容量(MW)\nF01,10000,5"
     result = client.post(
@@ -37,6 +39,31 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     assert all(s.width == 5040000 for s in doc.inline_shapes)
     assert len(doc.inline_shapes) == 10
+    saved = client.post(
+        "/api/v1/reports/assessment/files/source",
+        files={"file": ("greenwich.txt", "\n".join(rows).encode())},
+    )
+    assert saved.status_code == 200
+    data = saved.json()
+    assert (data["start_year"], data["end_year"], data["year"], data["height"]) == (
+        2003,
+        2022,
+        2003,
+        125,
+    )
+    assert data["coordinates"] == {}
+    run = client.post(
+        "/api/v1/reports/assessment/runs",
+        json={"source_id": data["id"], "density": 1.2},
+    )
+    assert run.status_code == 200
+    output = client.get("/api/v1/reports/assessment/runs/" + run.json()["id"]).json()
+    assert output["year"] == data["year"]
+    assert len(output["monthly"]) == 12
+    assert len(output["charts"]) == 6
+    archive_export = client.post(path + "/export", data={"source_id": data["id"], "density": "1.2"})
+    assert archive_export.status_code == 200
+
     assert (
         client.post(
             path + "/export",

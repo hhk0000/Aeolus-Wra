@@ -1,7 +1,7 @@
 """Single-point hourly mesoscale statistics and in-place v1 Word bindings."""
 
 import re
-from collections import Counter
+from base64 import b64encode
 from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
@@ -79,13 +79,21 @@ def hourly_records(raw):
     return f"{height:g}", records
 
 
-def hourly(raw):
-    height, records = hourly_records(raw)
-    latest = max(records)
-    end = latest.year if (latest.month, latest.day) == (12, 31) else latest.year - 1
+def natural_window(records):
+    first, last = min(records), max(records)
+    end = last.year if last == datetime(last.year, 12, 31, 23) else last.year - 1
     start = end - 19
-    if min(records) > datetime(start, 1, 31, 23) or Counter(t.year for t in records)[end] == 0:
-        raise CalculationError("最近20个完整自然年不在数据范围内。")
+    if first > datetime(start, 1, 1) or datetime(end, 12, 31, 23) not in records:
+        raise CalculationError("资料未覆盖最近20个完整自然年。")
+    return start, end
+
+
+def hourly(raw):
+    return select_year(*hourly_records(raw))
+
+
+def select_year(height, records):
+    start, end = natural_window(records)
     times = sorted(t for t in records if start <= t.year <= end)
     v, d = np.array([records[t] for t in times]).T
     years = np.array([t.year for t in times])
@@ -100,6 +108,54 @@ def hourly(raw):
         raise CalculationError("20年均值为零，无法选择代表年。")
     idx = int(np.argmin(np.abs(np.array(annual) - avg)))
     return height, times, v, d, years, start, annual, avg, start + idx
+
+
+def assessment_source(raw):
+    height, records = hourly_records(raw)
+    content, _ = decode_text(raw)
+    lines = content.splitlines()
+    header = next(
+        (
+            i
+            for i, line in enumerate(lines[:200])
+            if re.search(r"date|timestamp|日期|时间", line, re.I)
+            and any(separator in line for separator in ("\t", ",", ";"))
+        ),
+        0,
+    )
+    preamble = "\n".join(lines[:header])
+    coordinates = {}
+    for label, key, positive, negative in (
+        ("Latitude", "lat", "N", "S"),
+        ("Longitude", "lon", "E", "W"),
+    ):
+        match = re.search(
+            rf"^\s*{label}\s*=\s*([{positive}{negative}])?\s*([-+]?\d+(?:\.\d+)?)\s*$",
+            preamble,
+            re.I | re.M,
+        )
+        if match:
+            value = float(match[2])
+            coordinates[key] = -abs(value) if (match[1] or "").upper() == negative else value
+    source = {
+        "height": float(height),
+        "first": min(records).isoformat(),
+        "last": max(records).isoformat(),
+        "coordinates": coordinates,
+    }
+    try:
+        _, _, _, _, _, start, annual, mean, year = select_year(height, records)
+    except CalculationError as exc:
+        return {**source, "coverage_error": str(exc)}
+    return {
+        **source,
+        "start_year": start,
+        "end_year": start + 19,
+        "year": year,
+        "mean_speed": mean,
+        "annual": annual,
+        "deviation": (annual[year - start] - mean) / mean * 100,
+    }
 
 
 def figure(title, labels, series, kind):
@@ -249,6 +305,56 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
         fit = None
     if fit:
         fields.update({"参数A": fmt(fit["c"]), "参数k": fmt(fit["k"])})
+    series = [
+        (
+            "近20年平均风速图",
+            range(start, start + 20),
+            [("年均风速 m/s", annual), ("20年均值 m/s", [avg] * 20)],
+            "annual",
+        ),
+        (
+            "风速和风功率密度月变化图",
+            range(1, 13),
+            [("风速 m/s", months[:, 0]), ("风功率密度 W/m²", months[:, 1])],
+            "line",
+        ),
+        (
+            "风速和风功率密度日变化图",
+            range(24),
+            [("风速 m/s", hours[:, 0]), ("风功率密度 W/m²", hours[:, 1])],
+            "line",
+        ),
+        ("风速和风能频率图", range(27), [("风速频率 %", f), ("风能频率 %", e)], "freq"),
+        ("风向频率玫瑰图", COMPASS, [("", direction)], "rose"),
+        ("风能频率玫瑰图", COMPASS, [("", energy)], "rose"),
+    ]
+    if fit:
+        series.append(
+            (
+                "威布尔分布图",
+                range(27),
+                [
+                    ("风速频率 %", f),
+                    ("Weibull 拟合 %", [r["fitted_frequency"] for r in fit["rows"]]),
+                ],
+                "fit",
+            )
+        )
+    if template is None:
+        return {
+            "year": year,
+            "height": float(height),
+            "fields": fields,
+            "monthly": [[fmt(speed), fmt(power)] for speed, power in months],
+            "charts": [
+                {
+                    "title": title,
+                    "image": b64encode(figure(title, labels, values, kind)).decode("ascii"),
+                }
+                for title, labels, values, kind in series
+                if kind != "annual"
+            ],
+        }
     doc = Document(BytesIO(template))
 
     def fill_cell(cell, value):
@@ -288,41 +394,6 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
     for i, label in enumerate(COMPASS):
         row(4, i + 1, [label, fmt(direction[i]) + "%"])
         row(5, i + 1, [label, fmt(energy[i]) + "%"])
-    series = [
-        (
-            "近20年平均风速图",
-            range(start, start + 20),
-            [("年均风速 m/s", annual), ("20年均值 m/s", [avg] * 20)],
-            "annual",
-        ),
-        (
-            "风速和风功率密度月变化图",
-            range(1, 13),
-            [("风速 m/s", months[:, 0]), ("风功率密度 W/m²", months[:, 1])],
-            "line",
-        ),
-        (
-            "风速和风功率密度日变化图",
-            range(24),
-            [("风速 m/s", hours[:, 0]), ("风功率密度 W/m²", hours[:, 1])],
-            "line",
-        ),
-        ("风速和风能频率图", range(27), [("风速频率 %", f), ("风能频率 %", e)], "freq"),
-        ("风向频率玫瑰图", COMPASS, [("", direction)], "rose"),
-        ("风能频率玫瑰图", COMPASS, [("", energy)], "rose"),
-    ]
-    if fit:
-        series.append(
-            (
-                "威布尔分布图",
-                range(27),
-                [
-                    ("风速频率 %", f),
-                    ("Weibull 拟合 %", [r["fitted_frequency"] for r in fit["rows"]]),
-                ],
-                "fit",
-            )
-        )
     shapes = {s._inline.docPr.name: s for s in doc.inline_shapes}
 
     replaced_rids = set()

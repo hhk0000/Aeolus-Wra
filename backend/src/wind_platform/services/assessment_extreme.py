@@ -10,6 +10,10 @@ STANDARD_DENSITY = 1.225
 DEFAULT_MULTIPLIER = 5.0
 
 
+def valid_pressure(value):
+    return isfinite(value) and value > 0 and isfinite(1600 * value)
+
+
 def pressure_stations(raw):
     content, _ = decode_text(raw)
     lines = [(i, line.strip()) for i, line in enumerate(content.splitlines(), 1) if line.strip()]
@@ -33,7 +37,7 @@ def pressure_stations(raw):
             lon, lat, value = float(longitude), float(latitude), float(pressure)
             if not name or not (-180 <= lon <= 180 and -90 <= lat <= 90):
                 raise ValueError
-            if not isfinite(value) or value <= 0 or not isfinite(1600 * value):
+            if not valid_pressure(value):
                 raise ValueError
         except ValueError as exc:
             raise CalculationError(

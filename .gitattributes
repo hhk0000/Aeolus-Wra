@@ -2,3 +2,4 @@
 *.cmd text eol=crlf
 *.png -text
 *.jpg -text
+backend/src/wind_platform/services/pressure_stations.txt -text

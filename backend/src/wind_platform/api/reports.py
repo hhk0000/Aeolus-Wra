@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from wind_platform.core.calculations import CalculationError
-from wind_platform.services import assessment_extreme, mesoscale_report
+from wind_platform.services import assessment_extreme, mesoscale_report, pressure_location
 from wind_platform.services.report_catalog import catalog, release
 from wind_platform.services.word_report import MAX_FIGURES, MIB, ReportManifest, build_report
 
@@ -137,14 +137,40 @@ def get_pressure_library(file_id: str, request: Request):
     return record
 
 
+@router.get("/reports/assessment/pressure-match")
+def get_pressure_match(place: str = ""):
+    return {"station": pressure_location.match_pressure(place[:120])}
+
+
 class ExtremeOptions(BaseModel):
     multiplier: float = Field(
         default=assessment_extreme.DEFAULT_MULTIPLIER, gt=0, allow_inf_nan=False
     )
     pressure_library_id: str | None = None
     pressure_station_index: int | None = Field(default=None, ge=0)
+    place: str = Field(default="", max_length=120)
+    pressure_override: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     def station(self, local):
+        station = (
+            pressure_location.match_pressure(self.place)
+            if self.place.strip()
+            else self.legacy_station(local)
+        )
+        if station and self.place.strip():
+            station = {**station, "requested_place": self.place.strip()}
+        if self.pressure_override is None:
+            return station
+        if not assessment_extreme.valid_pressure(self.pressure_override):
+            raise CalculationError("手填风压过大，无法换算参考风速。")
+        return {
+            **(station or {"name": self.place.strip() or "手动填写"}),
+            "pressure": self.pressure_override,
+            "manual": True,
+            "matched_pressure": station["pressure"] if station else None,
+        }
+
+    def legacy_station(self, local):
         if self.pressure_station_index is None:
             return None
         if not self.pressure_library_id:

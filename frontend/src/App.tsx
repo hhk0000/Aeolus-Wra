@@ -933,6 +933,7 @@ function WorkspaceApp() {
                   key={current?.id ?? "draft"}
                   workspaceId={current?.id ?? -4}
                   project={current?.name ?? "风资源评估"}
+                  region={current?.region ?? ""}
                   page={page}
                   onNavigate={go}
                 />

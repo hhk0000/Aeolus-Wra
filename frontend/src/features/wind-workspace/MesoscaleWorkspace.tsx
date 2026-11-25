@@ -25,6 +25,8 @@ type Assessment = {
   energy?: { id: string; name: string };
   pressure?: { id: string; name: string };
   pressureStation?: number;
+  place?: string;
+  pressureOverride?: string;
   multiplier: string;
   density: string;
   factor: string;
@@ -38,14 +40,20 @@ type Assessment = {
 };
 type PressureStation = {
   name: string;
-  lon: number;
-  lat: number;
+  province?: string;
+  level?: "county" | "city" | "province";
+  manual?: boolean;
   pressure: number;
 };
 type PressureLibrary = {
   id: string;
   name: string;
   stations: PressureStation[];
+};
+const pressureLevels = {
+  county: "区县匹配",
+  city: "市级匹配",
+  province: "省级参考站",
 };
 function identifiedDensity(
   source: Source | undefined,
@@ -128,11 +136,13 @@ const initial: Assessment = {
 
 export default function MesoscaleWorkspace({
   project,
+  region,
   workspaceId,
   page,
   onNavigate,
 }: {
   project: string;
+  region: string;
   workspaceId: number;
   page: number;
   onNavigate: (page: number) => void;
@@ -152,6 +162,11 @@ export default function MesoscaleWorkspace({
   const [chosen, setChosen] = useState(titles[0]);
   const [result, setResult] = useState<Result>();
   const [pressureLibrary, setPressureLibrary] = useState<PressureLibrary>();
+  const [pressureLookup, setPressureLookup] = useState<{
+    place: string;
+    station?: PressureStation | null;
+    error?: string;
+  }>();
   const [template, setTemplate] = useState<Template>();
   const [error, setError] = useState("");
   const [resultError, setResultError] = useState("");
@@ -160,12 +175,36 @@ export default function MesoscaleWorkspace({
   const source = state.source;
   const sourceId = source?.id;
   const pressureId = state.pressure?.id;
+  const place = (
+    state.place ?? (state.pressureStation === undefined ? region : "")
+  )
+    .trim()
+    .slice(0, 120);
   const pressureStations =
     pressureLibrary?.id === pressureId ? pressureLibrary?.stations : undefined;
-  const pressureStation =
+  const legacyPressureStation =
     state.pressureStation === undefined
       ? undefined
       : pressureStations?.[state.pressureStation];
+  const pressureStation = place
+    ? pressureLookup?.place === place
+      ? pressureLookup.station
+      : undefined
+    : legacyPressureStation;
+  const pressureNote = place
+    ? pressureLookup?.place !== place
+      ? "正在匹配地点…"
+      : (pressureLookup.error ??
+        (pressureStation?.level
+          ? `${pressureLevels[pressureStation.level]} · ${pressureStation.province}${pressureStation.name} · ${pressureStation.pressure} kN/m²`
+          : "未匹配到风压，可补充地区或在风资源分析手填。"))
+    : legacyPressureStation
+      ? `此前选定 · ${legacyPressureStation.name} · ${legacyPressureStation.pressure} kN/m²`
+      : "填写省、市、区县后自动匹配。";
+  const pressureOverride =
+    state.pressureOverride === undefined
+      ? undefined
+      : Number(state.pressureOverride);
   const multiplier = Number(state.multiplier);
   const analysisYear = state.analysisYear ?? source?.year;
   const sourceDensity = identifiedDensity(source, analysisYear);
@@ -180,6 +219,31 @@ export default function MesoscaleWorkspace({
       // Open pages can still use the assessment while storage is unavailable.
     }
   }, [state, storage]);
+  useEffect(() => {
+    if (!place) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void api<{ station: PressureStation | null }>(
+        "/reports/assessment/pressure-match?place=" + encodeURIComponent(place),
+        undefined,
+        controller.signal,
+      )
+        .then(({ station }) => {
+          if (!controller.signal.aborted) setPressureLookup({ place, station });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted)
+            setPressureLookup({
+              place,
+              error: "无法读取风压库，请稍后重试或手填。",
+            });
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [place]);
   useEffect(() => {
     if (!pressureId || pressureLibrary?.id === pressureId) return;
     const controller = new AbortController();
@@ -254,6 +318,8 @@ export default function MesoscaleWorkspace({
                 multiplier,
                 pressure_library_id: pressureId,
                 pressure_station_index: state.pressureStation,
+                place,
+                pressure_override: pressureOverride,
               },
             },
             controller.signal,
@@ -289,6 +355,8 @@ export default function MesoscaleWorkspace({
     multiplier,
     pressureId,
     state.pressureStation,
+    place,
+    pressureOverride,
   ]);
   useEffect(() => {
     if (page !== 3) return;
@@ -321,7 +389,9 @@ export default function MesoscaleWorkspace({
     density > 0 &&
     density < 3 &&
     Number.isFinite(multiplier) &&
-    multiplier > 0;
+    multiplier > 0 &&
+    (pressureOverride === undefined ||
+      (Number.isFinite(pressureOverride) && pressureOverride > 0));
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -346,10 +416,7 @@ export default function MesoscaleWorkspace({
     });
   }
 
-  async function upload(
-    file: File | undefined,
-    kind: "source" | "energy" | "pressure",
-  ) {
+  async function upload(file: File | undefined, kind: "source" | "energy") {
     if (!file || busy) return;
     setBusy(true);
     setError("");
@@ -358,17 +425,6 @@ export default function MesoscaleWorkspace({
       form.set("file", file);
       if (kind === "energy") {
         change({ energy: await api("/reports/assessment/files/energy", form) });
-      } else if (kind === "pressure") {
-        const library = await api<PressureLibrary>(
-          "/reports/assessment/files/pressure",
-          form,
-        );
-        setPressureLibrary(library);
-        change({
-          pressure: { id: library.id, name: library.name },
-          pressureStation: undefined,
-          runId: undefined,
-        });
       } else {
         const next = await api<Source>(
           "/reports/assessment/files/source",
@@ -385,7 +441,6 @@ export default function MesoscaleWorkspace({
           lon: "",
           alt: "",
         });
-        if (next.year) setTab(1);
       }
     } catch (cause) {
       setError((cause as Error).message);
@@ -398,6 +453,8 @@ export default function MesoscaleWorkspace({
     multiplier,
     pressure_library_id: pressureId,
     pressure_station_index: state.pressureStation,
+    place,
+    pressure_override: pressureOverride,
   };
 
   async function analyze() {
@@ -567,6 +624,31 @@ export default function MesoscaleWorkspace({
                 <p className="ww-inline-note">
                   支持 ERA5 和格林威治，自动识别风速、风向和高度。
                 </p>
+                <label className="field">
+                  项目地点（用于匹配风压）
+                  <input
+                    type="text"
+                    maxLength={120}
+                    disabled={busy}
+                    placeholder="例如：河北省 张家口市 怀来县"
+                    value={state.place ?? place}
+                    aria-describedby="assessment-pressure-location-note"
+                    onChange={(event) =>
+                      change({
+                        place: event.target.value,
+                        pressureOverride: undefined,
+                        runId: undefined,
+                      })
+                    }
+                  />
+                </label>
+                <p
+                  id="assessment-pressure-location-note"
+                  className="ww-inline-note"
+                  role="status"
+                >
+                  {pressureNote}
+                </p>
                 {busy && <p role="status">正在读取资料…</p>}
                 {source && (
                   <div className="ww-assessment-file">
@@ -720,51 +802,49 @@ export default function MesoscaleWorkspace({
                           默认 5，可按项目依据调整。
                         </small>
                       </label>
-                      <label>
-                        50 年一遇风压库（TXT）
-                        <input
-                          type="file"
-                          accept=".txt,text/plain"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            event.target.value = "";
-                            void upload(file, "pressure");
-                          }}
-                        />
-                        <small className="ww-inline-note">
-                          列顺序为地点、经度、纬度、风压（kN/m²）。
-                        </small>
-                      </label>
-                      {state.pressure && (
-                        <label className="ww-wide">
-                          风压站点 · {state.pressure.name}
-                          <select
-                            value={state.pressureStation ?? ""}
+                      <div>
+                        <label>
+                          50 年基本风压（kN/m²）
+                          <input
+                            type="number"
+                            step="any"
+                            value={
+                              state.pressureOverride ??
+                              pressureStation?.pressure ??
+                              ""
+                            }
+                            aria-describedby="assessment-pressure-note"
                             onChange={(event) =>
                               change({
-                                pressureStation:
-                                  event.target.value === ""
-                                    ? undefined
-                                    : Number(event.target.value),
+                                pressureOverride: event.target.value,
+                                runId: undefined,
+                              })
+                            }
+                          />
+                          <small
+                            id="assessment-pressure-note"
+                            className="ww-inline-note"
+                          >
+                            {state.pressureOverride !== undefined &&
+                              "当前采用手填值 · "}
+                            {pressureNote}
+                          </small>
+                        </label>
+                        {state.pressureOverride !== undefined && (
+                          <button
+                            type="button"
+                            className="ww-button"
+                            onClick={() =>
+                              change({
+                                pressureOverride: undefined,
                                 runId: undefined,
                               })
                             }
                           >
-                            <option value="">请选择站点</option>
-                            {pressureStations?.map((station, index) => (
-                              <option key={index} value={index}>
-                                {station.name} · {station.lon}°, {station.lat}°
-                                · {station.pressure} kN/m²
-                              </option>
-                            ))}
-                          </select>
-                          {pressureStation && (
-                            <small className="ww-inline-note">
-                              使用所选站点原始风压值。
-                            </small>
-                          )}
-                        </label>
-                      )}
+                            恢复自动值
+                          </button>
+                        )}
+                      </div>
                       <label className="ww-wide">
                         机组发电量表（可选，XLSX、CSV 或 TSV）
                         <input
@@ -1154,8 +1234,8 @@ function ExtremeWindResult({
               <th scope="row">风压法</th>
               <td>
                 {station
-                  ? `${station.name} · ${station.pressure} kN/m²`
-                  : "待选择风压站点"}
+                  ? `${station.manual ? "手动填写" : [station.level && pressureLevels[station.level], (station.province ?? "") + station.name].filter(Boolean).join(" · ")} · ${station.pressure} kN/m²`
+                  : "待补充基本风压"}
               </td>
               <td>—</td>
               <td>{result.pressure_standard?.toFixed(2) ?? "—"}</td>

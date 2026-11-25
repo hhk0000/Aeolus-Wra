@@ -9,6 +9,30 @@ from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
+from wind_platform.services.pressure_location import match_pressure
+
+
+@pytest.mark.parametrize(
+    ("place", "level", "station", "pressure"),
+    [
+        ("河北省张家口市怀来县", "county", "怀来", 0.35),
+        ("河北 · 张家口", "city", "张家口市", 0.55),
+        ("河北省张家口市崇礼区", "city", "张家口市", 0.55),
+        ("河北省", "province", "石家庄市", 0.35),
+        ("重庆市奉节县", "county", "奉节", 0.35),
+        ("吉林市", "city", "吉林市", 0.50),
+        ("吉林省", "province", "长春市", 0.65),
+    ],
+)
+def test_pressure_lookup_uses_supplied_station_table(place, level, station, pressure):
+    result = match_pressure(place)
+    assert (result["level"], result["name"], result["pressure"]) == (level, station, pressure)
+    assert "elevation" not in result
+
+
+def test_pressure_lookup_leaves_unknown_place_empty():
+    assert match_pressure("未知县") is None
+    assert match_pressure("未知省张家口市") is None
 
 
 def test_versioned_mesoscale_download_and_export(tmp_path):
@@ -99,6 +123,33 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     output = client.get("/api/v1/reports/assessment/runs/" + run.json()["id"]).json()
     assert output["year"] == data["year"]
     assert output["extreme"]["adopted"] is None and output["extreme"]["multiplier"] == 5
+
+    place = "河北省张家口市怀来县"
+    lookup = client.get("/api/v1/reports/assessment/pressure-match", params={"place": place}).json()
+    assert lookup["station"]["pressure"] == 0.35
+    location_options = {"source_id": data["id"], "density": 1.2, "extreme": {"place": place}}
+    location_run = client.post("/api/v1/reports/assessment/runs", json=location_options)
+    location_result = client.get(
+        "/api/v1/reports/assessment/runs/" + location_run.json()["id"]
+    ).json()["extreme"]["station"]
+    assert location_result["pressure"] == 0.35 and location_result["requested_place"] == place
+
+    location_options["extreme"]["pressure_override"] = 0.60
+    manual_run = client.post("/api/v1/reports/assessment/runs", json=location_options)
+    manual = client.get("/api/v1/reports/assessment/runs/" + manual_run.json()["id"]).json()[
+        "extreme"
+    ]
+    assert manual["station"]["matched_pressure"] == 0.35
+    assert manual["station"]["manual"] and manual["adopted"] == pytest.approx((1600 * 0.60) ** 0.5)
+    manual_word = client.post(
+        path + "/export",
+        data={**location_options, "extreme": dumps(location_options["extreme"])},
+    )
+    assert manual_word.status_code == 200
+    manual_text = "\n".join(p.text for p in Document(BytesIO(manual_word.content)).paragraphs)
+    assert "采用手动填写的风压" in manual_text
+    assert "河北怀来站的 0.35 kN/m²" in manual_text
+    assert "30.98 m/s" in manual_text
     assert [len(table["rows"]) for table in output["tables"].values()] == [13, 24, 27, 16, 16]
     for index, table in enumerate(output["tables"].values(), 1):
         assert table["rows"] == [

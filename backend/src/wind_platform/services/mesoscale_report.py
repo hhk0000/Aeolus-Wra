@@ -316,6 +316,29 @@ def assessment_charts(series, fit):
         }
 
 
+def pressure_result_text(station, speed):
+    if station is None:
+        return "尚未取得基本风压，风压法结果待补。"
+    name = station["name"]
+    province = station.get("province", "")
+    if station.get("manual"):
+        source = "采用手动填写的风压。"
+        if station["matched_pressure"] is not None:
+            source += f"风压库参考为{province}{name}站的 {station['matched_pressure']:g} kN/m²。"
+    elif province:
+        level = {"county": "区县", "city": "市级", "province": "省级参考站"}[station["level"]]
+        source = f"按{level}匹配，采用风压库中的{province}{name}站。"
+    else:
+        source = (
+            f"采用风压库《{station['library']}》的{name}站"
+            f"（经度 {station['lon']:g}°，纬度 {station['lat']:g}°）。"
+        )
+    return (
+        f"{source}50 年一遇基本风压为 {station['pressure']:g} kN/m²，"
+        f"换算参考风速为 {speed:.2f} m/s。"
+    )
+
+
 def build(
     template,
     raw,
@@ -574,14 +597,7 @@ def build(
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
-    fields["风压法结果"] = (
-        f"采用风压库《{pressure_station['library']}》的{pressure_station['name']}站"
-        f"（经度 {pressure_station['lon']:g}°，纬度 {pressure_station['lat']:g}°）。"
-        f"50 年一遇基本风压为 {pressure_station['pressure']:g} kN/m²，"
-        f"换算参考风速为 {extreme['pressure_standard']:.2f} m/s。"
-        if pressure_station
-        else "未选定风压库站点，风压法结果待补。"
-    )
+    fields["风压法结果"] = pressure_result_text(pressure_station, extreme["pressure_standard"])
     fields["倍数法结果"] = (
         f"{year} 年分析高度 {height} m 的年平均风速为 {extreme['mean_speed']:.2f} m/s，"
         f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"

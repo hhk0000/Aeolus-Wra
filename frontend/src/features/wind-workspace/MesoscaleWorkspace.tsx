@@ -558,7 +558,9 @@ export default function MesoscaleWorkspace({
       const href = URL.createObjectURL(await response.blob());
       const anchor = document.createElement("a");
       anchor.href = href;
-      anchor.download = (project || "风资源评估") + "中尺度风资源分析报告.docx";
+      anchor.download = project
+        ? project + "风资源评估报告.docx"
+        : "风资源评估报告.docx";
       anchor.click();
       setTimeout(() => URL.revokeObjectURL(href), 30000);
     } catch (cause) {

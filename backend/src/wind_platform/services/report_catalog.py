@@ -2,13 +2,17 @@
 
 import hashlib
 import json
+from functools import partial
 from pathlib import Path
 
 from wind_platform.core.calculations import CalculationError
 from wind_platform.services import mesoscale_report
 
 ROOT = Path(__file__).resolve().parents[1] / "report_templates"
-RENDERERS = {"mesoscale-v1": mesoscale_report.build}
+RENDERERS = {
+    "mesoscale-v1": mesoscale_report.build,
+    "mesoscale-formal": partial(mesoscale_report.build, formal_layout=True),
+}
 
 
 def catalog():

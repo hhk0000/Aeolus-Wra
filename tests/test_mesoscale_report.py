@@ -38,7 +38,7 @@ def test_pressure_lookup_leaves_unknown_place_empty():
 def test_versioned_mesoscale_download_and_export(tmp_path):
     client = TestClient(create_app(tmp_path))
     entry = client.get("/api/v1/reports/templates").json()[0]
-    path = f"/api/v1/reports/templates/{entry['id']}/{entry['version']}"
+    path = f"/api/v1/reports/templates/{entry['id']}/1.1.0"
     source = client.get(path + "/source")
     with ZipFile(BytesIO(source.content)) as package:
         assert not any("comments" in name.lower() for name in package.namelist())
@@ -81,12 +81,31 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.1.0"
+    assert entry["version"] == "1.2.0"
     assert "五日雷暴法" not in text and "待补齐风压法结果" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
     assert doc.tables[1].rows[-1].cells[2].text == "84.00"
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
+    formal = client.post(
+        f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/export",
+        files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
+        data={"density": "1.2", "project": "测试场址"},
+    )
+    assert formal.status_code == 200
+    formal_doc = Document(BytesIO(formal.content))
+    assert len(formal_doc.inline_shapes) == 7
+    assert formal_doc.tables[3].rows[1].cells[0].text == "0"
+    assert "尾流后理论年发电量合计为 10000.00 MWh" in "\n".join(
+        p.text for p in formal_doc.paragraphs
+    )
+    for shape in formal_doc.inline_shapes:
+        assert shape.width == 5040000
+        picture = shape._inline.graphic.graphicData.pic
+        assert picture.spPr.xpath("./a:ln")[0].get("w") == "6350"
+        part = formal_doc.part.related_parts[picture.blipFill.blip.embed]
+        with Image.open(BytesIO(part.blob)) as image:
+            assert shape.width / shape.height == pytest.approx(image.width / image.height)
     assert all(s.width == 5040000 for s in doc.inline_shapes)
     assert len(doc.inline_shapes) == 11
     roses = {

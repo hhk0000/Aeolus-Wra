@@ -11,7 +11,7 @@ import numpy as np
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
-from docx.shared import Emu, RGBColor
+from docx.shared import Cm, Emu, RGBColor
 from PIL import Image, ImageDraw, ImageFont
 
 from wind_platform.core.calculations import (
@@ -24,6 +24,7 @@ from wind_platform.core.calculations import (
 from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import decode_text, preview, split_line
 from wind_platform.services.assessment_extreme import DEFAULT_MULTIPLIER, extreme_wind
+from wind_platform.services.mesoscale_word_charts import formal_figure
 
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
@@ -494,6 +495,7 @@ def build(
     extreme_multiplier=DEFAULT_MULTIPLIER,
     pressure_station=None,
     weibull_method="mle",
+    formal_layout=False,
 ):
     if weibull_method not in WEIBULL_METHOD_LABELS:
         raise CalculationError("请选择有效的威布尔拟合算法。")
@@ -770,6 +772,9 @@ def build(
         unused._tr.getparent().remove(unused._tr)
     for table_index, table in enumerate(tables.values(), 1):
         for row_index, values in enumerate(table["rows"], 1):
+            if formal_layout and table_index == 3 and row_index <= 26:
+                center = str(row_index - 1) if row_index < 26 else "25（≥24.5）"
+                values = [center, *values[1:]]
             row(table_index, row_index, values)
     shapes = {s._inline.docPr.name: s for s in doc.inline_shapes}
 
@@ -785,10 +790,43 @@ def build(
     for title, labels, ss, kind in series:
         caption = "资料期各年平均风速图" if kind == "annual" and short_window else title
         fit_label = WEIBULL_METHOD_LABELS[weibull_method] if kind == "fit" else None
+        shape = shapes[title]
+        if formal_layout:
+            if kind == "line" and len(labels) == 12:
+                labels = [f"{month}月" for month in labels]
+            elif kind == "freq":
+                has_tail = any(values[-1] > 0 for _, values in ss)
+                labels = [*range(25), "25+" if has_tail else "25"]
+                ss = [(name, [*values[:25], sum(values[25:])]) for name, values in ss]
+            png = formal_figure(
+                labels,
+                ss,
+                kind,
+                ratio=shape.width / shape.height,
+                compass=COMPASS,
+                direction=direction,
+                fit=fit,
+                stats=stats,
+                fit_label=fit_label,
+            )
+            shape.width = Cm(14)
+            border = shape._inline.graphic.graphicData.pic.spPr
+            for existing in border.xpath("./a:ln"):
+                border.remove(existing)
+            line = OxmlElement("a:ln")
+            line.set("w", "6350")
+            fill = OxmlElement("a:solidFill")
+            color = OxmlElement("a:srgbClr")
+            color.set("val", "000000")
+            fill.append(color)
+            line.append(fill)
+            border.append(line)
+        else:
+            png = figure(caption, labels, ss, kind, fit_label=fit_label)
         bind_image(
-            shapes[title],
-            figure(caption, labels, ss, kind, fit_label=fit_label),
-            preserve_ratio=kind in ("rose", "freq", "fit"),
+            shape,
+            png,
+            preserve_ratio=formal_layout or kind in ("rose", "freq", "fit"),
         )
         if fit_label:
             shapes[title]._inline.docPr.set("descr", fit_label)
@@ -812,10 +850,11 @@ def build(
                 figure(new.docPr.name, COMPASS, [("", longdir)], "rose"),
                 preserve_ratio=True,
             )
-    for heading, field, title in (
+    supplemental_figures = (
         ("风能频率分布", "frequency", "各月风向频率玫瑰图"),
         ("威布尔分布", "energy_frequency", "各月风能频率玫瑰图"),
-    ):
+    )
+    for heading, field, title in () if formal_layout else supplemental_figures:
         anchor = next((p for p in doc.paragraphs if p.text.strip() == heading), None)
         if anchor is None:
             continue
@@ -835,6 +874,19 @@ def build(
     from wind_platform.services.mesoscale_energy import energy_table
 
     fields.update(energy_table(doc, energy_file, factor, fill_cell))
+    if formal_layout:
+        for frequencies_at_bins, field in (
+            (f, "风速频率最高区间"),
+            (e, "风能频率最高区间"),
+        ):
+            center = np.argmax([*frequencies_at_bins[:25], sum(frequencies_at_bins[25:])])
+            fields[field] = f"{center} m/s 档" if center < 25 else "≥24.5 m/s（25 m/s 档）"
+        fields["理论发电量汇总"] = (
+            f"尾流后理论年发电量合计为 {fields['理论电量合计']} MWh，"
+            f"单机平均为 {fields['单机理论电量均值']} MWh。"
+            if "理论电量合计" in fields
+            else ""
+        )
     # Sensitivity methodology has not been approved; suppress the reference project's numbers.
     for rr in doc.tables[7].rows[2:]:
         for cc in rr.cells:

@@ -79,6 +79,8 @@ def energy_table(doc, raw, factor, fill):
     for i, value in [(8, base / len(rows)), (9, net / len(rows)), (10, net / mw)]:
         fill(total_cells[i], f"{value:.2f}")
     return {
+        "理论电量合计": f"{base:.2f}",
+        "单机理论电量均值": f"{base / len(rows):.2f}",
         "年上网电量": f"{net / 10:.2f}",
         "年装机满发利用小时": f"{net / mw:.1f}",
         "容量系数": f"{net / mw / 8760:.3f}",

@@ -9,7 +9,7 @@ from io import BytesIO
 import numpy as np
 from docx import Document
 from docx.oxml import OxmlElement
-from docx.shared import RGBColor
+from docx.shared import Emu, RGBColor
 from PIL import Image, ImageDraw, ImageFont
 
 from wind_platform.core.calculations import (
@@ -434,13 +434,15 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
 
     replaced_rids = set()
 
-    def bind_image(shape, png):
+    def bind_image(shape, png, *, preserve_ratio=False):
         replaced_rids.add(shape._inline.graphic.graphicData.pic.blipFill.blip.embed)
-        rid, _ = doc.part.get_or_add_image(BytesIO(png))
+        rid, image = doc.part.get_or_add_image(BytesIO(png))
         shape._inline.graphic.graphicData.pic.blipFill.blip.embed = rid
+        if preserve_ratio:
+            shape.height = Emu(round(shape.width * image.px_height / image.px_width))
 
     for title, labels, ss, kind in series:
-        bind_image(shapes[title], figure(title, labels, ss, kind))
+        bind_image(shapes[title], figure(title, labels, ss, kind), preserve_ratio=kind == "rose")
     if not fit:
         shape = shapes["威布尔分布图"]._inline
         replaced_rids.add(shape.graphic.graphicData.pic.blipFill.blip.embed)
@@ -456,7 +458,11 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
             drawing.append(new)
             from docx.shape import InlineShape
 
-            bind_image(InlineShape(new), figure(new.docPr.name, COMPASS, [("", longdir)], "rose"))
+            bind_image(
+                InlineShape(new),
+                figure(new.docPr.name, COMPASS, [("", longdir)], "rose"),
+                preserve_ratio=True,
+            )
     from wind_platform.services.mesoscale_energy import energy_table
 
     fields.update(energy_table(doc, energy_file, factor, fill_cell))

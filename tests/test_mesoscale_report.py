@@ -4,6 +4,7 @@ from zipfile import ZipFile
 import pytest
 from docx import Document
 from fastapi.testclient import TestClient
+from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
 from wind_platform.services.mesoscale_report import hourly_records
@@ -39,6 +40,19 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     assert all(s.width == 5040000 for s in doc.inline_shapes)
     assert len(doc.inline_shapes) == 10
+    roses = {
+        shape._inline.docPr.name: shape
+        for shape in doc.inline_shapes
+        if "玫瑰图" in shape._inline.docPr.name
+    }
+    assert set(roses) == {"风向频率玫瑰图", "风能频率玫瑰图", "20年风向频率玫瑰图"}
+    for shape in roses.values():
+        drawing = shape._inline.graphic.graphicData.pic
+        assert drawing.xpath("./pic:spPr/a:ln")
+        image_part = doc.part.related_parts[drawing.blipFill.blip.embed]
+        with Image.open(BytesIO(image_part.blob)) as image:
+            assert shape.height == round(shape.width * image.height / image.width)
+        assert drawing.spPr.xfrm.ext.cy == shape.height
     saved = client.post(
         "/api/v1/reports/assessment/files/source",
         files={"file": ("greenwich.txt", "\n".join(rows).encode())},

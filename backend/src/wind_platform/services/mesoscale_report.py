@@ -213,7 +213,15 @@ def figure(title, labels, series, kind):
                     prev = None
                     continue
                 yy = 465 - 370 * val / limit
-                if kind in ("annual", "freq", "fit") and j == 0:
+                if kind == "freq":
+                    half_width = (x[1] - x[0]) * 0.18
+                    offset = half_width * (-1.15 if j == 0 else 1.15)
+                    if val > 0:
+                        draw.rectangle(
+                            (xi + offset - half_width, yy, xi + offset + half_width, 465),
+                            fill=colors[j],
+                        )
+                elif kind in ("annual", "fit") and j == 0:
                     draw.rectangle((xi - 6, yy, xi + 6, 465), fill=colors[j])
                 else:
                     if prev:
@@ -340,12 +348,50 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
                 "fit",
             )
         )
+    metrics = ["平均风速（m/s）", "平均风功率密度（W/m²）"]
+    tables = {
+        "风速和风功率密度月变化图": {
+            "headers": ["月份", *metrics],
+            "rows": [
+                [f"{i}月", fmt(speed), fmt(power)] for i, (speed, power) in enumerate(months, 1)
+            ]
+            + [["全年平均", fields["年平均风速"], fields["年平均风功率密度"]]],
+            "summary_rows": 1,
+        },
+        "风速和风功率密度日变化图": {
+            "headers": ["时段", *metrics],
+            "rows": [[str(i), fmt(speed), fmt(power)] for i, (speed, power) in enumerate(hours)],
+        },
+        "风速和风能频率图": {
+            "headers": ["风速区间", "风速分布频率", "风功率分布频率"],
+            "rows": [
+                [r["label"], fmt(f[i]) + "%", fmt(e[i]) + "%"] for i, r in enumerate(freq[:25])
+            ]
+            + [
+                [">=24.5", fmt(sum(f[25:])) + "%", fmt(sum(e[25:])) + "%"],
+                ["3～25 m/s", fields["区间风速频率"] + "%", fields["区间风能频率"] + "%"],
+            ],
+            "summary_rows": 1,
+        },
+        "风向频率玫瑰图": {
+            "headers": ["风向", "风向频率"],
+            "rows": [
+                [label, fmt(value) + "%"] for label, value in zip(COMPASS, direction, strict=True)
+            ],
+        },
+        "风能频率玫瑰图": {
+            "headers": ["风向", "风能频率"],
+            "rows": [
+                [label, fmt(value) + "%"] for label, value in zip(COMPASS, energy, strict=True)
+            ],
+        },
+    }
     if template is None:
         return {
             "year": year,
             "height": float(height),
             "fields": fields,
-            "monthly": [[fmt(speed), fmt(power)] for speed, power in months],
+            "tables": tables,
             "charts": [
                 {
                     "title": title,
@@ -381,19 +427,9 @@ def build(template, raw, rho, project, factor=75.0, energy_file=None, location=N
             ],
         )
     row(0, 12, ["20年平均", fmt(avg), "10年平均", fields["10年平均风速"]])
-    for i, (s, p) in enumerate(months):
-        row(1, i + 1, [f"{i + 1}月", fmt(s), fmt(p)])
-    row(1, 13, ["全年平均", fields["年平均风速"], fields["年平均风功率密度"]])
-    for i, (s, p) in enumerate(hours):
-        row(2, i + 1, [i, fmt(s), fmt(p)])
-    # The sample has 26 data rows. Pool both upper-tail bins in its final row.
-    for i, r in enumerate(freq[:25]):
-        row(3, i + 1, [r["label"], fmt(f[i]) + "%", fmt(e[i]) + "%"])
-    row(3, 26, [">=24.5", fmt(sum(f[25:])) + "%", fmt(sum(e[25:])) + "%"])
-    row(3, 27, ["3～25 m/s", fields["区间风速频率"] + "%", fields["区间风能频率"] + "%"])
-    for i, label in enumerate(COMPASS):
-        row(4, i + 1, [label, fmt(direction[i]) + "%"])
-        row(5, i + 1, [label, fmt(energy[i]) + "%"])
+    for table_index, table in enumerate(tables.values(), 1):
+        for row_index, values in enumerate(table["rows"], 1):
+            row(table_index, row_index, values)
     shapes = {s._inline.docPr.name: s for s in doc.inline_shapes}
 
     replaced_rids = set()

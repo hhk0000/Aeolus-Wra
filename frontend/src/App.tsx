@@ -950,6 +950,7 @@ function WorkspaceApp() {
               {reportType && reportType !== "风资源评估" && page === 2 && (
                 <ResultsWorkspace
                   key={workspaceId}
+                  includeExtremePlaceholder={reportType === "初设"}
                   projectId={workspaceId}
                   concurrentJobId={galleryJobId}
                   galleryTarget={galleryTarget}

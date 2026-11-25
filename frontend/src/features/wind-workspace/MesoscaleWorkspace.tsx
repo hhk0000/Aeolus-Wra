@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 type Source = {
@@ -31,7 +31,14 @@ type Assessment = {
 type Result = {
   year: number;
   height: number;
-  monthly: [string, string][];
+  tables?: Record<
+    string,
+    {
+      headers: string[];
+      rows: string[][];
+      summary_rows?: number;
+    }
+  >;
   charts: { title: string; image: string }[];
 };
 type Template = { id: string; version: string; title: string };
@@ -46,6 +53,20 @@ const titles = [
   "威布尔分布图",
   "五十年极大风速",
 ];
+const shortTitles = Object.fromEntries(
+  titles.map((title, index) => [
+    title,
+    [
+      "风速与功率密度月变化",
+      "风速与功率密度日变化",
+      "风速与风能频率",
+      "风向频率玫瑰图",
+      "风能频率玫瑰图",
+      "威布尔分布",
+      "五十年极大风速",
+    ][index],
+  ]),
+);
 const initial: Assessment = {
   density: "",
   factor: "75",
@@ -85,6 +106,7 @@ export default function MesoscaleWorkspace({
   const [error, setError] = useState("");
   const [resultError, setResultError] = useState("");
   const [busy, setBusy] = useState(false);
+  const removeDialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     try {
@@ -96,17 +118,44 @@ export default function MesoscaleWorkspace({
   useEffect(() => {
     if (page !== 2 || !state.runId) return;
     const controller = new AbortController();
+    const runId = state.runId;
+    const sourceId = state.source?.id;
+    const density = Number(state.density);
     void api<Result>(
-      "/reports/assessment/runs/" + state.runId,
+      "/reports/assessment/runs/" + runId,
       undefined,
       controller.signal,
     )
-      .then(setResult)
+      .then(async (saved) => {
+        if (controller.signal.aborted) return;
+        if (!saved.tables && sourceId && density > 0 && density < 3) {
+          const refreshed = await api<{ id: string }>(
+            "/reports/assessment/runs",
+            {
+              source_id: sourceId,
+              density,
+            },
+            controller.signal,
+          );
+          if (!controller.signal.aborted) {
+            setState((current) =>
+              current.runId === runId &&
+              current.source?.id === sourceId &&
+              Number(current.density) === density
+                ? { ...current, runId: refreshed.id }
+                : current,
+            );
+          }
+          return;
+        }
+        setResultError("");
+        setResult(saved);
+      })
       .catch((cause: Error) => {
         if (!controller.signal.aborted) setResultError(cause.message);
       });
     return () => controller.abort();
-  }, [page, state.runId]);
+  }, [page, state.runId, state.source?.id, state.density]);
   useEffect(() => {
     if (page !== 3) return;
     const controller = new AbortController();
@@ -131,6 +180,21 @@ export default function MesoscaleWorkspace({
 
   function change(values: Partial<Assessment>) {
     setState((current) => ({ ...current, ...values }));
+  }
+
+  function removeSource() {
+    removeDialog.current?.close();
+    setError("");
+    setResultError("");
+    setResult(undefined);
+    change({
+      source: undefined,
+      runId: undefined,
+      manualLocation: false,
+      lat: "",
+      lon: "",
+      alt: "",
+    });
   }
 
   async function upload(file: File | undefined, kind: "source" | "energy") {
@@ -299,9 +363,11 @@ export default function MesoscaleWorkspace({
                     type="file"
                     accept=".txt"
                     disabled={busy}
-                    onChange={(event) =>
-                      void upload(event.target.files?.[0], "source")
-                    }
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      void upload(file, "source");
+                    }}
                   />
                 </label>
                 <p className="ww-inline-note">
@@ -309,10 +375,51 @@ export default function MesoscaleWorkspace({
                 </p>
                 {busy && <p role="status">正在读取资料…</p>}
                 {source && (
-                  <p>
-                    {source.name} · {source.height} m ·{" "}
-                    {source.first.slice(0, 10)} 至 {source.last.slice(0, 10)}
-                  </p>
+                  <div className="ww-assessment-file">
+                    <div>
+                      <strong>{source.name}</strong>
+                      <p>
+                        {source.height} m · {source.first.slice(0, 10)} 至{" "}
+                        {source.last.slice(0, 10)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ww-button project-delete-confirm"
+                      disabled={busy}
+                      onClick={() => removeDialog.current?.showModal()}
+                    >
+                      删除资料
+                    </button>
+                    <dialog
+                      ref={removeDialog}
+                      className="modal ww-concurrent-task-dialog"
+                      aria-labelledby="assessment-remove-title"
+                    >
+                      <h2 id="assessment-remove-title">删除中尺度资料</h2>
+                      <p>
+                        从当前工作区移除「{source.name}
+                        」，并清空当前分析结果。原始文件和历史计算记录会保留。
+                      </p>
+                      <div className="project-delete-actions">
+                        <button
+                          type="button"
+                          className="ww-button"
+                          autoFocus
+                          onClick={() => removeDialog.current?.close()}
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          className="ww-button project-delete-confirm"
+                          onClick={removeSource}
+                        >
+                          确认删除
+                        </button>
+                      </div>
+                    </dialog>
+                  </div>
                 )}
                 {source?.coverage_error && (
                   <p className="ww-error" role="alert">
@@ -578,6 +685,7 @@ export default function MesoscaleWorkspace({
     const shown = titles.filter((title) => !state.hidden.includes(title));
     const active = shown.includes(chosen) ? chosen : shown[0];
     const chart = result?.charts.find((entry) => entry.title === active);
+    const statistics = active ? result?.tables?.[active] : undefined;
     return (
       <div className="ww-results ww-assessment">
         <div className="ww-gallery-filter">
@@ -589,15 +697,21 @@ export default function MesoscaleWorkspace({
           )}
         </div>
         <div className="ww-gallery-layout">
-          <aside className="ww-chart-list">
+          <aside
+            className="ww-chart-list ww-assessment-nav"
+            aria-label="资源评估成果"
+          >
             {shown.map((title) => (
               <button
                 key={title}
                 type="button"
                 className={title === active ? "active" : ""}
+                aria-label={title}
+                title={title}
+                aria-current={title === active ? "true" : undefined}
                 onClick={() => setChosen(title)}
               >
-                {title}
+                <strong>{shortTitles[title]}</strong>
               </button>
             ))}
           </aside>
@@ -621,25 +735,45 @@ export default function MesoscaleWorkspace({
                   src={"data:image/png;base64," + chart.image}
                   alt={chart.title}
                 />
-                {active === titles[0] && (
-                  <table className="ww-result-table">
-                    <thead>
-                      <tr>
-                        <th>月份</th>
-                        <th>平均风速（m/s）</th>
-                        <th>风功率密度（W/m²）</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {result.monthly.map(([speed, power], index) => (
-                        <tr key={index}>
-                          <td>{index + 1} 月</td>
-                          <td>{speed}</td>
-                          <td>{power}</td>
+                {statistics && (
+                  <div className="ww-table-scroll ww-assessment-table">
+                    <table className="ww-result-table">
+                      <caption>报告统计表</caption>
+                      <colgroup>
+                        {statistics.headers.map((header) => (
+                          <col key={header} />
+                        ))}
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          {statistics.headers.map((header) => (
+                            <th scope="col" key={header}>
+                              {header}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {statistics.rows.map(([label, ...values], index) => (
+                          <tr
+                            key={label}
+                            className={
+                              index >=
+                              statistics.rows.length -
+                                (statistics.summary_rows ?? 0)
+                                ? "ww-assessment-total"
+                                : undefined
+                            }
+                          >
+                            <th scope="row">{label}</th>
+                            {values.map((value, column) => (
+                              <td key={column}>{value}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </>
             )}

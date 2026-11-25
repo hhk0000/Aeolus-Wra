@@ -59,7 +59,11 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert run.status_code == 200
     output = client.get("/api/v1/reports/assessment/runs/" + run.json()["id"]).json()
     assert output["year"] == data["year"]
-    assert len(output["monthly"]) == 12
+    assert [len(table["rows"]) for table in output["tables"].values()] == [13, 24, 27, 16, 16]
+    for index, table in enumerate(output["tables"].values(), 1):
+        assert table["rows"] == [
+            [cell.text for cell in row.cells] for row in doc.tables[index].rows[1:]
+        ]
     assert len(output["charts"]) == 6
     archive_export = client.post(path + "/export", data={"source_id": data["id"], "density": "1.2"})
     assert archive_export.status_code == 200

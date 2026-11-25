@@ -2844,3 +2844,94 @@
   height: auto;
   margin: 0 auto 1rem;
 }
+
+.ww-assessment-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--ww-line);
+  border-radius: 10px;
+  background: var(--ui-soft);
+}
+.ww-assessment-file > div {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.ww-assessment-file strong {
+  overflow-wrap: anywhere;
+}
+.ww-assessment-file p {
+  margin: 4px 0 0;
+}
+.ww-assessment-file > button {
+  white-space: nowrap;
+}
+.ww-results.ww-assessment {
+  container-type: inline-size;
+}
+.ww-assessment .ww-gallery-layout {
+  grid-template-columns: 204px minmax(0, 1fr);
+}
+.ww-assessment .ww-assessment-nav {
+  display: grid;
+  gap: 4px;
+}
+.ww-assessment-nav button {
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+.ww-assessment-nav strong {
+  font-size: 13px;
+}
+@container (max-width: 760px) {
+  .ww-assessment .ww-gallery-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ww-assessment .ww-assessment-nav {
+    position: static;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+  }
+  .ww-assessment-nav button {
+    flex: 0 0 auto;
+  }
+}
+.ww-assessment .ww-assessment-table {
+  margin: 1.25rem 0;
+  background: var(--ui-paper);
+}
+.ww-assessment-table .ww-result-table {
+  width: 100%;
+  table-layout: fixed;
+}
+.ww-assessment-table .ww-result-table:has(col:nth-child(3)) {
+  min-width: 440px;
+}
+.ww-assessment-table col:first-child:has(~ col:nth-child(3)) {
+  width: 24%;
+}
+.ww-assessment-table caption {
+  padding: 11px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  color: var(--ui-ink);
+}
+.ww-assessment-table .ww-result-table :is(th, td) {
+  text-align: center;
+  padding: 9px clamp(10px, 2vw, 24px);
+}
+.ww-assessment-table .ww-result-table th[scope="row"] {
+  background: transparent;
+  font-weight: 500;
+}
+.ww-assessment-table .ww-result-table .ww-assessment-total :is(th, td) {
+  background: var(--ui-sage-soft);
+  font-weight: 700;
+}

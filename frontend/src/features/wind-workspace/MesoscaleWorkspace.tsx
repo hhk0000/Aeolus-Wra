@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Plot } from "./InteractiveResultView";
 import { RoseChart } from "./RoseChart";
+import { weibullMethods, type WeibullMethod } from "./weibullMethods";
 
 type Source = {
   id: string;
@@ -38,6 +39,7 @@ type Assessment = {
   lon: string;
   alt: string;
   runId?: string;
+  weibullMethod?: WeibullMethod;
   analysisYear?: number;
   hidden: string[];
 };
@@ -87,6 +89,7 @@ type Result = {
   extreme?: {
     station: (PressureStation & { library: string }) | null;
     mean_speed: number;
+    mean_speed_used?: number;
     density: number;
     multiplier: number;
     site_speed: number;
@@ -112,6 +115,7 @@ type Result = {
     energy?: boolean;
     fit?: Record<string, unknown>;
   }[];
+  weibull_charts?: Partial<Record<WeibullMethod, Result["charts"][number]>>;
 };
 type Template = { id: string; version: string; title: string };
 
@@ -332,8 +336,9 @@ export default function MesoscaleWorkspace({
         if (
           (!saved.tables ||
             usesReportImages ||
-            !saved.extreme ||
-            !saved.monthly_roses) &&
+            saved.extreme?.mean_speed_used === undefined ||
+            !saved.monthly_roses ||
+            !saved.weibull_charts) &&
           sourceId &&
           density > 0 &&
           density < 3
@@ -500,7 +505,7 @@ export default function MesoscaleWorkspace({
       });
       setResult(undefined);
       setResultError("");
-      change({ runId: run.id });
+      change({ runId: run.id, weibullMethod: undefined });
       onNavigate(2);
     } catch (cause) {
       setError((cause as Error).message);
@@ -522,6 +527,9 @@ export default function MesoscaleWorkspace({
       }
       form.set("factor", state.factor);
       form.set("project", project);
+      if (state.weibullMethod && state.weibullMethod !== "mle") {
+        form.set("weibull_method", state.weibullMethod);
+      }
       form.set("extreme", JSON.stringify(extremeOptions));
       if (state.energy) form.set("energy_id", state.energy.id);
       if (automaticLocation || state.manualLocation) {
@@ -1092,7 +1100,14 @@ export default function MesoscaleWorkspace({
   if (page === 2) {
     const shown = titles.filter((title) => !state.hidden.includes(title));
     const active = shown.includes(chosen) ? chosen : shown[0];
-    const chart = result?.charts.find((entry) => entry.title === active);
+    const defaultChart = result?.charts.find((entry) => entry.title === active);
+    const isWeibull = active === "威布尔分布图";
+    const preferredMethod = state.weibullMethod ?? "mle";
+    const alternate = isWeibull
+      ? result?.weibull_charts?.[preferredMethod]
+      : undefined;
+    const chart = alternate ?? defaultChart;
+    const method = alternate ? preferredMethod : "mle";
     const statistics = active ? result?.tables?.[active] : undefined;
     return (
       <div className="ww-results ww-assessment">
@@ -1135,7 +1150,44 @@ export default function MesoscaleWorkspace({
             ))}
           </aside>
           <section className="ww-panel ww-chart-stage">
-            {active && <h2>{active}</h2>}
+            {active && (
+              <div className="ww-assessment-chart-heading">
+                <h2>{active}</h2>
+                {isWeibull &&
+                  result?.weibull_charts &&
+                  (chart || Object.keys(result.weibull_charts).length > 0) && (
+                    <label>
+                      拟合算法
+                      <select
+                        value={method}
+                        onChange={(event) =>
+                          change({
+                            weibullMethod: event.target.value as WeibullMethod,
+                          })
+                        }
+                      >
+                        {Object.entries(weibullMethods).map(
+                          ([value, label]) => (
+                            <option
+                              key={value}
+                              value={value}
+                              disabled={
+                                value === "mle"
+                                  ? !defaultChart
+                                  : !result.weibull_charts?.[
+                                      value as WeibullMethod
+                                    ]
+                              }
+                            >
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  )}
+              </div>
+            )}
             {resultError ? (
               <p role="alert">{resultError}</p>
             ) : !state.runId ? (
@@ -1166,7 +1218,9 @@ export default function MesoscaleWorkspace({
                       fit={chart.fit}
                       fitMethod={
                         chart.plot === "weibull"
-                          ? "二参数最大似然法（MLE）"
+                          ? method === "mle"
+                            ? "二参数最大似然法（MLE）"
+                            : weibullMethods[method]
                           : undefined
                       }
                     />
@@ -1357,12 +1411,12 @@ function ExtremeWindResult({
               <th scope="col">方法</th>
               <th scope="col">计算依据</th>
               <th scope="col">
-                场址密度
+                场址密度风速
                 <br />
                 m/s
               </th>
               <th scope="col">
-                标准密度
+                标准密度风速
                 <br />
                 m/s
               </th>
@@ -1382,9 +1436,16 @@ function ExtremeWindResult({
               <th scope="row">平均风速倍数法</th>
               <td>
                 <strong>
-                  {result.mean_speed.toFixed(6)} m/s × {result.multiplier}
+                  {(result.mean_speed_used ?? result.mean_speed).toFixed(
+                    result.mean_speed_used === undefined ? 6 : 2,
+                  )}{" "}
+                  m/s × {result.multiplier}
                 </strong>
-                <small>使用原始均值计算，结果保留两位小数</small>
+                <small>
+                  {result.mean_speed_used === undefined
+                    ? "历史结果使用原始均值"
+                    : "平均风速保留两位小数后乘倍数"}
+                </small>
               </td>
               <td>{result.site_speed.toFixed(2)}</td>
               <td>{result.multiplier_standard.toFixed(2)}</td>

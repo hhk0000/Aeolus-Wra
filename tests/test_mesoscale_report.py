@@ -176,6 +176,14 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert direction["rows"][0]["degrees"] == 0
     assert energy["energy"] is True
     assert fit["fit"]["k"] > 0
+    alternatives = output["weibull_charts"]
+    assert set(alternatives) == {"least-squares", "moments", "energy"}
+    for alternate in alternatives.values():
+        assert alternate["fit"]["positive_count"] == fit["fit"]["positive_count"]
+        assert [row["frequency"] for row in alternate["rows"]] == [
+            row["frequency"] for row in fit["rows"]
+        ]
+    assert alternatives["moments"]["fit"]["k"] != pytest.approx(fit["fit"]["k"])
     assert all("image" not in chart for chart in output["charts"])
     extreme = {
         "pressure_library_id": library["id"],
@@ -199,10 +207,13 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     ).json()["extreme"]
     assert selected_result["adopted"] == selected_result["multiplier_standard"]
     archive_export = client.post(
-        path + "/export", data={**options, "extreme": dumps(options["extreme"])}
+        path + "/export",
+        data={**options, "extreme": dumps(options["extreme"]), "weibull_method": "moments"},
     )
     assert archive_export.status_code == 200
-    extracted = "\n".join(p.text for p in Document(BytesIO(archive_export.content)).paragraphs)
+    archive_doc = Document(BytesIO(archive_export.content))
+    extracted = "\n".join(p.text for p in archive_doc.paragraphs)
+    assert any(shape._inline.docPr.get("descr") == "矩估计" for shape in archive_doc.inline_shapes)
     assert "繁峙县" in extracted and "0.45 kN/m²" in extracted and "26.83 m/s" in extracted
     assert "等效参考风速为 27.11 m/s" in extracted
     assert "较大值 29.69 m/s" in extracted and "五日雷暴法" not in extracted
@@ -290,7 +301,7 @@ def test_ten_minute_assessment_uses_native_samples_and_real_hours(tmp_path):
         b"2023-01-01 00:00\t4\t0\n"
         b"2023-01-01 00:10\t5\t90\n"
         b"2023-01-01 00:20\t6\t90\n"
-        b"2023-12-31 23:50\t8\t180\n"
+        b"2023-12-31 23:50\t8.024\t180\n"
     )
     source = client.post(
         "/api/v1/reports/assessment/files/source", files={"file": ("10min.txt", raw)}
@@ -303,6 +314,9 @@ def test_ten_minute_assessment_uses_native_samples_and_real_hours(tmp_path):
     output = client.get(path + "/" + saved.json()["id"]).json()
     assert output["fields"]["时间步长"] == "10 min"
     assert output["fields"]["区间累计时数"] == "0.67"
+    assert output["extreme"]["mean_speed"] == pytest.approx(5.756)
+    assert output["extreme"]["mean_speed_used"] == 5.76
+    assert output["extreme"]["site_speed"] == pytest.approx(28.8)
     fit = next(chart["fit"] for chart in output["charts"] if chart["plot"] == "weibull")
     assert fit["positive_count"] == 4
     jan = output["monthly_roses"]

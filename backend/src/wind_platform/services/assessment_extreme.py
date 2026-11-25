@@ -1,6 +1,7 @@
 """Single-grid-point preliminary extreme wind methods."""
 
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from math import isfinite, sqrt
 
 from wind_platform.core.calculations import CalculationError
@@ -54,7 +55,8 @@ def pressure_site_speed(standard_speed, density):
 
 
 def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None):
-    site_speed = mean_speed * multiplier
+    mean_speed_used = float(Decimal(str(mean_speed)).quantize(Decimal("0.01"), ROUND_HALF_UP))
+    site_speed = mean_speed_used * multiplier
     multiplier_standard = site_speed * sqrt(density / STANDARD_DENSITY)
     if not isfinite(site_speed) or not isfinite(multiplier_standard):
         raise CalculationError("风速倍数过大，无法计算有效的风速。")
@@ -63,6 +65,7 @@ def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=Non
     return {
         "station": station,
         "mean_speed": mean_speed,
+        "mean_speed_used": mean_speed_used,
         "density": density,
         "multiplier": multiplier,
         "site_speed": site_speed,

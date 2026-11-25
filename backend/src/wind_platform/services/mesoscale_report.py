@@ -19,14 +19,20 @@ from wind_platform.core.calculations import (
     CalculationError,
     frequencies,
     rose,
-    weibull,
     wind_statistics,
 )
+from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import decode_text, preview, split_line
 from wind_platform.services.assessment_extreme import DEFAULT_MULTIPLIER, extreme_wind
 
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
+WEIBULL_METHOD_LABELS = {
+    "mle": "二参数最大似然法（MLE）",
+    "least-squares": "累计概率线性最小二乘",
+    "moments": "矩估计",
+    "energy": "均速与能量匹配",
+}
 
 
 def density_metadata(preamble):
@@ -240,8 +246,13 @@ def assessment_source(raw):
     }
 
 
-def figure(title, labels, series, kind):
-    im = Image.new("RGB", (1000, 570), "white")
+def figure(title, labels, series, kind, *, fit_label=None):
+    frequency_plot = kind in ("freq", "fit")
+    frequency_top = (
+        max(2, 2 * math.ceil(max(max(values) for _, values in series) / 2)) if frequency_plot else 0
+    )
+    chart_bottom = 95 + max(370, frequency_top // 2 * 24)
+    im = Image.new("RGB", (1000, chart_bottom + 105), "white")
     draw = ImageDraw.Draw(im)
     try:
         font = ImageFont.truetype("msyh.ttc", 20)
@@ -249,8 +260,8 @@ def figure(title, labels, series, kind):
         font = ImageFont.load_default(size=17)
     colors = ["#4F81BD", "#C0504D"]
     draw.text((45, 12), title, font=font, fill="black")
-    if kind == "fit":
-        draw.text((920, 12), "二参数最大似然法（MLE）", font=font, fill="#52665b", anchor="rt")
+    if fit_label:
+        draw.text((920, 12), fit_label, font=font, fill="#52665b", anchor="rt")
     if kind == "rose":
         vals = series[0][1]
         angles = np.arange(16) * np.pi / 8
@@ -274,17 +285,32 @@ def figure(title, labels, series, kind):
         draw.text((20, 515), f"外圈 {maximum:.1f}%", font=font, fill="black")
     else:
         x = np.linspace(83, 902, len(labels))
+        if frequency_plot:
+            axis_title = Image.new("RGBA", (180, 26))
+            ImageDraw.Draw(axis_title).text(
+                (90, 13), "风速频率（%）", font=font, fill=colors[0], anchor="mm"
+            )
+            vertical_title = axis_title.transpose(Image.Transpose.ROTATE_90)
+            im.paste(
+                vertical_title,
+                (2, (95 + chart_bottom - vertical_title.height) // 2),
+                vertical_title,
+            )
         for j, (name, values) in enumerate(series):
             values = np.array(values, dtype=float)
             limit = max(float(np.nanmax(values)) if np.isfinite(values).any() else 0, 1)
-            if kind in ("annual", "freq", "fit"):
+            if kind == "annual":
                 limit = max(1, max(max(s[1]) for s in series))
+            elif frequency_plot:
+                limit = frequency_top
             draw.text((50 + j * 470, 45), name, font=font, fill=colors[j])
             step = (
                 1
                 if kind == "annual" or kind == "line" and j == 0
                 else 100
                 if kind == "line"
+                else 2
+                if frequency_plot
                 else None
             )
             if step:
@@ -292,8 +318,8 @@ def figure(title, labels, series, kind):
                 ticks = range(0, limit + step, step)
             else:
                 ticks = np.linspace(0, limit, 6)
-            for tick in ticks:
-                y = 465 - 370 * tick / limit
+            for tick in ticks if not frequency_plot or j == 0 else ():
+                y = chart_bottom - (chart_bottom - 95) * tick / limit
                 if j == 0:
                     draw.line((70, y, 920, y), fill="#dddddd")
                 draw.text(
@@ -308,17 +334,17 @@ def figure(title, labels, series, kind):
                 if not np.isfinite(val):
                     prev = None
                     continue
-                yy = 465 - 370 * val / limit
+                yy = chart_bottom - (chart_bottom - 95) * val / limit
                 if kind == "freq":
                     half_width = (x[1] - x[0]) * 0.18
                     offset = half_width * (-1.15 if j == 0 else 1.15)
                     if val > 0:
                         draw.rectangle(
-                            (xi + offset - half_width, yy, xi + offset + half_width, 465),
+                            (xi + offset - half_width, yy, xi + offset + half_width, chart_bottom),
                             fill=colors[j],
                         )
                 elif kind in ("annual", "fit") and j == 0:
-                    draw.rectangle((xi - 6, yy, xi + 6, 465), fill=colors[j])
+                    draw.rectangle((xi - 6, yy, xi + 6, chart_bottom), fill=colors[j])
                 else:
                     if prev:
                         draw.line((*prev, xi, yy), fill=colors[j], width=4)
@@ -326,7 +352,9 @@ def figure(title, labels, series, kind):
                 prev = (xi, yy)
         for i, xi in enumerate(x):
             if len(labels) < 18 or i % 2 == 0:
-                draw.text((xi, 480), str(labels[i]), anchor="mt", font=font, fill="black")
+                draw.text(
+                    (xi, chart_bottom + 15), str(labels[i]), anchor="mt", font=font, fill="black"
+                )
     buf = BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue()
@@ -465,7 +493,10 @@ def build(
     *,
     extreme_multiplier=DEFAULT_MULTIPLIER,
     pressure_station=None,
+    weibull_method="mle",
 ):
+    if weibull_method not in WEIBULL_METHOD_LABELS:
+        raise CalculationError("请选择有效的威布尔拟合算法。")
     height, times, v, d, years, start, annual, avg, recommended_year, interval_minutes = hourly(raw)
     window_years = len(annual)
     end = start + window_years - 1
@@ -584,9 +615,13 @@ def build(
         fields[key + "最高时刻"] = f"{np.nanargmax(hours[:, j])}时"
         fields[key + "最低时刻"] = f"{np.nanargmin(hours[:, j])}时"
     try:
-        fit = weibull(a)
+        fit = fit_weibull(a, weibull_method)
     except CalculationError:
+        if weibull_method != "mle":
+            raise
         fit = None
+    except ValueError as exc:
+        raise CalculationError("当前风速样本无法使用所选威布尔算法拟合。") from exc
     if fit:
         fields.update({"参数A": fmt(fit["c"]), "参数k": fmt(fit["k"])})
     series = [
@@ -612,18 +647,20 @@ def build(
         ("风向频率玫瑰图", COMPASS, [("frequency", direction)], "rose"),
         ("风能频率玫瑰图", COMPASS, [("energy_frequency", energy)], "rose"),
     ]
-    if fit:
-        series.append(
-            (
-                "威布尔分布图",
-                range(27),
-                [
-                    ("风速频率 %", f),
-                    ("Weibull 拟合 %", [r["fitted_frequency"] for r in fit["rows"]]),
-                ],
-                "fit",
-            )
+
+    def weibull_series(fitted):
+        return (
+            "威布尔分布图",
+            range(27),
+            [
+                ("风速频率 %", f),
+                ("Weibull 拟合 %", [r["fitted_frequency"] for r in fitted["rows"]]),
+            ],
+            "fit",
         )
+
+    if fit:
+        series.append(weibull_series(fit))
     metrics = ["平均风速（m/s）", "平均风功率密度（W/m²）"]
     tables = {
         "风速和风功率密度月变化图": {
@@ -669,6 +706,17 @@ def build(
         },
     }
     if template is None:
+        weibull_charts = {}
+        for method in WEIBULL_METHOD_LABELS:
+            if method == weibull_method:
+                continue
+            try:
+                alternative = fit_weibull(a, method)
+            except ValueError:
+                continue
+            weibull_charts[method] = next(
+                assessment_charts([weibull_series(alternative)], alternative)
+            )
         return {
             "year": year,
             "height": float(height),
@@ -680,6 +728,7 @@ def build(
             "fields": fields,
             "tables": tables,
             "charts": list(assessment_charts(series, fit)),
+            "weibull_charts": weibull_charts,
             "extreme": extreme,
         }
     doc = Document(BytesIO(template))
@@ -735,7 +784,14 @@ def build(
 
     for title, labels, ss, kind in series:
         caption = "资料期各年平均风速图" if kind == "annual" and short_window else title
-        bind_image(shapes[title], figure(caption, labels, ss, kind), preserve_ratio=kind == "rose")
+        fit_label = WEIBULL_METHOD_LABELS[weibull_method] if kind == "fit" else None
+        bind_image(
+            shapes[title],
+            figure(caption, labels, ss, kind, fit_label=fit_label),
+            preserve_ratio=kind in ("rose", "freq", "fit"),
+        )
+        if fit_label:
+            shapes[title]._inline.docPr.set("descr", fit_label)
     if not fit:
         shape = shapes["威布尔分布图"]._inline
         replaced_rids.add(shape.graphic.graphicData.pic.blipFill.blip.embed)
@@ -797,8 +853,9 @@ def build(
     )
     fields["倍数法结果"] = (
         f"{fields['分析期'] if combined else f'{year} 年'}分析高度 {height} m 的"
-        f"{'平均风速' if combined else '年平均风速'}为 {extreme['mean_speed']:.6f} m/s，"
-        f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
+        f"{'平均风速' if combined else '年平均风速'}保留两位小数后为 "
+        f"{extreme['mean_speed_used']:.2f} m/s，乘以 {extreme_multiplier:g}，"
+        f"场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
         f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
     )

@@ -2845,6 +2845,24 @@
   margin: 0 auto 1rem;
 }
 
+.ww-assessment-chart-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.ww-assessment-chart-heading label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.ww-assessment-chart-heading select {
+  max-width: 100%;
+}
+
 .ww-assessment-file {
   display: flex;
   align-items: center;

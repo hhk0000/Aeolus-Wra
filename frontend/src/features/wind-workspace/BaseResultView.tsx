@@ -2,11 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { api, downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
-import { EXCEL, windAxisMaximum } from "./chartTheme";
+import {
+  EXCEL,
+  frequencyAxisMaximum,
+  frequencyTickStep,
+  windAxisMaximum,
+} from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
-import { WindAxisTicks } from "./WindAxisTicks";
+import { FrequencyAxisTicks, WindAxisTicks } from "./WindAxisTicks";
 
 const palette = EXCEL.series;
 const seriesColor = (key: string, index: number) =>
@@ -398,17 +403,29 @@ function CartesianPlot({
   if (!used.length || !rows.length) return null;
   const tickSize = compact ? 17 : 13;
   const axisSize = textSize(tickSize);
+  const frequencyTop = isFrequency
+    ? frequencyAxisMaximum(
+        Math.max(
+          0,
+          ...rows.flatMap((row) => used.map((key) => Number(row[key]) || 0)),
+        ),
+      )
+    : 0;
+  const extraHeight = Math.max(
+    0,
+    (frequencyTop / frequencyTickStep) * (axisSize + 5) - 190,
+  );
   const dual = used.includes("mean_speed") && used.includes("power_density");
   const w = isAnnual
       ? Math.max(900, rows.length * axisSize * 1.5 + 160)
       : compact
         ? 480
         : 900,
-    h = compact ? 250 : isAnnual ? 390 : 350,
+    h = compact ? 250 + extraHeight : isAnnual ? 390 : 350 + extraHeight,
     left = compact ? 48 : dual ? Math.max(66, 5 * axisSize + 12) : 66,
     right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : w - 70,
     top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
-    bottom = compact ? 215 : 285;
+    bottom = (compact ? 215 : 285) + extraHeight;
   const rawMaximum = (key: string) =>
     isAnnual && annualMaximum !== undefined
       ? annualMaximum
@@ -432,7 +449,8 @@ function CartesianPlot({
       ];
     }),
   );
-  const maxFor = (key: string) => maxima.get(key) ?? 1;
+  const maxFor = (key: string) =>
+    isFrequency ? frequencyTop : (maxima.get(key) ?? 1);
   const minFor = (key: string) =>
     dual
       ? 0
@@ -478,6 +496,13 @@ function CartesianPlot({
           ))}
         {dual ? (
           <WindAxisTicks left={left} right={right} maximum={maxFor} y={y} />
+        ) : isFrequency ? (
+          <FrequencyAxisTicks
+            left={left}
+            right={right}
+            maximum={frequencyTop}
+            y={(value) => y(value, used[0])}
+          />
         ) : (
           [0, 1, 2, 3, 4].map((n) => (
             <g key={n}>
@@ -701,7 +726,11 @@ function CartesianPlot({
               fontSize={textSize(tickSize)}
               fill={EXCEL.text}
             >
-              {isAnnual ? "平均风速(m/s)" : labels[used[0]]}
+              {isAnnual
+                ? "平均风速(m/s)"
+                : isFrequency
+                  ? "风速频率（%）"
+                  : labels[used[0]]}
             </text>
           </>
         )}

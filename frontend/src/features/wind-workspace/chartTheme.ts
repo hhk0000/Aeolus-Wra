@@ -38,3 +38,12 @@ export function windAxisMaximum(field: string, maximum: number) {
     ? Math.max(axis.step, Math.ceil(maximum / axis.step) * axis.step)
     : maximum;
 }
+
+export const frequencyTickStep = 2;
+
+export function frequencyAxisMaximum(maximum: number) {
+  return Math.max(
+    frequencyTickStep,
+    Math.ceil(maximum / frequencyTickStep) * frequencyTickStep,
+  );
+}

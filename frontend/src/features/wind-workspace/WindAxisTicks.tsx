@@ -1,4 +1,40 @@
-import { EXCEL, windAxes } from "./chartTheme";
+import { EXCEL, frequencyTickStep, windAxes } from "./chartTheme";
+
+export function FrequencyAxisTicks({
+  left,
+  right,
+  maximum,
+  y,
+}: {
+  left: number;
+  right: number;
+  maximum: number;
+  y: (value: number) => number;
+}) {
+  return Array.from({ length: maximum / frequencyTickStep + 1 }, (_, index) => {
+    const value = index * frequencyTickStep;
+    const position = y(value);
+    return (
+      <g key={value} data-axis-tick="frequency">
+        <line
+          x1={left}
+          x2={right}
+          y1={position}
+          y2={position}
+          stroke={EXCEL.grid}
+        />
+        <text
+          x={left - 6}
+          y={position + 4}
+          textAnchor="end"
+          fill={EXCEL.series[0]}
+        >
+          {value}
+        </text>
+      </g>
+    );
+  });
+}
 
 export function WindAxisTicks({
   left,

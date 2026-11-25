@@ -225,7 +225,7 @@ def get_assessment(run_id: str, request: Request):
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
-    async with request.form(max_files=2, max_fields=10) as form:
+    async with request.form(max_files=2, max_fields=11) as form:
         upload = form.get("data")
         source_id = form.get("source_id")
         local = request.app.state.wind_store
@@ -287,6 +287,7 @@ async def export_registered(key: str, version: str, request: Request):
             analysis_year=analysis_year,
             extreme_multiplier=extreme.multiplier,
             pressure_station=extreme.station(local),
+            weibull_method=str(form.get("weibull_method", "mle")),
         )
     return Response(
         result,

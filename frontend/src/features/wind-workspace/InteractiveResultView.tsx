@@ -4,14 +4,20 @@ import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
 import { useChartTextSize } from "./chartText";
-import { EXCEL, windAxisMaximum } from "./chartTheme";
+import {
+  EXCEL,
+  frequencyAxisMaximum,
+  frequencyTickStep,
+  windAxisMaximum,
+} from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
 import { isHistoricalHourlyResult } from "./model";
-import { WindAxisTicks } from "./WindAxisTicks";
+import { FrequencyAxisTicks, WindAxisTicks } from "./WindAxisTicks";
+import { weibullMethods } from "./weibullMethods";
 
 type Row = Record<string, unknown>;
 type RoseMetric = "direction" | "energy" | "both";
@@ -115,9 +121,24 @@ export function Plot({
   const [hover, setHover] = useState("");
   const dualAxis =
     fields.includes("power_density") && fields.includes("mean_speed");
+  const frequencyAxis = outputId === "frequency" || outputId === "weibull";
+  const frequencyTop = frequencyAxis
+    ? frequencyAxisMaximum(
+        Math.max(
+          0,
+          ...rows.flatMap((row) =>
+            fields.map((field) => Number(row[field]) || 0),
+          ),
+        ),
+      )
+    : 0;
   const axisSize = textSize(13);
+  const extraHeight = Math.max(
+    0,
+    (frequencyTop / frequencyTickStep) * (axisSize + 5) - 185,
+  );
   const w = rose ? 900 : dualAxis ? 900 : 800,
-    h = rose ? 680 : dualAxis ? 540 : 340,
+    h = rose ? 680 : dualAxis ? 540 : 340 + extraHeight,
     L = dualAxis ? Math.max(90, 5 * axisSize + 12) : 65,
     R = dualAxis ? w - Math.max(90, 4 * axisSize + 16) : 725,
     T = fitMethod
@@ -127,7 +148,7 @@ export function Plot({
         : dualAxis
           ? 3 * axisSize + 24
           : 35,
-    B = dualAxis ? 440 : 275;
+    B = dualAxis ? 440 : 275 + extraHeight;
   const cx = rose ? 450 : 400,
     cy = rose ? 310 : 165;
   const base = 80,
@@ -142,6 +163,7 @@ export function Plot({
   const rp = (r: Row) =>
     point(Number(r.degrees), base + (Number(r[roseKey]) / max) * maxR);
   const limits = (f: string) => {
+    if (frequencyAxis) return [0, frequencyTop];
     const shared = fields.includes("power_density") ? [f] : fields;
     const vals = rows
       .flatMap((r) =>
@@ -335,6 +357,13 @@ export function Plot({
                   right={R}
                   maximum={(f) => domains.get(f)?.[1] ?? 0}
                   y={y}
+                />
+              ) : frequencyAxis ? (
+                <FrequencyAxisTicks
+                  left={L}
+                  right={R}
+                  maximum={frequencyTop}
+                  y={(value) => y(value, fields[0])}
                 />
               ) : (
                 [0, 1, 2, 3, 4].map((i) => (
@@ -544,13 +573,15 @@ export function Plot({
                 fontSize={textSize(13)}
                 fill={fields.length ? seriesColor(fields[0], 0) : EXCEL.text}
               >
-                {outputId === "turbulence"
-                  ? "湍流强度"
-                  : fields[0] === "mean_speed"
-                    ? "风速 (m/s)"
-                    : fields[0] === "power_density"
-                      ? "风功率密度 (W/m²)"
-                      : (names[fields[0]] ?? "")}
+                {frequencyAxis
+                  ? "风速频率（%）"
+                  : outputId === "turbulence"
+                    ? "湍流强度"
+                    : fields[0] === "mean_speed"
+                      ? "风速 (m/s)"
+                      : fields[0] === "power_density"
+                        ? "风功率密度 (W/m²)"
+                        : (names[fields[0]] ?? "")}
               </text>
               {dualAxis && (
                 <text
@@ -1304,10 +1335,11 @@ export function InteractiveResultView({
                       setError("");
                     }}
                   >
-                    <option value="mle">最大似然 MLE（默认）</option>
-                    <option value="least-squares">累计概率线性最小二乘</option>
-                    <option value="moments">矩估计</option>
-                    <option value="energy">均速与能量匹配</option>
+                    {Object.entries(weibullMethods).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <button

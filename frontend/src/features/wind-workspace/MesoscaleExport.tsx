@@ -82,6 +82,10 @@ export default function MesoscaleExport({ project }: { project: string }) {
             <input name="data" type="file" accept=".txt" required />
           </label>
         </p>
+        <p className="ww-inline-note">
+          自动识别 ERA5 和格林威治 TXT
+          的表头及分析高度。风速与风向须为同一高度，长期评估仍需 20 年资料。
+        </p>
         <p>
           <label>
             轮毂高度空气密度（kg/m³）{" "}
@@ -101,7 +105,9 @@ export default function MesoscaleExport({ project }: { project: string }) {
             <input name="energy" type="file" accept=".xlsx,.csv,.tsv,.txt" />
           </label>
         </p>
-        <p>表头需包含「序号」「尾流后理论年发电量(MWh)」「单机容量(MW)」。</p>
+        <p>
+          机组发电量表须包含「序号」「尾流后理论年发电量(MWh)」「单机容量(MW)」。
+        </p>
         <p>
           <label>
             综合修正系数（%）{" "}

@@ -1,11 +1,10 @@
 """Single-point hourly mesoscale statistics and in-place v1 Word bindings."""
 
-import csv
 import re
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime
-from io import BytesIO, StringIO
+from io import BytesIO
 
 import numpy as np
 from docx import Document
@@ -21,36 +20,50 @@ from wind_platform.core.calculations import (
     weibull,
     wind_statistics,
 )
+from wind_platform.core.ingestion import decode_text, preview, split_line
 
 
-def hourly(raw):
-    for enc in ("utf-8-sig", "gb18030"):
-        try:
-            stream = StringIO(raw.decode(enc))
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        raise CalculationError("TXT 编码须为 UTF-8 或 GB18030。")
-    rows = csv.reader(stream, delimiter="\t")
-    head = next(rows, [])
-
-    def channel(pattern):
-        hits = [(i, m) for i, s in enumerate(head) if (m := re.fullmatch(pattern, s.strip(), re.I))]
-        if len(hits) != 1:
-            raise CalculationError("请提供单点单高度 TXT，含时间、Anem 风速与 Vane 风向列。")
-        return hits[0]
-
-    ti, _ = channel(r"Date\s*&\s*Time Stamp")
-    vi, vh = channel(r"(?:CH\d+)?Anem\s*(\d+(?:\.\d+)?)\s*m\s*m/s")
-    di, dh = channel(r"(?:CH\d+)?Vane\s*(\d+(?:\.\d+)?)\s*m\s*Deg")
-    if float(vh[1]) != float(dh[1]):
-        raise CalculationError("风速与风向高度不同。")
+def hourly_records(raw):
+    detected = preview(raw)
+    ti = detected["detected"]["timestamp_column"]
+    if detected["detected"]["time_column"] is not None:
+        raise CalculationError("中尺度 TXT 须使用单列日期时间。")
+    columns = {}
+    for quantity in ("speed", "direction"):
+        candidates = [
+            channel
+            for channel in detected["suggestions"]
+            if channel["quantity"] == quantity
+            and channel["statistic"] == "mean"
+            and channel["height"] is not None
+            and not channel["ambiguous"]
+            and channel["index"] != ti
+        ]
+        if len(candidates) != 1:
+            raise CalculationError(
+                "须识别到唯一的一列带高度的平均风速和风向。"
+                "支持 Speed_100m / Direction_100m 或 Anem125m / Vane125m 等表头。"
+            )
+        columns[quantity] = candidates[0]
+    speed, direction = columns["speed"], columns["direction"]
+    height = speed["height"]
+    if height != direction["height"]:
+        raise CalculationError("风速与风向高度不同，请使用同一分析高度。")
+    vi, di = speed["index"], direction["index"]
+    speed_header, direction_header = detected["headers"][vi], detected["headers"][di]
+    if not re.search(r"\bm\s*/\s*s\b", speed_header, re.I) or not re.search(
+        r"°|\bdeg\b", direction_header, re.I
+    ):
+        raise CalculationError("平均风速须为 m/s，风向须为度（° 或 Deg）。")
+    text, _ = decode_text(raw)
+    header_line = detected["header_line"]
+    delimiter = detected["delimiter"]
     records = {}
-    for n, row in enumerate(rows, 2):
-        if not row or not any(row):
+    for n, line in enumerate(text.splitlines()[header_line:], header_line + 1):
+        if not line.strip():
             continue
         try:
+            row = split_line(line, delimiter)
             dt = datetime.fromisoformat(row[ti].strip().replace("/", "-"))
             if dt in records or dt.minute or dt.second or dt.microsecond or dt.tzinfo:
                 raise ValueError()
@@ -63,6 +76,11 @@ def hourly(raw):
             raise CalculationError(f"第 {n} 行时间重复、非整点或数值无效。") from exc
     if not records:
         raise CalculationError("TXT 无数据。")
+    return f"{height:g}", records
+
+
+def hourly(raw):
+    height, records = hourly_records(raw)
     latest = max(records)
     end = latest.year if (latest.month, latest.day) == (12, 31) else latest.year - 1
     start = end - 19
@@ -81,7 +99,7 @@ def hourly(raw):
     if avg <= 0:
         raise CalculationError("20年均值为零，无法选择代表年。")
     idx = int(np.argmin(np.abs(np.array(annual) - avg)))
-    return vh[1], times, v, d, years, start, annual, avg, start + idx
+    return height, times, v, d, years, start, annual, avg, start + idx
 
 
 def figure(title, labels, series, kind):

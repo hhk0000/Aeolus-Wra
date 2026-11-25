@@ -4,6 +4,11 @@
 
 收到“在 DSH 的基础上继续开发”“在 GPT 的基础上继续开发”或“继续开发”，先读本文件和 [协作检索规则](docs/COLLABORATION.md)，自行查找交接和提取需求。
 
+## 2026-11-25 中尺度数据识别
+
+- 内置报告复用资料导入的表头与通道识别，兼容 ERA5 Windographer 和格林威治逐小时 TXT。已实测两份原始样本，分别为 100 m 和 125 m。统计口径和原始文件保持原状。
+- ERA5 样本通过 Word 导出联调。格林威治两年样本通过识别，现有 20 年模板按原有年限要求提示资料不足。规则见 [报告模板说明](docs/REPORT_TEMPLATES.md)。
+
 ## 2026-11-24 首个内置 Word 模板
 
 分支 codex/mesoscale-template-v1。首版前期中尺度模板为 mesoscale/1.0.0，详见 [模板发布与回退](docs/REPORT_TEMPLATES.md)。接入前、模板发布、平台集成三个节点分别为 report-mesoscale/pre-v1、report-mesoscale/template-v1.0.0、report-mesoscale/platform-v1.0.0。

@@ -1,9 +1,12 @@
 from io import BytesIO
 from zipfile import ZipFile
 
+import pytest
 from docx import Document
 from fastapi.testclient import TestClient
+from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
+from wind_platform.services.mesoscale_report import hourly_records
 
 
 def test_versioned_mesoscale_download_and_export(tmp_path):
@@ -42,3 +45,32 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         ).status_code
         == 422
     )
+
+
+@pytest.mark.parametrize(
+    ("header", "data", "height"),
+    [
+        (
+            b"Created 2026/11/13 00:15 by Windographer 4.0.2\r\n\r\n"
+            b"Date/Time\tDirection_100m [\xb0]\tSpeed_100m [m/s]\t",
+            b"2022-01-01 00:00\t231.304\t8.576",
+            "100",
+        ),
+        (
+            b"Date & Time Stamp\tCH1Anem125m m/s\tCH1SD\tCH1Max\tCH1Min\t"
+            b"CH2Vane125m Deg\tCH2SD\tCH2Max\tCH2Min",
+            b"2022/01/01 00:00\t8.576\t1\t12\t2\t231.304\t5\t250\t120",
+            "125",
+        ),
+    ],
+)
+def test_hourly_report_recognizes_both_source_formats(header, data, height):
+    detected_height, records = hourly_records(header + b"\n" + data)
+    assert detected_height == height
+    assert list(records.values()) == [(8.576, 231.304)]
+
+
+def test_hourly_report_does_not_pair_different_heights():
+    raw = b"Date/Time\tSpeed_100m [m/s]\tDirection_125m [Deg]\n2022-01-01 00:00\t4\t90"
+    with pytest.raises(CalculationError, match="高度不同"):
+        hourly_records(raw)

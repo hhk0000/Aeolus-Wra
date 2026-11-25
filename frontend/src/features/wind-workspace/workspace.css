@@ -2980,3 +2980,14 @@
   max-width: 720px;
   margin-inline: auto;
 }
+.ww-assessment-monthly-roses {
+  margin-block: 1.6rem;
+}
+.ww-assessment-monthly-roses .ww-rose-month-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 740px) {
+  .ww-assessment-monthly-roses .ww-rose-month-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

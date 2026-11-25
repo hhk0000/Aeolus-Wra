@@ -14,6 +14,7 @@ type Source = {
   start_year?: number;
   end_year?: number;
   window_years?: number;
+  interval_minutes?: number;
   density_period?: number | null;
   year?: number;
   mean_speed?: number;
@@ -75,6 +76,11 @@ function identifiedDensity(
 type Result = {
   year: number;
   height: number;
+  interval_minutes?: number;
+  monthly_roses?: Record<
+    "frequency" | "energy_frequency",
+    Record<string, unknown>[][]
+  >;
   window_years?: number;
   analysis_start_year?: number;
   analysis_end_year?: number;
@@ -110,7 +116,6 @@ type Result = {
 type Template = { id: string; version: string; title: string };
 
 const tabs = ["数据资料", "风资源分析", "长期参考"];
-const assessmentAxisSteps = { mean_speed: 1, power_density: 100 };
 const titles = [
   "风速和风功率密度月变化图",
   "风速和风功率密度日变化图",
@@ -228,7 +233,8 @@ export default function MesoscaleWorkspace({
   const needsSourceRefresh =
     !!sourceId &&
     (source?.density_by_year === undefined ||
-      source.window_years === undefined);
+      source.window_years === undefined ||
+      source.interval_minutes === undefined);
 
   useEffect(() => {
     try {
@@ -324,7 +330,10 @@ export default function MesoscaleWorkspace({
         if (controller.signal.aborted) return;
         const usesReportImages = saved.charts.some((chart) => !chart.rows);
         if (
-          (!saved.tables || usesReportImages || !saved.extreme) &&
+          (!saved.tables ||
+            usesReportImages ||
+            !saved.extreme ||
+            !saved.monthly_roses) &&
           sourceId &&
           density > 0 &&
           density < 3
@@ -590,7 +599,8 @@ export default function MesoscaleWorkspace({
         )}
         <p className="ww-inline-note" role="status">
           分析时段 {analysisStart}-01-01 00:00 至 {analysisEnd + 1}-01-01
-          00:00（不含终点） · {source.height} m
+          00:00（不含终点） · {source.height} m ·{" "}
+          {source.interval_minutes === 10 ? "10 min" : "1 h"}
         </p>
       </div>
     );
@@ -634,7 +644,7 @@ export default function MesoscaleWorkspace({
             {tab === 0 && (
               <>
                 <label className="field">
-                  中尺度数据（逐小时 TXT）
+                  中尺度数据（10 分钟或逐小时 TXT）
                   <input
                     type="file"
                     accept=".txt"
@@ -680,7 +690,9 @@ export default function MesoscaleWorkspace({
                     <div>
                       <strong>{source.name}</strong>
                       <p>
-                        {source.height} m · {source.first.slice(0, 10)} 至{" "}
+                        {source.height} m ·{" "}
+                        {source.interval_minutes === 10 ? "10 min" : "1 h"} ·{" "}
+                        {source.first.slice(0, 10)} 至{" "}
                         {source.last.slice(0, 10)}
                       </p>
                     </div>
@@ -1097,6 +1109,9 @@ export default function MesoscaleWorkspace({
               {result.window_years
                 ? ` · 基准资料 ${result.window_years} 年`
                 : ""}
+              {result.interval_minutes
+                ? ` · ${result.interval_minutes === 10 ? "10 min" : "1 h"}`
+                : ""}
             </span>
           )}
         </div>
@@ -1154,11 +1169,6 @@ export default function MesoscaleWorkspace({
                           ? "二参数最大似然法（MLE）"
                           : undefined
                       }
-                      axisSteps={
-                        chart.plot === "monthly" || chart.plot === "hourly"
-                          ? assessmentAxisSteps
-                          : undefined
-                      }
                     />
                   ) : chart.image ? (
                     <img
@@ -1167,6 +1177,45 @@ export default function MesoscaleWorkspace({
                     />
                   ) : null}
                 </div>
+                {chart.plot === "weibull" &&
+                  typeof chart.fit?.positive_count === "number" && (
+                    <p className="ww-inline-note">
+                      {result.interval_minutes === 10 ? "10 min" : "1 h"} 原序列
+                      · 正风速拟合样本{" "}
+                      {chart.fit.positive_count.toLocaleString("zh-CN")} 条 ·
+                      零风速比例{" "}
+                      {(Number(chart.fit.zero_fraction) * 100).toFixed(2)}%
+                    </p>
+                  )}
+                {chart.plot === "rose" && result.monthly_roses && (
+                  <section className="ww-assessment-monthly-roses">
+                    <h3>
+                      {chart.energy
+                        ? "各月风能频率玫瑰图"
+                        : "各月风向频率玫瑰图"}
+                    </h3>
+                    <div className="ww-rose-month-grid">
+                      {result.monthly_roses[
+                        chart.energy ? "energy_frequency" : "frequency"
+                      ].map((rows, i) =>
+                        rows.length ? (
+                          <RoseChart
+                            key={i}
+                            title={`${i + 1} 月`}
+                            rows={rows}
+                            energy={chart.energy}
+                            compact
+                          />
+                        ) : (
+                          <div key={i} className="ww-simple-empty">
+                            <strong>{i + 1} 月</strong>
+                            <p>有效资料不足</p>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </section>
+                )}
                 {statistics && (
                   <div className="ww-table-scroll ww-assessment-table">
                     <table className="ww-result-table">
@@ -1333,9 +1382,9 @@ function ExtremeWindResult({
               <th scope="row">平均风速倍数法</th>
               <td>
                 <strong>
-                  {result.mean_speed.toFixed(2)} m/s × {result.multiplier}
+                  {result.mean_speed.toFixed(6)} m/s × {result.multiplier}
                 </strong>
-                <small>分析期平均风速 × 倍数</small>
+                <small>使用原始均值计算，结果保留两位小数</small>
               </td>
               <td>{result.site_speed.toFixed(2)}</td>
               <td>{result.multiplier_standard.toFixed(2)}</td>

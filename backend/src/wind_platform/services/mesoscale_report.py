@@ -1,13 +1,15 @@
-"""Single-point hourly mesoscale statistics and in-place v1 Word bindings."""
+"""Single-point mesoscale statistics and in-place v1 Word bindings."""
 
 import math
 import re
 from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
+from itertools import pairwise
 
 import numpy as np
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.shared import Emu, RGBColor
 from PIL import Image, ImageDraw, ImageFont
@@ -97,7 +99,7 @@ def _read_hourly(raw, source_details=False):
         try:
             row = split_line(line, delimiter)
             dt = datetime.fromisoformat(row[ti].strip().replace("/", "-"))
-            if dt in records or dt.minute or dt.second or dt.microsecond or dt.tzinfo:
+            if dt in records or dt.minute % 10 or dt.second or dt.microsecond or dt.tzinfo:
                 raise ValueError()
             v = float(row[vi]) if row[vi].strip() else np.nan
             d = float(row[di]) if row[di].strip() else np.nan
@@ -105,7 +107,7 @@ def _read_hourly(raw, source_details=False):
                 raise ValueError()
             records[dt] = (v, d)
         except (IndexError, ValueError) as exc:
-            raise CalculationError(f"第 {n} 行时间重复、非整点或数值无效。") from exc
+            raise CalculationError(f"第 {n} 行时间重复、偏离10分钟网格或数值无效。") from exc
         if density_index is not None and density_index < len(row):
             try:
                 value = float(row[density_index])
@@ -124,25 +126,42 @@ def _read_hourly(raw, source_details=False):
     )
 
 
-def natural_window(records):
+def record_interval(records):
+    if all(t.minute == 0 for t in records):
+        return 60
+    stamps = sorted(records)
+    cadence = 0
+    for before, after in pairwise(stamps):
+        cadence = math.gcd(cadence, int((after - before).total_seconds() // 60))
+        if cadence == 10:
+            return cadence
+    raise CalculationError("资料须为整点逐小时序列或可识别的10分钟序列。")
+
+
+def natural_window(records, interval_minutes=60):
     valid_years = {t.year for t, (speed, _) in records.items() if np.isfinite(speed)}
     first, last = min(records), max(records)
-    legacy_end = last.year if last == datetime(last.year, 12, 31, 23) else last.year - 1
+    last_minute = 60 - interval_minutes
+    legacy_end = (
+        last.year if last == datetime(last.year, 12, 31, 23, last_minute) else last.year - 1
+    )
     legacy_start = legacy_end - 19
     if (
         legacy_start >= 1
         and first <= datetime(legacy_start, 1, 1)
-        and datetime(legacy_end, 12, 31, 23) in records
+        and datetime(legacy_end, 12, 31, 23, last_minute) in records
         and all(year in valid_years for year in range(legacy_start, legacy_end + 1))
     ):
         return legacy_start, legacy_end
     complete_years = {
         year
         for year in valid_years
-        if datetime(year, 1, 1) in records and datetime(year, 12, 31, 23) in records
+        if datetime(year, 1, 1) in records and datetime(year, 12, 31, 23, last_minute) in records
     }
     if not complete_years:
-        raise CalculationError("资料未覆盖一个完整自然年（1月1日00:00至12月31日23:00）。")
+        raise CalculationError(
+            f"资料未覆盖一个完整自然年（1月1日00:00至12月31日23:{last_minute:02d}）。"
+        )
     end = start = max(complete_years)
     while start - 1 in complete_years and end - start < 19:
         start -= 1
@@ -153,8 +172,9 @@ def hourly(raw):
     return select_year(*hourly_records(raw))
 
 
-def select_year(height, records):
-    start, end = natural_window(records)
+def select_year(height, records, interval_minutes=None):
+    interval_minutes = interval_minutes or record_interval(records)
+    start, end = natural_window(records, interval_minutes)
     times = sorted(t for t in records if start <= t.year <= end)
     v, d = np.array([records[t] for t in times]).T
     years = np.array([t.year for t in times])
@@ -168,7 +188,7 @@ def select_year(height, records):
     if avg <= 0:
         raise CalculationError("资料期平均风速为零，无法选择分析年。")
     idx = int(np.argmin(np.abs(np.array(annual) - avg))) if len(annual) == 20 else len(annual) - 1
-    return height, times, v, d, years, start, annual, avg, start + idx
+    return height, times, v, d, years, start, annual, avg, start + idx, interval_minutes
 
 
 def assessment_source(raw):
@@ -193,9 +213,12 @@ def assessment_source(raw):
         "coordinates": coordinates,
         "density_by_year": {str(y): total / count for y, (total, count) in densities.items()},
         "density_constant": density_metadata(preamble),
+        "interval_minutes": record_interval(records),
     }
     try:
-        _, _, _, _, _, start, annual, mean, year = select_year(height, records)
+        _, _, _, _, _, start, annual, mean, year, _ = select_year(
+            height, records, source["interval_minutes"]
+        )
     except CalculationError as exc:
         return {**source, "window_years": 0, "coverage_error": str(exc)}
     end = start + len(annual) - 1
@@ -309,6 +332,56 @@ def figure(title, labels, series, kind):
     return buf.getvalue()
 
 
+def rose_points(field, values):
+    return (
+        [
+            {"label": label, "degrees": i * 22.5, field: float(value)}
+            for i, (label, value) in enumerate(zip(COMPASS, values, strict=True))
+        ]
+        if len(values)
+        else []
+    )
+
+
+def monthly_rose_figure(months, field):
+    cell_width, cell_height = 380, 320
+    image = Image.new("RGB", (3 * cell_width, 4 * cell_height), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("msyh.ttc", 23)
+    except OSError:
+        font = ImageFont.load_default(size=19)
+    for i, rows in enumerate(months):
+        col, row = i % 3, i // 3
+        x, y = col * cell_width, row * cell_height
+        draw.rectangle((x, y, x + cell_width - 1, y + cell_height - 1), outline="#8f8f8f")
+        draw.text((x + cell_width // 2, y + 16), f"{i + 1}月", anchor="mt", font=font, fill="black")
+        if rows:
+            values = [r[field] for r in rows]
+            with Image.open(BytesIO(figure("", COMPASS, [("", values)], "rose"))) as plot:
+                panel = plot.crop((242, 48, 758, 530))
+                panel.thumbnail((300, 266), Image.Resampling.LANCZOS)
+                image.paste(panel, (x + (cell_width - panel.width) // 2, y + 38))
+            draw.text(
+                (x + 12, y + cell_height - 10),
+                f"外圈 {max(max(values), 1):.1f}%",
+                anchor="lb",
+                font=font,
+                fill="#52665b",
+            )
+        else:
+            draw.text(
+                (x + cell_width // 2, y + cell_height // 2),
+                "有效资料不足",
+                anchor="mm",
+                font=font,
+                fill="#52665b",
+            )
+    result = BytesIO()
+    image.save(result, "PNG")
+    return result
+
+
 def assessment_charts(series, fit):
     plot_types = {"freq": "frequency", "fit": "weibull"}
     fields_by_kind = {
@@ -325,10 +398,7 @@ def assessment_charts(series, fit):
                 "title": title,
                 "plot": "rose",
                 "energy": field == "energy_frequency",
-                "rows": [
-                    {"label": label, "degrees": i * 22.5, field: float(value)}
-                    for i, (label, value) in enumerate(zip(labels, data, strict=True))
-                ],
+                "rows": rose_points(field, data),
             }
             continue
         plot = (
@@ -351,7 +421,11 @@ def assessment_charts(series, fit):
             "plot": plot,
             "fields": fields,
             "rows": rows,
-            **({"fit": {"k": fit["k"], "c": fit["c"]}} if kind == "fit" and fit else {}),
+            **(
+                {"fit": {key: fit[key] for key in ("k", "c", "positive_count", "zero_fraction")}}
+                if kind == "fit" and fit
+                else {}
+            ),
         }
 
 
@@ -392,7 +466,7 @@ def build(
     extreme_multiplier=DEFAULT_MULTIPLIER,
     pressure_station=None,
 ):
-    height, times, v, d, years, start, annual, avg, recommended_year = hourly(raw)
+    height, times, v, d, years, start, annual, avg, recommended_year, interval_minutes = hourly(raw)
     window_years = len(annual)
     end = start + window_years - 1
     short_window = window_years < 20
@@ -406,7 +480,7 @@ def build(
     analysis_end = end if combined else year
     mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
-    stats = wind_statistics(a, rho, 60)
+    stats = wind_statistics(a, rho, interval_minutes)
     extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
@@ -419,7 +493,8 @@ def build(
             )
         return np.array(result)
 
-    months = groups([t.month for t in dates], range(1, 13))
+    month_numbers = np.array([t.month for t in dates])
+    months = groups(month_numbers, range(1, 13))
     hours = groups([t.hour for t in dates], range(24))
     freq = frequencies(a)
 
@@ -433,6 +508,27 @@ def build(
 
     longdir, _ = directions(v, d)
     direction, energy = directions(a, b)
+    monthly_roses = {"frequency": [], "energy_frequency": []}
+    for month in range(1, 13):
+        mask = month_numbers == month
+        observed = b[mask]
+        speeds = a[mask]
+        paired = np.isfinite(speeds) & np.isfinite(observed)
+        monthly_direction = (
+            [
+                r["frequency"]
+                for r in rose(np.ones_like(observed), observed, calm_threshold=0)["rows"]
+            ]
+            if np.isfinite(observed).any()
+            else []
+        )
+        monthly_energy = (
+            [r["energy_frequency"] for r in rose(speeds, observed, calm_threshold=0)["rows"]]
+            if (speeds[paired] > 0).any()
+            else []
+        )
+        monthly_roses["frequency"].append(rose_points("frequency", monthly_direction))
+        monthly_roses["energy_frequency"].append(rose_points("energy_frequency", monthly_energy))
     if not np.nansum(a**3):
         raise CalculationError("代表年风能为零。")
     effective = (a >= 3) & (a <= 25)
@@ -456,7 +552,7 @@ def build(
 
     fields = {
         "分析高度": height,
-        "时间步长": "1 h",
+        "时间步长": "1 h" if interval_minutes == 60 else "10 min",
         "代表年份": str(year),
         "20年起止年月": f"{start}年1月—{end}年12月" if not short_window else "资料不足",
         "20年平均风速": fmt(avg) if not short_window else "—",
@@ -472,7 +568,7 @@ def build(
         "年平均风功率密度": fmt(stats["power_density"]),
         "大风月": f"{np.nanargmax(months[:, 0]) + 1}月",
         "小风月": f"{np.nanargmin(months[:, 0]) + 1}月",
-        "区间累计时数": str(int(effective.sum())),
+        "区间累计时数": f"{effective.sum() * interval_minutes / 60:.2f}".rstrip("0").rstrip("."),
         "区间风速频率": fmt(100 * effective.sum() / np.isfinite(a).sum()),
         "区间风能频率": fmt(100 * np.nansum(a[effective] ** 3) / np.nansum(a**3)),
         "风速频率最高区间": freq[np.argmax(f)]["label"],
@@ -577,6 +673,8 @@ def build(
             "year": year,
             "height": float(height),
             "window_years": window_years,
+            "interval_minutes": interval_minutes,
+            "monthly_roses": monthly_roses,
             "analysis_start_year": analysis_start,
             "analysis_end_year": analysis_end,
             "fields": fields,
@@ -658,6 +756,26 @@ def build(
                 figure(new.docPr.name, COMPASS, [("", longdir)], "rose"),
                 preserve_ratio=True,
             )
+    for heading, field, title in (
+        ("风能频率分布", "frequency", "各月风向频率玫瑰图"),
+        ("威布尔分布", "energy_frequency", "各月风能频率玫瑰图"),
+    ):
+        anchor = next((p for p in doc.paragraphs if p.text.strip() == heading), None)
+        if anchor is None:
+            continue
+        picture = doc.add_paragraph()
+        picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        picture.paragraph_format.keep_with_next = True
+        shape = picture.add_run().add_picture(
+            monthly_rose_figure(monthly_roses[field], field), width=shapes["风向频率玫瑰图"].width
+        )
+        shape._inline.docPr.name = title
+        border = shapes["风向频率玫瑰图"]._inline.graphic.graphicData.pic.spPr.xpath("./a:ln")
+        if border:
+            shape._inline.graphic.graphicData.pic.spPr.append(deepcopy(border[0]))
+        caption = doc.add_paragraph(title, style="图表名称")
+        anchor._p.addprevious(picture._p)
+        anchor._p.addprevious(caption._p)
     from wind_platform.services.mesoscale_energy import energy_table
 
     fields.update(energy_table(doc, energy_file, factor, fill_cell))
@@ -679,7 +797,7 @@ def build(
     )
     fields["倍数法结果"] = (
         f"{fields['分析期'] if combined else f'{year} 年'}分析高度 {height} m 的"
-        f"{'平均风速' if combined else '年平均风速'}为 {extreme['mean_speed']:.2f} m/s，"
+        f"{'平均风速' if combined else '年平均风速'}为 {extreme['mean_speed']:.6f} m/s，"
         f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
         f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
@@ -708,7 +826,8 @@ def build(
             return
         if short_window and "选取代表年份为" in txt:
             para.clear().add_run(
-                f"分析期为{fields['分析期']}。采用{height} m 高度风速、风向资料，时间步长为 1 h。"
+                f"分析期为{fields['分析期']}。采用{height} m 高度风速、风向资料，"
+                f"时间步长为 {fields['时间步长']}。"
             )
             return
         hits = [(m, fields[m[1]]) for m in re.finditer(r"【([^】]+)】", txt) if m[1] in fields]

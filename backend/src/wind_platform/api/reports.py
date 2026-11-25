@@ -93,7 +93,7 @@ async def upload_assessment_file(kind: str, request: Request):
         file = form.get("file")
         if not isinstance(file, UploadFile) or not file.size or file.size > limits[kind]:
             raise CalculationError(
-                "请选择有效的资料，逐小时 TXT 不超过64 MB，机组表和风压库不超过4 MB。"
+                "请选择有效的资料，中尺度 TXT 不超过64 MB，机组表和风压库不超过4 MB。"
             )
         raw = await file.read()
         detail = {}
@@ -121,7 +121,7 @@ def get_assessment_source(file_id: str, request: Request):
     record = local.get("assessment-files", file_id)
     if record["kind"] != "source":
         raise CalculationError("上传文件用途不匹配。")
-    if "density_by_year" in record and "window_years" in record:
+    if {"density_by_year", "window_years", "interval_minutes"} <= record.keys():
         return record
     return {
         **record,
@@ -234,7 +234,7 @@ async def export_registered(key: str, version: str, request: Request):
         elif isinstance(upload, UploadFile) and upload.size is not None and upload.size <= 64 * MIB:
             raw = await upload.read()
         else:
-            raise CalculationError("请选择不超过64 MB的逐小时中尺度TXT。")
+            raise CalculationError("请选择不超过64 MB的中尺度TXT。")
         try:
             density = float(str(form.get("density", "")))
             factor = float(str(form.get("factor", "75")))

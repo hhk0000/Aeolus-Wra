@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { api, downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
-import { EXCEL } from "./chartTheme";
+import { EXCEL, windAxisMaximum } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
+import { WindAxisTicks } from "./WindAxisTicks";
 
 const palette = EXCEL.series;
 const seriesColor = (key: string, index: number) =>
@@ -397,7 +398,7 @@ function CartesianPlot({
   if (!used.length || !rows.length) return null;
   const tickSize = compact ? 17 : 13;
   const axisSize = textSize(tickSize);
-  const dual = used.includes("power_density");
+  const dual = used.includes("mean_speed") && used.includes("power_density");
   const w = isAnnual
       ? Math.max(900, rows.length * axisSize * 1.5 + 160)
       : compact
@@ -408,7 +409,7 @@ function CartesianPlot({
     right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : w - 70,
     top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
     bottom = compact ? 215 : 285;
-  const maxFor = (key: string) =>
+  const rawMaximum = (key: string) =>
     isAnnual && annualMaximum !== undefined
       ? annualMaximum
       : Math.max(
@@ -417,11 +418,27 @@ function CartesianPlot({
           ...(key === "mean_speed"
             ? means.map((r) => Number(r.mean_speed) || 0)
             : []),
-        ) * 1.15;
+        );
+  const maxima = new Map(
+    used.map((key) => {
+      const maximum = rawMaximum(key);
+      return [
+        key,
+        dual
+          ? windAxisMaximum(key, maximum)
+          : isAnnual && annualMaximum !== undefined
+            ? maximum
+            : maximum * 1.15,
+      ];
+    }),
+  );
+  const maxFor = (key: string) => maxima.get(key) ?? 1;
   const minFor = (key: string) =>
-    isAnnual
-      ? annualMinimum
-      : Math.min(0, ...rows.map((r) => Number(r[key]) || 0));
+    dual
+      ? 0
+      : isAnnual
+        ? annualMinimum
+        : Math.min(0, ...rows.map((r) => Number(r[key]) || 0));
   const x = (i: number) => left + ((i + 0.5) / rows.length) * (right - left);
   const y = (value: number, key: string) =>
     bottom -
@@ -459,41 +476,35 @@ function CartesianPlot({
               stroke={EXCEL.grid}
             />
           ))}
-        {[0, 1, 2, 3, 4].map((n) => (
-          <g key={n}>
-            <line
-              x1={left}
-              x2={right}
-              y1={top + (n * (bottom - top)) / 4}
-              y2={top + (n * (bottom - top)) / 4}
-              stroke={EXCEL.grid}
-            />
-            <text
-              x={left - 8}
-              y={top + (n * (bottom - top)) / 4 + 4}
-              textAnchor="end"
-              fontSize={textSize(tickSize)}
-              fill={EXCEL.text}
-            >
-              {(
-                maxFor(used[0]) -
-                (n / 4) * (maxFor(used[0]) - minFor(used[0]))
-              ).toFixed(
-                isTI || isShear ? 3 : isAnnual && annualCustomAxis ? 2 : 1,
-              )}
-            </text>
-            {dual && (
+        {dual ? (
+          <WindAxisTicks left={left} right={right} maximum={maxFor} y={y} />
+        ) : (
+          [0, 1, 2, 3, 4].map((n) => (
+            <g key={n}>
+              <line
+                x1={left}
+                x2={right}
+                y1={top + (n * (bottom - top)) / 4}
+                y2={top + (n * (bottom - top)) / 4}
+                stroke={EXCEL.grid}
+              />
               <text
-                x={right + 8}
+                x={left - 8}
                 y={top + (n * (bottom - top)) / 4 + 4}
+                textAnchor="end"
                 fontSize={textSize(tickSize)}
-                fill={palette[1]}
+                fill={EXCEL.text}
               >
-                {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
+                {(
+                  maxFor(used[0]) -
+                  (n / 4) * (maxFor(used[0]) - minFor(used[0]))
+                ).toFixed(
+                  isTI || isShear ? 3 : isAnnual && annualCustomAxis ? 2 : 1,
+                )}
               </text>
-            )}
-          </g>
-        ))}
+            </g>
+          ))
+        )}
         {(!isAnnual || bars ? used : []).map((key, k) => (
           <g key={key}>
             {(isAnnual || isFrequency || outputId === "density") &&

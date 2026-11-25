@@ -88,13 +88,19 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert doc.tables[1].rows[-1].cells[2].text == "84.00"
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     assert all(s.width == 5040000 for s in doc.inline_shapes)
-    assert len(doc.inline_shapes) == 9
+    assert len(doc.inline_shapes) == 11
     roses = {
         shape._inline.docPr.name: shape
         for shape in doc.inline_shapes
         if "玫瑰图" in shape._inline.docPr.name
     }
-    assert set(roses) == {"风向频率玫瑰图", "风能频率玫瑰图", "20年风向频率玫瑰图"}
+    assert set(roses) == {
+        "风向频率玫瑰图",
+        "风能频率玫瑰图",
+        "20年风向频率玫瑰图",
+        "各月风向频率玫瑰图",
+        "各月风能频率玫瑰图",
+    }
     for shape in roses.values():
         drawing = shape._inline.graphic.graphicData.pic
         assert drawing.xpath("./pic:spPr/a:ln")
@@ -251,6 +257,9 @@ def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
     assert run.status_code == 200
     snapshot = client.get(runs_url + "/" + run.json()["id"]).json()
     assert snapshot["window_years"] == year_count
+    assert snapshot["interval_minutes"] == 60
+    assert len(snapshot["monthly_roses"]["frequency"]) == 12
+    assert not snapshot["monthly_roses"]["frequency"][1]
     assert snapshot["analysis_start_year"] == start
     assert snapshot["analysis_end_year"] == upload["end_year"]
     month = snapshot["tables"]["风速和风功率密度月变化图"]
@@ -272,6 +281,35 @@ def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
         "近10年平均",
         "资料不足",
     ]
+
+
+def test_ten_minute_assessment_uses_native_samples_and_real_hours(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    raw = (
+        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\n"
+        b"2023-01-01 00:00\t4\t0\n"
+        b"2023-01-01 00:10\t5\t90\n"
+        b"2023-01-01 00:20\t6\t90\n"
+        b"2023-12-31 23:50\t8\t180\n"
+    )
+    source = client.post(
+        "/api/v1/reports/assessment/files/source", files={"file": ("10min.txt", raw)}
+    ).json()
+    assert source["interval_minutes"] == 10 and source["window_years"] == 1
+    options = {"source_id": source["id"], "density": 1.2}
+    path = "/api/v1/reports/assessment/runs"
+    saved = client.post(path, json=options)
+    assert saved.status_code == 200
+    output = client.get(path + "/" + saved.json()["id"]).json()
+    assert output["fields"]["时间步长"] == "10 min"
+    assert output["fields"]["区间累计时数"] == "0.67"
+    fit = next(chart["fit"] for chart in output["charts"] if chart["plot"] == "weibull")
+    assert fit["positive_count"] == 4
+    jan = output["monthly_roses"]
+    assert jan["frequency"][0][4]["frequency"] == pytest.approx(200 / 3)
+    assert jan["energy_frequency"][0][4]["energy_frequency"] == pytest.approx(
+        100 * (5**3 + 6**3) / (4**3 + 5**3 + 6**3)
+    )
 
 
 def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):

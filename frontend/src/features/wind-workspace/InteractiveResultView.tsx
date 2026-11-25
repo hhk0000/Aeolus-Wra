@@ -4,13 +4,14 @@ import type { Run, RunOutput } from "./api";
 import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
 import { useChartTextSize } from "./chartText";
-import { EXCEL } from "./chartTheme";
+import { EXCEL, windAxisMaximum } from "./chartTheme";
 import { RoseChart } from "./RoseChart";
 import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
 import { isHistoricalHourlyResult } from "./model";
+import { WindAxisTicks } from "./WindAxisTicks";
 
 type Row = Record<string, unknown>;
 type RoseMetric = "direction" | "energy" | "both";
@@ -95,7 +96,6 @@ export function Plot({
   outputId = "",
   fit,
   fitMethod,
-  axisSteps,
 }: {
   rows: Row[];
   fields: string[];
@@ -110,7 +110,6 @@ export function Plot({
   outputId?: string;
   fit?: Row;
   fitMethod?: string;
-  axisSteps?: Record<string, number>;
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
@@ -149,9 +148,7 @@ export function Plot({
         shared.map((key) => (r[key] == null ? NaN : Number(r[key]))),
       )
       .filter(Number.isFinite);
-    const step = axisSteps?.[f];
-    if (step)
-      return [0, Math.max(step, Math.ceil(Math.max(0, ...vals) / step) * step)];
+    if (dualAxis) return [0, windAxisMaximum(f, Math.max(0, ...vals))];
     const lo = density ? densityMinimum : Math.min(0, ...vals);
     const hi = density
       ? (densityMaximum ??
@@ -332,80 +329,46 @@ export function Plot({
                     strokeWidth="1"
                   />
                 ))}
-              {axisSteps
-                ? (dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
-                    (field, side) => {
-                      const [lo, hi] = domains.get(field) ?? [0, 1];
-                      const step = axisSteps[field] ?? (hi - lo) / 4;
-                      return Array.from(
-                        { length: Math.round((hi - lo) / step) + 1 },
-                        (_, i) => {
-                          const tick = lo + i * step;
-                          const position = y(tick, field);
-                          return (
-                            <g key={`${field}-${i}`} data-axis-tick={field}>
-                              {side === 0 ? (
-                                <line
-                                  x1={L}
-                                  x2={R}
-                                  y1={position}
-                                  y2={position}
-                                  stroke={EXCEL.grid}
-                                />
-                              ) : (
-                                <line
-                                  x1={R}
-                                  x2={R + 4}
-                                  y1={position}
-                                  y2={position}
-                                  stroke={EXCEL.axis}
-                                />
-                              )}
-                              <text
-                                x={side ? R + 7 : L - 6}
-                                y={position}
-                                textAnchor={side ? "start" : "end"}
-                                fill={seriesColor(field, side)}
-                              >
-                                {axisSteps[field] ? tick : tick.toFixed(2)}
-                              </text>
-                            </g>
-                          );
-                        },
-                      );
-                    },
-                  )
-                : [0, 1, 2, 3, 4].map((i) => (
-                    <g key={i}>
-                      <line
-                        x1={L}
-                        x2={R}
-                        y1={T + (i * (B - T)) / 4}
-                        y2={T + (i * (B - T)) / 4}
-                        stroke={EXCEL.grid}
-                        strokeWidth="1"
-                      />
-                      {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
-                        (f, j) => {
-                          const [lo, hi] = domains.get(f) ?? [0, 1];
-                          return (
-                            <text
-                              key={f}
-                              x={j ? R + 6 : L - 6}
-                              y={T + (i * (B - T)) / 4}
-                              textAnchor={j ? "start" : "end"}
-                              fill={seriesColor(f, j)}
-                              fontSize={textSize(13)}
-                            >
-                              {(hi - (i * (hi - lo)) / 4).toFixed(
-                                density && hi - lo < 0.04 ? 3 : 2,
-                              )}
-                            </text>
-                          );
-                        },
-                      )}
-                    </g>
-                  ))}
+              {dualAxis ? (
+                <WindAxisTicks
+                  left={L}
+                  right={R}
+                  maximum={(f) => domains.get(f)?.[1] ?? 0}
+                  y={y}
+                />
+              ) : (
+                [0, 1, 2, 3, 4].map((i) => (
+                  <g key={i}>
+                    <line
+                      x1={L}
+                      x2={R}
+                      y1={T + (i * (B - T)) / 4}
+                      y2={T + (i * (B - T)) / 4}
+                      stroke={EXCEL.grid}
+                      strokeWidth="1"
+                    />
+                    {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
+                      (f, j) => {
+                        const [lo, hi] = domains.get(f) ?? [0, 1];
+                        return (
+                          <text
+                            key={f}
+                            x={j ? R + 6 : L - 6}
+                            y={T + (i * (B - T)) / 4}
+                            textAnchor={j ? "start" : "end"}
+                            fill={seriesColor(f, j)}
+                            fontSize={textSize(13)}
+                          >
+                            {(hi - (i * (hi - lo)) / 4).toFixed(
+                              density && hi - lo < 0.04 ? 3 : 2,
+                            )}
+                          </text>
+                        );
+                      },
+                    )}
+                  </g>
+                ))
+              )}
               {fields.map((f, j) => (
                 <g key={f}>
                   {isBar(f) &&

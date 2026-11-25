@@ -26,3 +26,15 @@ export function excelSvgProps() {
     fill: EXCEL.text,
   } as const;
 }
+
+export const windAxes = [
+  { field: "mean_speed", step: 1 },
+  { field: "power_density", step: 100 },
+] as const;
+
+export function windAxisMaximum(field: string, maximum: number) {
+  const axis = windAxes.find((item) => item.field === field);
+  return axis
+    ? Math.max(axis.step, Math.ceil(maximum / axis.step) * axis.step)
+    : maximum;
+}

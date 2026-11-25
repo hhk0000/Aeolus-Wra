@@ -1,0 +1,64 @@
+"""Single-grid-point preliminary extreme wind methods."""
+
+import re
+from math import isfinite, sqrt
+
+from wind_platform.core.calculations import CalculationError
+from wind_platform.core.ingestion import decode_text, split_line
+
+STANDARD_DENSITY = 1.225
+DEFAULT_MULTIPLIER = 5.0
+
+
+def pressure_stations(raw):
+    content, _ = decode_text(raw)
+    lines = [(i, line.strip()) for i, line in enumerate(content.splitlines(), 1) if line.strip()]
+    if not lines:
+        raise CalculationError("风压库没有站点。")
+    first = lines[0][1]
+    delimiter = "tab" if "\t" in first else "comma" if "," in first else "space"
+    stations = []
+    for number, line in lines:
+        columns = split_line(line, delimiter)
+        if delimiter == "space" and len(columns) > 4:
+            columns = [" ".join(columns[:-3]), *columns[-3:]]
+        try:
+            name, longitude, latitude, pressure = (value.strip() for value in columns)
+            if number == lines[0][0] and re.fullmatch(
+                r"地点|站点(?:名称)?|地名|location|station(?: name)?", name, re.IGNORECASE
+            ):
+                if re.match(r"纬度|latitude|lat\b", longitude, re.IGNORECASE):
+                    raise CalculationError("风压库第二列须为经度，第三列须为纬度。")
+                continue
+            lon, lat, value = float(longitude), float(latitude), float(pressure)
+            if not name or not (-180 <= lon <= 180 and -90 <= lat <= 90):
+                raise ValueError
+            if not isfinite(value) or value <= 0 or not isfinite(1600 * value):
+                raise ValueError
+        except ValueError as exc:
+            raise CalculationError(
+                f"风压库第 {number} 行无效，须依次填写地点、经度、纬度、50年基本风压（kN/m²）。"
+            ) from exc
+        stations.append({"name": name, "lon": lon, "lat": lat, "pressure": value})
+    if not stations:
+        raise CalculationError("风压库没有站点。")
+    return stations
+
+
+def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None):
+    site_speed = mean_speed * multiplier
+    multiplier_standard = site_speed * sqrt(density / STANDARD_DENSITY)
+    if not isfinite(site_speed) or not isfinite(multiplier_standard):
+        raise CalculationError("风速倍数过大，无法计算有效的风速。")
+    pressure_standard = sqrt(1600 * station["pressure"]) if station else None
+    adopted = max(pressure_standard, multiplier_standard) if station else None
+    return {
+        "station": station,
+        "mean_speed": mean_speed,
+        "density": density,
+        "multiplier": multiplier,
+        "site_speed": site_speed,
+        "multiplier_standard": multiplier_standard,
+        "pressure_standard": pressure_standard,
+        "adopted": adopted,
+    }

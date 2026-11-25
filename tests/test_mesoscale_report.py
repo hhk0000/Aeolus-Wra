@@ -1,4 +1,5 @@
 from io import BytesIO
+from json import dumps
 from zipfile import ZipFile
 
 import pytest
@@ -26,6 +27,27 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         rows.append(f"{y}/12/31 23:00	6	90")
     rows.append("2023/03/01 00:00\t99\t0")
     energy = "序号,尾流后理论年发电量(MWh),单机容量(MW)\nF01,10000,5"
+    stations_url = "/api/v1/reports/assessment/files/pressure"
+    stations = client.post(
+        stations_url,
+        files={
+            "file": (
+                "风压库.txt",
+                "地点\t经度\t纬度\t风压\n繁峙县\t113.27\t39.19\t0.45".encode("gb18030"),
+            )
+        },
+    )
+    assert stations.status_code == 200
+    library = stations.json()
+    assert client.get(f"{stations_url}/{library['id']}").json()["stations"] == [
+        {"name": "繁峙县", "lon": 113.27, "lat": 39.19, "pressure": 0.45}
+    ]
+    assert (
+        client.post(
+            stations_url, files={"file": ("无效.txt", "繁峙县,113.27,39.19,-0.45".encode())}
+        ).status_code
+        == 422
+    )
     result = client.post(
         path + "/export",
         files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
@@ -35,11 +57,14 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
+    assert entry["version"] == "1.1.0"
+    assert "五日雷暴法" not in text and "待补齐风压法结果" in text
+    assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
     assert doc.tables[1].rows[-1].cells[2].text == "84.00"
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     assert all(s.width == 5040000 for s in doc.inline_shapes)
-    assert len(doc.inline_shapes) == 10
+    assert len(doc.inline_shapes) == 9
     roses = {
         shape._inline.docPr.name: shape
         for shape in doc.inline_shapes
@@ -73,6 +98,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert run.status_code == 200
     output = client.get("/api/v1/reports/assessment/runs/" + run.json()["id"]).json()
     assert output["year"] == data["year"]
+    assert output["extreme"]["adopted"] is None and output["extreme"]["multiplier"] == 5
     assert [len(table["rows"]) for table in output["tables"].values()] == [13, 24, 27, 16, 16]
     for index, table in enumerate(output["tables"].values(), 1):
         assert table["rows"] == [
@@ -94,8 +120,36 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert energy["energy"] is True
     assert fit["fit"]["k"] > 0
     assert all("image" not in chart for chart in output["charts"])
-    archive_export = client.post(path + "/export", data={"source_id": data["id"], "density": "1.2"})
+    extreme = {
+        "pressure_library_id": library["id"],
+        "pressure_station_index": 0,
+        "multiplier": 5.1,
+    }
+    options = {"source_id": data["id"], "density": 1.2, "extreme": extreme}
+    selected_run = client.post("/api/v1/reports/assessment/runs", json=options)
+    selected_result = client.get(
+        "/api/v1/reports/assessment/runs/" + selected_run.json()["id"]
+    ).json()["extreme"]
+    assert selected_result["pressure_standard"] == pytest.approx(26.83281573)
+    assert selected_result["site_speed"] == 25.5
+    assert selected_result["multiplier_standard"] == pytest.approx(25.5 * (1.2 / 1.225) ** 0.5)
+    assert selected_result["adopted"] == selected_result["pressure_standard"]
+    options["extreme"] = {**extreme, "multiplier": 6}
+    selected_run = client.post("/api/v1/reports/assessment/runs", json=options)
+    selected_result = client.get(
+        "/api/v1/reports/assessment/runs/" + selected_run.json()["id"]
+    ).json()["extreme"]
+    assert selected_result["adopted"] == selected_result["multiplier_standard"]
+    archive_export = client.post(
+        path + "/export", data={**options, "extreme": dumps(options["extreme"])}
+    )
     assert archive_export.status_code == 200
+    extracted = "\n".join(p.text for p in Document(BytesIO(archive_export.content)).paragraphs)
+    assert "繁峙县" in extracted and "0.45 kN/m²" in extracted and "26.83 m/s" in extracted
+    assert "较大值 29.69 m/s" in extracted and "五日雷暴法" not in extracted
+    registry = client.get("/api/v1/standards").json()
+    transfer = next(m for m in registry["methods"] if m["id"] == "assessment-density-transfer")
+    assert transfer["source"] == "GB51096" and "1.225" in transfer["formula"]
 
     assert (
         client.post(

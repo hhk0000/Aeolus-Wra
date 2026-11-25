@@ -20,6 +20,7 @@ from wind_platform.core.calculations import (
     wind_statistics,
 )
 from wind_platform.core.ingestion import decode_text, preview, split_line
+from wind_platform.services.assessment_extreme import DEFAULT_MULTIPLIER, extreme_wind
 
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
@@ -316,7 +317,17 @@ def assessment_charts(series, fit):
 
 
 def build(
-    template, raw, rho, project, factor=75.0, energy_file=None, location=None, analysis_year=None
+    template,
+    raw,
+    rho,
+    project,
+    factor=75.0,
+    energy_file=None,
+    location=None,
+    analysis_year=None,
+    *,
+    extreme_multiplier=DEFAULT_MULTIPLIER,
+    pressure_station=None,
 ):
     height, times, v, d, years, start, annual, avg, recommended_year = hourly(raw)
     if analysis_year is not None and not start <= analysis_year < start + 20:
@@ -325,6 +336,7 @@ def build(
     mask = years == year
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, rho, 60)
+    extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
     dates = [t for t in times if t.year == year]
 
     def groups(keys, choices):
@@ -482,6 +494,7 @@ def build(
             "fields": fields,
             "tables": tables,
             "charts": list(assessment_charts(series, fit)),
+            "extreme": extreme,
         }
     doc = Document(BytesIO(template))
 
@@ -561,6 +574,25 @@ def build(
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
+    fields["风压法结果"] = (
+        f"采用风压库《{pressure_station['library']}》的{pressure_station['name']}站"
+        f"（经度 {pressure_station['lon']:g}°，纬度 {pressure_station['lat']:g}°）。"
+        f"50 年一遇基本风压为 {pressure_station['pressure']:g} kN/m²，"
+        f"换算参考风速为 {extreme['pressure_standard']:.2f} m/s。"
+        if pressure_station
+        else "未选定风压库站点，风压法结果待补。"
+    )
+    fields["倍数法结果"] = (
+        f"{year} 年分析高度 {height} m 的年平均风速为 {extreme['mean_speed']:.2f} m/s，"
+        f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
+        f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
+        f"{extreme['multiplier_standard']:.2f} m/s。"
+    )
+    fields["前期风速判断"] = (
+        f"两种方法均有结果，取标准空气密度口径下的较大值 {extreme['adopted']:.2f} m/s。"
+        if extreme["adopted"] is not None
+        else "待补齐风压法结果后，再按两种方法的较大值形成前期判断。"
+    )
 
     def replace(para):
         runs = para.runs

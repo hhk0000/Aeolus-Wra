@@ -23,6 +23,9 @@ type Source = {
 type Assessment = {
   source?: Source;
   energy?: { id: string; name: string };
+  pressure?: { id: string; name: string };
+  pressureStation?: number;
+  multiplier: string;
   density: string;
   factor: string;
   manualLocation: boolean;
@@ -32,6 +35,17 @@ type Assessment = {
   runId?: string;
   analysisYear?: number;
   hidden: string[];
+};
+type PressureStation = {
+  name: string;
+  lon: number;
+  lat: number;
+  pressure: number;
+};
+type PressureLibrary = {
+  id: string;
+  name: string;
+  stations: PressureStation[];
 };
 function identifiedDensity(
   source: Source | undefined,
@@ -47,6 +61,16 @@ function identifiedDensity(
 type Result = {
   year: number;
   height: number;
+  extreme?: {
+    station: (PressureStation & { library: string }) | null;
+    mean_speed: number;
+    density: number;
+    multiplier: number;
+    site_speed: number;
+    multiplier_standard: number;
+    pressure_standard: number | null;
+    adopted: number | null;
+  };
   tables?: Record<
     string,
     {
@@ -93,6 +117,7 @@ const shortTitles = Object.fromEntries(
 );
 const initial: Assessment = {
   density: "",
+  multiplier: "5",
   factor: "75",
   manualLocation: false,
   lat: "",
@@ -126,6 +151,7 @@ export default function MesoscaleWorkspace({
   const [tab, setTab] = useState(0);
   const [chosen, setChosen] = useState(titles[0]);
   const [result, setResult] = useState<Result>();
+  const [pressureLibrary, setPressureLibrary] = useState<PressureLibrary>();
   const [template, setTemplate] = useState<Template>();
   const [error, setError] = useState("");
   const [resultError, setResultError] = useState("");
@@ -133,6 +159,14 @@ export default function MesoscaleWorkspace({
   const removeDialog = useRef<HTMLDialogElement>(null);
   const source = state.source;
   const sourceId = source?.id;
+  const pressureId = state.pressure?.id;
+  const pressureStations =
+    pressureLibrary?.id === pressureId ? pressureLibrary?.stations : undefined;
+  const pressureStation =
+    state.pressureStation === undefined
+      ? undefined
+      : pressureStations?.[state.pressureStation];
+  const multiplier = Number(state.multiplier);
   const analysisYear = state.analysisYear ?? source?.year;
   const sourceDensity = identifiedDensity(source, analysisYear);
   const density = sourceDensity ?? Number(state.density);
@@ -146,6 +180,20 @@ export default function MesoscaleWorkspace({
       // Open pages can still use the assessment while storage is unavailable.
     }
   }, [state, storage]);
+  useEffect(() => {
+    if (!pressureId || pressureLibrary?.id === pressureId) return;
+    const controller = new AbortController();
+    void api<PressureLibrary>(
+      "/reports/assessment/files/pressure/" + pressureId,
+      undefined,
+      controller.signal,
+    )
+      .then(setPressureLibrary)
+      .catch((cause: Error) => {
+        if (!controller.signal.aborted) setError(cause.message);
+      });
+    return () => controller.abort();
+  }, [pressureId, pressureLibrary?.id]);
   useEffect(() => {
     if (!sourceId || !needsDensityLookup) return;
     const controller = new AbortController();
@@ -191,7 +239,7 @@ export default function MesoscaleWorkspace({
         if (controller.signal.aborted) return;
         const usesReportImages = saved.charts.some((chart) => !chart.rows);
         if (
-          (!saved.tables || usesReportImages) &&
+          (!saved.tables || usesReportImages || !saved.extreme) &&
           sourceId &&
           density > 0 &&
           density < 3
@@ -202,6 +250,11 @@ export default function MesoscaleWorkspace({
               source_id: sourceId,
               density,
               analysis_year: chosenYear,
+              extreme: {
+                multiplier,
+                pressure_library_id: pressureId,
+                pressure_station_index: state.pressureStation,
+              },
             },
             controller.signal,
           );
@@ -227,7 +280,16 @@ export default function MesoscaleWorkspace({
         if (!controller.signal.aborted) setResultError(cause.message);
       });
     return () => controller.abort();
-  }, [page, state.runId, sourceId, density, state.analysisYear]);
+  }, [
+    page,
+    state.runId,
+    sourceId,
+    density,
+    state.analysisYear,
+    multiplier,
+    pressureId,
+    state.pressureStation,
+  ]);
   useEffect(() => {
     if (page !== 3) return;
     const controller = new AbortController();
@@ -257,7 +319,9 @@ export default function MesoscaleWorkspace({
     analysisYear !== undefined &&
     analysisYears.includes(analysisYear) &&
     density > 0 &&
-    density < 3;
+    density < 3 &&
+    Number.isFinite(multiplier) &&
+    multiplier > 0;
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -282,7 +346,10 @@ export default function MesoscaleWorkspace({
     });
   }
 
-  async function upload(file: File | undefined, kind: "source" | "energy") {
+  async function upload(
+    file: File | undefined,
+    kind: "source" | "energy" | "pressure",
+  ) {
     if (!file || busy) return;
     setBusy(true);
     setError("");
@@ -291,6 +358,17 @@ export default function MesoscaleWorkspace({
       form.set("file", file);
       if (kind === "energy") {
         change({ energy: await api("/reports/assessment/files/energy", form) });
+      } else if (kind === "pressure") {
+        const library = await api<PressureLibrary>(
+          "/reports/assessment/files/pressure",
+          form,
+        );
+        setPressureLibrary(library);
+        change({
+          pressure: { id: library.id, name: library.name },
+          pressureStation: undefined,
+          runId: undefined,
+        });
       } else {
         const next = await api<Source>(
           "/reports/assessment/files/source",
@@ -316,6 +394,12 @@ export default function MesoscaleWorkspace({
     }
   }
 
+  const extremeOptions = {
+    multiplier,
+    pressure_library_id: pressureId,
+    pressure_station_index: state.pressureStation,
+  };
+
   async function analyze() {
     if (!source || !canRun || busy) return;
     setBusy(true);
@@ -325,6 +409,7 @@ export default function MesoscaleWorkspace({
         source_id: source.id,
         density,
         analysis_year: state.analysisYear,
+        extreme: extremeOptions,
       });
       setResult(undefined);
       setResultError("");
@@ -350,6 +435,7 @@ export default function MesoscaleWorkspace({
       }
       form.set("factor", state.factor);
       form.set("project", project);
+      form.set("extreme", JSON.stringify(extremeOptions));
       if (state.energy) form.set("energy_id", state.energy.id);
       if (automaticLocation || state.manualLocation) {
         form.set(
@@ -616,6 +702,69 @@ export default function MesoscaleWorkspace({
                           }
                         />
                       </label>
+                      <label>
+                        平均风速倍数
+                        <input
+                          required
+                          type="number"
+                          step="any"
+                          value={state.multiplier}
+                          onChange={(event) =>
+                            change({
+                              multiplier: event.target.value,
+                              runId: undefined,
+                            })
+                          }
+                        />
+                        <small className="ww-inline-note">
+                          默认 5，可按项目依据调整。
+                        </small>
+                      </label>
+                      <label>
+                        50 年一遇风压库（TXT）
+                        <input
+                          type="file"
+                          accept=".txt,text/plain"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            void upload(file, "pressure");
+                          }}
+                        />
+                        <small className="ww-inline-note">
+                          列顺序为地点、经度、纬度、风压（kN/m²）。
+                        </small>
+                      </label>
+                      {state.pressure && (
+                        <label className="ww-wide">
+                          风压站点 · {state.pressure.name}
+                          <select
+                            value={state.pressureStation ?? ""}
+                            onChange={(event) =>
+                              change({
+                                pressureStation:
+                                  event.target.value === ""
+                                    ? undefined
+                                    : Number(event.target.value),
+                                runId: undefined,
+                              })
+                            }
+                          >
+                            <option value="">请选择站点</option>
+                            {pressureStations?.map((station, index) => (
+                              <option key={index} value={index}>
+                                {station.name} · {station.lon}°, {station.lat}°
+                                · {station.pressure} kN/m²
+                              </option>
+                            ))}
+                          </select>
+                          {pressureStation && (
+                            <small className="ww-inline-note">
+                              使用所选站点原始风压值。
+                            </small>
+                          )}
+                        </label>
+                      )}
                       <label className="ww-wide">
                         机组发电量表（可选，XLSX、CSV 或 TSV）
                         <input
@@ -848,9 +997,7 @@ export default function MesoscaleWorkspace({
           </aside>
           <section className="ww-panel ww-chart-stage">
             {active && <h2>{active}</h2>}
-            {active === "五十年极大风速" ? (
-              <p>待接入计算算法。</p>
-            ) : resultError ? (
+            {resultError ? (
               <p role="alert">{resultError}</p>
             ) : !state.runId ? (
               <p>完成风资源分析后查看结果。</p>
@@ -858,6 +1005,8 @@ export default function MesoscaleWorkspace({
               <p role="status">正在读取计算结果…</p>
             ) : !active ? (
               <p>请在分析配置选择要显示的图表。</p>
+            ) : active === "五十年极大风速" && result.extreme ? (
+              <ExtremeWindResult result={result.extreme} />
             ) : !chart ? (
               <p>当前资料无法生成这张图。</p>
             ) : (
@@ -979,5 +1128,64 @@ export default function MesoscaleWorkspace({
       </div>
       {errorNotice}
     </section>
+  );
+}
+
+function ExtremeWindResult({
+  result,
+}: {
+  result: NonNullable<Result["extreme"]>;
+}) {
+  const station = result.station;
+  return (
+    <>
+      <div className="ww-table-scroll ww-assessment-table">
+        <table className="ww-table">
+          <thead>
+            <tr>
+              <th scope="col">方法</th>
+              <th scope="col">输入</th>
+              <th scope="col">场址估算（m/s）</th>
+              <th scope="col">标准密度口径（m/s）</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">风压法</th>
+              <td>
+                {station
+                  ? `${station.name} · ${station.pressure} kN/m²`
+                  : "待选择风压站点"}
+              </td>
+              <td>—</td>
+              <td>{result.pressure_standard?.toFixed(2) ?? "—"}</td>
+            </tr>
+            <tr>
+              <th scope="row">平均风速倍数法</th>
+              <td>
+                {result.mean_speed.toFixed(2)} m/s × {result.multiplier} ·{" "}
+                {result.density} kg/m³
+              </td>
+              <td>{result.site_speed.toFixed(2)}</td>
+              <td>{result.multiplier_standard.toFixed(2)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        {result.adopted === null ? (
+          "待补齐风压法结果后取两种方法的较大值。"
+        ) : (
+          <>
+            前期采用值 <strong>{result.adopted.toFixed(2)} m/s</strong>
+            （标准空气密度）
+          </>
+        )}
+      </p>
+      <p className="ww-inline-note">
+        风压法按站点基本风压换算。倍数法按标准密度 1.225 kg/m³
+        折算。结果用于前期评估。
+      </p>
+    </>
   );
 }

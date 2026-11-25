@@ -1,1 +1,16 @@
-{"mesoscale":{"title":"前期中尺度评估","active":"1.0.0","releases":{"1.0.0":{"renderer":"mesoscale-v1","sha256":"1eb8ccda41cd5faf9656a7bd170bf8bd9e9a1ac2bb7f613d8626fc88bc0046e9"}}}}
+{
+  "mesoscale": {
+    "title": "前期中尺度评估",
+    "active": "1.1.0",
+    "releases": {
+      "1.0.0": {
+        "renderer": "mesoscale-v1",
+        "sha256": "1eb8ccda41cd5faf9656a7bd170bf8bd9e9a1ac2bb7f613d8626fc88bc0046e9"
+      },
+      "1.1.0": {
+        "renderer": "mesoscale-v1",
+        "sha256": "29b4c85915f47bb63d7c041d2606132d4dcba721bee233413627a0381f950b54"
+      }
+    }
+  }
+}

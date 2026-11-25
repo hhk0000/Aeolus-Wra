@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from wind_platform.core.calculations import CalculationError
-from wind_platform.services import mesoscale_report
+from wind_platform.services import assessment_extreme, mesoscale_report
 from wind_platform.services.report_catalog import catalog, release
 from wind_platform.services.word_report import MAX_FIGURES, MIB, ReportManifest, build_report
 
@@ -86,19 +86,23 @@ def assessment_file(local, file_id, kind):
 
 @router.post("/reports/assessment/files/{kind}")
 async def upload_assessment_file(kind: str, request: Request):
-    limits = {"source": 64 * MIB, "energy": 4 * MIB}
+    limits = {"source": 64 * MIB, "energy": 4 * MIB, "pressure": 4 * MIB}
     if kind not in limits:
         raise CalculationError("资料类型无效。")
     async with request.form(max_files=1, max_fields=0) as form:
         file = form.get("file")
         if not isinstance(file, UploadFile) or not file.size or file.size > limits[kind]:
-            raise CalculationError("请选择有效的资料，逐小时 TXT 不超过64 MB，机组表不超过4 MB。")
+            raise CalculationError(
+                "请选择有效的资料，逐小时 TXT 不超过64 MB，机组表和风压库不超过4 MB。"
+            )
         raw = await file.read()
-        detail = (
-            await run_in_threadpool(mesoscale_report.assessment_source, raw)
-            if kind == "source"
-            else {}
-        )
+        detail = {}
+        if kind == "source":
+            detail = await run_in_threadpool(mesoscale_report.assessment_source, raw)
+        elif kind == "pressure":
+            detail = {
+                "stations": await run_in_threadpool(assessment_extreme.pressure_stations, raw)
+            }
         local = request.app.state.wind_store
         return local.put(
             "assessment-files",
@@ -125,10 +129,43 @@ def get_assessment_source(file_id: str, request: Request):
     }
 
 
+@router.get("/reports/assessment/files/pressure/{file_id}")
+def get_pressure_library(file_id: str, request: Request):
+    record = request.app.state.wind_store.get("assessment-files", file_id)
+    if record["kind"] != "pressure":
+        raise CalculationError("上传文件用途不匹配。")
+    return record
+
+
+class ExtremeOptions(BaseModel):
+    multiplier: float = Field(
+        default=assessment_extreme.DEFAULT_MULTIPLIER, gt=0, allow_inf_nan=False
+    )
+    pressure_library_id: str | None = None
+    pressure_station_index: int | None = Field(default=None, ge=0)
+
+    def station(self, local):
+        if self.pressure_station_index is None:
+            return None
+        if not self.pressure_library_id:
+            raise CalculationError("请选择风压库。")
+        record = local.get("assessment-files", self.pressure_library_id)
+        if record["kind"] != "pressure":
+            raise CalculationError("上传文件用途不匹配。")
+        if self.pressure_station_index >= len(record["stations"]):
+            raise CalculationError("所选风压站点不存在。")
+        return {
+            **record["stations"][self.pressure_station_index],
+            "library": record["name"],
+            "sha256": record["sha256"],
+        }
+
+
 class AssessmentOptions(BaseModel):
     source_id: str
     density: float = Field(gt=0, lt=3)
     analysis_year: int | None = None
+    extreme: ExtremeOptions = Field(default_factory=ExtremeOptions)
 
 
 @router.post("/reports/assessment/runs")
@@ -136,7 +173,13 @@ def run_assessment(options: AssessmentOptions, request: Request):
     local = request.app.state.wind_store
     raw = assessment_file(local, options.source_id, "source")
     results = mesoscale_report.build(
-        None, raw, options.density, "", analysis_year=options.analysis_year
+        None,
+        raw,
+        options.density,
+        "",
+        analysis_year=options.analysis_year,
+        extreme_multiplier=options.extreme.multiplier,
+        pressure_station=options.extreme.station(local),
     )
     saved = local.put("assessment-runs", results)
     return {"id": saved["id"]}
@@ -150,7 +193,7 @@ def get_assessment(run_id: str, request: Request):
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
-    async with request.form(max_files=2, max_fields=9) as form:
+    async with request.form(max_files=2, max_fields=10) as form:
         upload = form.get("data")
         source_id = form.get("source_id")
         local = request.app.state.wind_store
@@ -183,12 +226,12 @@ async def export_registered(key: str, version: str, request: Request):
         else:
             energy_bytes = await energy.read() if energy else None
         location = {}
-        for key, label, lo, hi in (
+        for field, label, lo, hi in (
             ("lat", "纬度", -90, 90),
             ("lon", "经度", -180, 180),
             ("alt", "海拔高度", -500, 9000),
         ):
-            value = str(form.get(key, "")).strip()
+            value = str(form.get(field, "")).strip()
             if value:
                 try:
                     if not lo <= float(value) <= hi:
@@ -196,6 +239,10 @@ async def export_registered(key: str, version: str, request: Request):
                 except ValueError as exc:
                     raise CalculationError(f"{label}超出有效范围。") from exc
                 location[label] = value
+        try:
+            extreme = ExtremeOptions.model_validate_json(str(form.get("extreme", "{}")))
+        except ValidationError as exc:
+            raise CalculationError("请填写正数风速倍数并检查风压站点选项。") from exc
         result = await run_in_threadpool(
             render,
             data,
@@ -206,6 +253,8 @@ async def export_registered(key: str, version: str, request: Request):
             energy_bytes,
             location,
             analysis_year=analysis_year,
+            extreme_multiplier=extreme.multiplier,
+            pressure_station=extreme.station(local),
         )
     return Response(
         result,

@@ -17,6 +17,6 @@ IEC参考默认按61400-1第3版NTM代表湍流曲线 Iref*(0.75+5.6/V)；A/B/C�
 ## 实测 Weibull 与 Windographer 对账
 
 - 用户提供的两份资料《Weibull c》《Weibull Distribution》确认 c 是尺度参数，与平台的 A 同义。两参数分布的理论均值为 `A·Γ(1+1/k)`。资料引用 Stevens and Smulders（1979）的极大似然估计。
-- 平台可研 / 初设默认先形成完整小时均值再拟合。若 Windographer 分析的是 10 min 原序列，应以同一文件、传感器、时段、旗标筛选和 10 min 统计步长比对。直方图分箱宽度只改变绘制的柱状图。[UL 风速分布窗口说明](https://support.ul-renewables.com/windographer/dlg-analyze-wind-speed-distribution.htm)
+- 可研 / 初设现固定使用 10 min 结果序列。较早版本曾默认使用完整小时均值。与 Windographer 比对时使用同一文件、传感器、时段、旗标筛选和统计步长。直方图分箱宽度只改变绘制的柱状图。[UL 风速分布窗口说明](https://support.ul-renewables.com/windographer/dlg-analyze-wind-speed-distribution.htm)
 - 平台已验证的 MLE 用全部正风速拟合，零值质量单列。Windographer 的详细说明给出约 0.5% 的低风速截点，以及在截点以下生成样本后迭代拟合的步骤。[UL 极大似然算法说明](https://support.ul-renewables.com/windographer/articles-weibull-ml.htm)
-- 对同一实际 115 m 合成通道，平台 1 h 拟合复现截图，切换 10 min 后与 Windographer 的差异明显缩小。离线对照实验对严格低于截点的记录进行低风速模拟，结果复现在截图的三位小数精度。截点并列值与随机收敛策略仍需通过更多样本验证。本轮复算用于解释差异，平台已有计算方法及中尺度前期评估继续沿用。
+- 对同一实际 115 m 合成通道，平台 1 h 拟合复现旧截图，改用 10 min 后与 Windographer 的差异明显缩小。离线对照实验对严格低于截点的记录进行低风速模拟，结果复现在截图的三位小数精度。截点并列值与随机收敛策略仍需通过更多样本验证。正式 MLE 沿用现有方法，前期中尺度评估使用逐小时原序列。

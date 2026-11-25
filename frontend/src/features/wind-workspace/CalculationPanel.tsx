@@ -79,7 +79,6 @@ export default function CalculationPanel({
             : Number(config.manualDensity),
         shear_channels: config.shearChannels,
         direction_channel: config.directionChannel || undefined,
-        aggregation: config.aggregation,
         sectors: config.sectors,
         calm_threshold: Number(config.calmThreshold),
       });
@@ -251,16 +250,6 @@ export default function CalculationPanel({
             </label>
           )}
           <label>
-            结果风况统计步长
-            <select
-              value={config.aggregation}
-              onChange={(e) => change("aggregation", e.target.value)}
-            >
-              <option value="hourly">国标18710 · 完整小时均值</option>
-              <option value="10min">十分钟序列统计（明确选择）</option>
-            </select>
-          </label>
-          <label>
             结果数据风向通道
             <select
               value={config.directionChannel}
@@ -295,7 +284,7 @@ export default function CalculationPanel({
           </label>
         </div>
         <div className="ww-callout">
-          风功率密度使用本次确认的固定密度与每条风速的三次方计算。完整小时模式要求小时内记录齐全；十分钟湍流使用仪器标准差，两者分开统计。
+          结果风况按十分钟原序列统计。风功率密度使用本次确认的固定密度与每条风速的三次方计算。
         </div>
         <fieldset className="ww-channel-checks">
           <legend>用于综合切变的实测质控风速层（至少两层、同支臂）</legend>

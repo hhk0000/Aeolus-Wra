@@ -52,6 +52,18 @@ def export(client, section, *, template=None, image=None, **options):
     return client.post("/api/v1/reports/docx", files=parts)
 
 
+def test_engineering_report_rejects_historical_hourly_result(source):
+    client, sample = source
+    store = client.app.state.wind_store
+    old = store.put("runs", {**sample, "config": {"aggregation": "hourly"}})
+    section = {"run_id": old["id"], "output_id": "monthly"}
+    assert export(client, section).status_code == 422
+    current = store.put("runs", {**sample, "config": {"aggregation": "10min"}})
+    response = export(client, {**section, "run_id": current["id"]})
+    assert response.status_code == 200
+    assert any("10 min" in p.text for p in Document(BytesIO(response.content)).paragraphs)
+
+
 def make_template(markers):
     doc = Document()
     doc.sections[0].header.paragraphs[0].text = "模板页眉"

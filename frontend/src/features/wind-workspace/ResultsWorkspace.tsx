@@ -342,7 +342,9 @@ export function ResultsWorkspace({
           </div>
           <div>
             <strong>
-              {state.analysis.aggregation === "10min" ? "10min" : "1h"}
+              {state.analysisRuns[tower.id]?.config.aggregation === "hourly"
+                ? "历史 1 h"
+                : "10 min"}
             </strong>
             <span>统计步长</span>
           </div>
@@ -730,6 +732,7 @@ export function ReportOutline({
     const run = state.analysisRuns[towerId];
     const ltRun = state.longTermRuns[towerId];
     const monthlyChannels = (
+      run?.config.aggregation !== "hourly" &&
       Array.isArray(run?.outputs["monthly"]?.summary?.channels)
         ? run.outputs["monthly"].summary?.channels
         : []
@@ -935,7 +938,9 @@ export function ReportOutline({
               state={state}
               projectName={projectName}
             />
-            {!state.analysisRuns[state.activeTowerId] && (
+            {(!state.analysisRuns[state.activeTowerId] ||
+              state.analysisRuns[state.activeTowerId].config.aggregation ===
+                "hourly") && (
               <button className="ww-button" onClick={onAnalyze}>
                 前往风资源分析
               </button>

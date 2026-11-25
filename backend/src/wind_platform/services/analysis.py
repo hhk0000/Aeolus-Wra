@@ -15,6 +15,16 @@ from wind_platform.core.power_classes import power_class
 from wind_platform.core.standards import ENGINE_VERSION
 from wind_platform.services.store import LocalStore
 
+RESULT_WIND_OUTPUTS = {
+    "monthly",
+    "hourly",
+    "monthly-hourly",
+    "frequency",
+    "weibull",
+    "annual-rose",
+    "monthly-rose",
+}
+
 
 class AnalysisOptions(BaseModel):
     tower_name: str | None = Field(default=None, max_length=240)
@@ -37,7 +47,7 @@ class AnalysisOptions(BaseModel):
     result_channels: list[str] = Field(default_factory=list)
     shear_channels: list[str] = Field(default_factory=list)
     turbulence_minimum_samples: int = Field(default=20, ge=1)
-    aggregation: str = "hourly"
+    aggregation: str = "10min"
     sectors: int = Field(ge=1, le=36, default=16)
     calm_threshold: float = Field(ge=0, le=1, default=0.5)
     direction_channel: str | None = None
@@ -143,6 +153,8 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
         raise calc.CalculationError("至少选择一份已解析数据。")
     if config.aggregation not in {"hourly", "10min"} or config.qc_period not in {"all", "analysis"}:
         raise calc.CalculationError("统计步长或质控范围无效。")
+    # Saved engineering runs can send their former aggregation back when recalculated.
+    config = config.model_copy(update={"aggregation": "10min"})
     sources, warnings, outputs = {}, [], {}
     for stage, id_ in [("raw", config.raw_id), ("qc", config.qc_id), ("result", config.result_id)]:
         if id_:
@@ -489,16 +501,8 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
         )
         step = result["options"]["interval_minutes"]
         d = values(direction, mask) if direction else None
-        if config.aggregation == "hourly":
-            arrays = [v for _, v in series] + ([d] if d is not None else [])
-            result_stamps, aggregated = aggregate(
-                result_stamps, arrays, step, {len(series)} if d is not None else set()
-            )
-            series = [(c, v) for (c, _), v in zip(series, aggregated[: len(series)], strict=True)]
-            d = aggregated[-1] if d is not None else None
-            step = 60
-        elif step != 10:
-            raise calc.CalculationError("10min统计模式需要10min结果数据。")
+        if step != 10:
+            raise calc.CalculationError("可研 / 初设结果需要原始步长为10分钟的结果数据。")
         config_density = rho
 
         def require_rho():
@@ -527,9 +531,7 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                         )
                     )
             if not rows:
-                raise calc.CalculationError(
-                    "所选时段没有可用风速；小时模式需小时内各时间格均有效。"
-                )
+                raise calc.CalculationError("所选时段的十分钟序列没有可用风速。")
             return {
                 "rows": rows,
                 "summary": {
@@ -588,14 +590,6 @@ def run_analysis(store: LocalStore, config: AnalysisOptions) -> dict:
                     if dc["quantity"] != "direction" or dc["statistic"] != "mean":
                         continue
                     dv = values(dc, mask)
-                    if config.aggregation == "hourly":
-                        _, direction_arrays = aggregate(
-                            times(result, mask),
-                            [dv],
-                            result["options"]["interval_minutes"],
-                            {0},
-                        )
-                        dv = direction_arrays[0]
                     for c, v in series:
                         label = {
                             **c,

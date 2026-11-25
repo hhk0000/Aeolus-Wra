@@ -7,6 +7,7 @@ import { readCharts, removeReportChart } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 import type { ReportSection } from "./reportSnapshot";
 import { downloadWord, downloadHtml } from "./reportDownload";
+import { isHistoricalHourlyResult, isResultWindOutput } from "./model";
 
 export interface ReportRun {
   run: Run;
@@ -39,6 +40,7 @@ export default function ReportExport({
       .filter(
         ([id, output]) =>
           output.status === "ready" &&
+          !isHistoricalHourlyResult(run, id) &&
           !(
             id === "raw-records" && run.outputs.completeness?.status === "ready"
           ),
@@ -51,10 +53,25 @@ export default function ReportExport({
         title: [label, output.title].filter(Boolean).join(" · "),
       })),
   );
-  const saved = allSaved.filter((chart) =>
-    runs.some(
-      ({ run }) =>
-        run.id === chart.config.sourceRunId || run.id === chart.config.runId,
+  const saved = allSaved.filter((chart) => {
+    const exact = runs.find(({ run }) => run.id === chart.config.runId)?.run;
+    const source =
+      exact ?? runs.find(({ run }) => run.id === chart.config.sourceRunId)?.run;
+    const outputId = String(chart.config.outputId);
+    if (!source) return false;
+    if (chart.config.resultAggregation === "10min" && !exact) return true;
+    return (
+      !isHistoricalHourlyResult(source, outputId) &&
+      !(
+        isResultWindOutput(outputId) &&
+        chart.config.resultAggregation === "hourly"
+      )
+    );
+  });
+  const hasHistoricalHourly = runs.some(({ run }) =>
+    Object.entries(run.outputs).some(
+      ([id, output]) =>
+        output.status === "ready" && isHistoricalHourlyResult(run, id),
     ),
   );
   useEffect(() => {
@@ -181,6 +198,11 @@ export default function ReportExport({
   const controls = (
     <fieldset disabled={busy} className="ww-report-controls">
       <legend>报告内容</legend>
+      {hasHistoricalHourly && (
+        <p className="ww-inline-note">
+          有历史小时均值成果。请按十分钟序列重算后再纳入报告。
+        </p>
+      )}
       <p>
         默认导出当前范围内全部已计算成果。勾选后只导出所选项，可同时选择默认成果和图上保存的配置。
       </p>
@@ -298,7 +320,7 @@ export default function ReportExport({
       <div className="ww-report-actions">
         <button
           type="button"
-          disabled={busy || !entries.length}
+          disabled={busy || !(chosen.length || chosenSaved.length)}
           className="ww-button primary"
           onClick={() => void save("docx")}
         >
@@ -306,7 +328,7 @@ export default function ReportExport({
         </button>
         <button
           type="button"
-          disabled={busy || !entries.length}
+          disabled={busy || !(chosen.length || chosenSaved.length)}
           className="ww-button"
           onClick={() => void save("html")}
         >

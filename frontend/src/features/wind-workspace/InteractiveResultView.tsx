@@ -10,6 +10,7 @@ import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
+import { isHistoricalHourlyResult } from "./model";
 
 type Row = Record<string, unknown>;
 type RoseMetric = "direction" | "energy" | "both";
@@ -896,7 +897,9 @@ export function InteractiveResultView({
     roseMetric,
     runId: chartRun?.id ?? run.id,
     sourceRunId: original.id,
+    resultAggregation: run.config.aggregation,
   };
+  const historicalHourly = isHistoricalHourlyResult(run, outputId);
   function exportReport() {
     const charts = document
       .getElementById(`interactive-${outputId}`)
@@ -1058,7 +1061,7 @@ export function InteractiveResultView({
         <div className="ww-chart-actions">
           <button
             className="ww-button"
-            disabled={busy || output.status !== "ready"}
+            disabled={busy || output.status !== "ready" || historicalHourly}
             onClick={addToReport}
           >
             加入报告
@@ -1082,7 +1085,11 @@ export function InteractiveResultView({
           <details className="ww-details">
             <summary>更多导出</summary>
             <div className="ww-chart-actions">
-              <button className="ww-button" onClick={exportReport}>
+              <button
+                className="ww-button"
+                onClick={exportReport}
+                disabled={historicalHourly}
+              >
                 本图报告（HTML）
               </button>
               <button

@@ -18,6 +18,7 @@ from PIL import Image
 from pydantic import BaseModel, Field, model_validator
 
 from wind_platform.core.calculations import CalculationError
+from wind_platform.services.analysis import RESULT_WIND_OUTPUTS
 from wind_platform.services.store import LocalStore
 
 MARKER = "{{风资源分析}}"
@@ -243,15 +244,28 @@ def build_report(
     existing = set(body)
     _paragraph(document, manifest.title, "Title" if marker is None else "Heading 1")
     runs = {}
+    noted_result_steps = set()
     for section in manifest.sections:
         first_reference = section.run_id not in runs
         if first_reference:
             runs[section.run_id] = store.get("runs", section.run_id)
         run = runs[section.run_id]
+        is_result = run.get("kind") == "analysis" and section.output_id in RESULT_WIND_OUTPUTS
+        if is_result and run.get("config", {}).get("aggregation") == "hourly":
+            raise CalculationError(
+                "历史小时均值成果须按十分钟序列重算后，才能纳入可研 / 初设报告。"
+            )
         output = run.get("outputs", {}).get(section.output_id)
         if not output or output["status"] != "ready":
             raise CalculationError(f"运行中没有可导出的成果 {section.output_id}。")
         _paragraph(document, section.title or output["title"], "Heading 2")
+        if (
+            is_result
+            and run.get("config", {}).get("aggregation") == "10min"
+            and section.run_id not in noted_result_steps
+        ):
+            document.add_paragraph("结果风况统计步长　10 min")
+            noted_result_steps.add(section.run_id)
         if first_reference:
             config = run.get("config", {})
             if tower := config.get("tower_name"):

@@ -142,7 +142,6 @@ export interface WorkspaceState {
     altitude: string;
     shearChannels: string[];
     directionChannel: string;
-    aggregation: string;
     sectors: number;
     calmThreshold: string;
   };
@@ -340,7 +339,6 @@ export function createWorkspace(): WorkspaceState {
       altitude: "",
       shearChannels: [],
       directionChannel: "",
-      aggregation: "hourly",
       sectors: 16,
       calmThreshold: "0.5",
     },
@@ -477,6 +475,18 @@ export function correlationErrors(state: WorkspaceState) {
       );
   }
   return errors;
+}
+
+export function isResultWindOutput(id: string) {
+  return OUTPUTS.some((output) => output.id === id && output.kind === "result");
+}
+
+export function isHistoricalHourlyResult(run: Run, id: string) {
+  return (
+    run.kind === "analysis" &&
+    run.config.aggregation === "hourly" &&
+    isResultWindOutput(id)
+  );
 }
 
 export function outputStatus(item: OutputSpec, state: WorkspaceState) {

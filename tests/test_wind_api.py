@@ -156,11 +156,13 @@ def test_full_workflow_preserves_original_and_gives_distinct_denominators(client
             "observed_end": "2024-01-01T00:30",
             "density_method": "manual",
             "manual_density": 1.2,
-            "aggregation": "10min",
+            "aggregation": "hourly",  # Recalculating a saved engineering run from the old default.
         },
     )
     assert response.status_code == 200, response.text
     run = response.json()
+    assert run["config"]["aggregation"] == "10min"
+    assert run["outputs"]["monthly"]["summary"]["step_minutes"] == 10
     complete = run["outputs"]["completeness"]["rows"][0]
     assert complete["retention_percent"] == 50
     assert complete["annual_expected"] == 52560

@@ -214,6 +214,66 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     )
 
 
+@pytest.mark.parametrize("year_count", [1, 2])
+def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
+    client = TestClient(create_app(tmp_path))
+    start = 2022
+    rows = ["Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tAir Density [kg/m^3]"]
+    rows.append("2021-12-31 23:00\t99\t90\t2.0")
+    for year in range(start, start + year_count):
+        speed = 4 + (year - start) * 4
+        density = 1.1 if year == start else 1.3
+        rows.extend(
+            [
+                f"{year}-01-01 00:00\t{speed}\t90\t{density}",
+                f"{year}-06-01 12:00\t{speed + 1}\t0\t",
+                f"{year}-12-31 23:00\t{speed + 2}\t180\t{density if year == start else ''}",
+            ]
+        )
+    rows.append(f"{start + year_count}-01-01 00:00\t99\t0\t2.0")
+    raw = "\n".join(rows).encode()
+    upload = client.post(
+        "/api/v1/reports/assessment/files/source", files={"file": ("short.txt", raw)}
+    ).json()
+    assert upload["window_years"] == year_count
+    expected_mean = 5 + 2 * (year_count - 1)
+    assert upload["end_year"] == start + year_count - 1 and upload["mean_speed"] == expected_mean
+    assert upload["density_period"] == pytest.approx(1.1 if year_count == 1 else 3.5 / 3)
+    local = client.app.state.wind_store
+    older = {**upload, "coverage_error": "资料未达到20年。"}
+    older.pop("window_years")
+    legacy = local.put("assessment-files", older)
+    refreshed = client.get("/api/v1/reports/assessment/files/source/" + legacy["id"]).json()
+    assert refreshed["window_years"] == year_count and refreshed["coverage_error"] is None
+    options = {"source_id": upload["id"], "density": upload["density_period"]}
+    runs_url = "/api/v1/reports/assessment/runs"
+    run = client.post(runs_url, json=options)
+    assert run.status_code == 200
+    snapshot = client.get(runs_url + "/" + run.json()["id"]).json()
+    assert snapshot["window_years"] == year_count
+    assert snapshot["analysis_start_year"] == start
+    assert snapshot["analysis_end_year"] == upload["end_year"]
+    month = snapshot["tables"]["风速和风功率密度月变化图"]
+    assert month["rows"][0][1] == f"{expected_mean - 1:.2f}"
+    assert month["rows"][-1][1] == f"{expected_mean:.2f}"
+    if year_count == 2:
+        assert month["rows"][-1][0] == "分析期平均"
+    report = client.post("/api/v1/reports/templates/mesoscale/1.1.0/export", data=options)
+    assert report.status_code == 200
+    doc = Document(BytesIO(report.content))
+    body = "\n".join(p.text for p in doc.paragraphs)
+    assert f"共{year_count}个自然年" in body
+    assert "长期代表性待补充资料后复核" in body and "近20年" not in body
+    assert f"分析期为{start}年1月—{upload['end_year']}年12月" in body
+    assert len(doc.tables[0].rows) == year_count + 2
+    assert [c.text for c in doc.tables[0].rows[-1].cells] == [
+        f"{year_count}年平均",
+        f"{expected_mean:.2f}",
+        "近10年平均",
+        "资料不足",
+    ]
+
+
 def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
     client = TestClient(create_app(tmp_path))
     rows = ["Date & Time Stamp\tCH1Anem125m m/s\tCH2Vane125m Deg"]

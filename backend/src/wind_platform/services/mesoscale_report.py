@@ -120,16 +120,32 @@ def _read_hourly(raw, source_details=False):
         f"{height:g}",
         records,
         preamble,
-        {str(year): total / count for year, (total, count) in densities.items()},
+        densities,
     )
 
 
 def natural_window(records):
+    valid_years = {t.year for t, (speed, _) in records.items() if np.isfinite(speed)}
     first, last = min(records), max(records)
-    end = last.year if last == datetime(last.year, 12, 31, 23) else last.year - 1
-    start = end - 19
-    if first > datetime(start, 1, 1) or datetime(end, 12, 31, 23) not in records:
-        raise CalculationError("资料未覆盖最近20个完整自然年。")
+    legacy_end = last.year if last == datetime(last.year, 12, 31, 23) else last.year - 1
+    legacy_start = legacy_end - 19
+    if (
+        legacy_start >= 1
+        and first <= datetime(legacy_start, 1, 1)
+        and datetime(legacy_end, 12, 31, 23) in records
+        and all(year in valid_years for year in range(legacy_start, legacy_end + 1))
+    ):
+        return legacy_start, legacy_end
+    complete_years = {
+        year
+        for year in valid_years
+        if datetime(year, 1, 1) in records and datetime(year, 12, 31, 23) in records
+    }
+    if not complete_years:
+        raise CalculationError("资料未覆盖一个完整自然年（1月1日00:00至12月31日23:00）。")
+    end = start = max(complete_years)
+    while start - 1 in complete_years and end - start < 19:
+        start -= 1
     return start, end
 
 
@@ -150,8 +166,8 @@ def select_year(height, records):
         annual.append(float(a.mean()))
     avg = float(np.nanmean(v))
     if avg <= 0:
-        raise CalculationError("20年均值为零，无法选择代表年。")
-    idx = int(np.argmin(np.abs(np.array(annual) - avg)))
+        raise CalculationError("资料期平均风速为零，无法选择分析年。")
+    idx = int(np.argmin(np.abs(np.array(annual) - avg))) if len(annual) == 20 else len(annual) - 1
     return height, times, v, d, years, start, annual, avg, start + idx
 
 
@@ -175,17 +191,25 @@ def assessment_source(raw):
         "first": min(records).isoformat(),
         "last": max(records).isoformat(),
         "coordinates": coordinates,
-        "density_by_year": densities,
+        "density_by_year": {str(y): total / count for y, (total, count) in densities.items()},
         "density_constant": density_metadata(preamble),
     }
     try:
         _, _, _, _, _, start, annual, mean, year = select_year(height, records)
     except CalculationError as exc:
-        return {**source, "coverage_error": str(exc)}
+        return {**source, "window_years": 0, "coverage_error": str(exc)}
+    end = start + len(annual) - 1
+    density_totals = [value for y, value in densities.items() if start <= y <= end]
+    density_count = sum(count for _, count in density_totals)
     return {
         **source,
         "start_year": start,
-        "end_year": start + 19,
+        "end_year": end,
+        "window_years": len(annual),
+        "density_period": sum(total for total, _ in density_totals) / density_count
+        if density_count
+        else None,
+        "coverage_error": None,
         "year": year,
         "mean_speed": mean,
         "annual": annual,
@@ -369,14 +393,22 @@ def build(
     pressure_station=None,
 ):
     height, times, v, d, years, start, annual, avg, recommended_year = hourly(raw)
-    if analysis_year is not None and not start <= analysis_year < start + 20:
-        raise CalculationError("分析年须在最近20个完整自然年窗口内。")
+    window_years = len(annual)
+    end = start + window_years - 1
+    short_window = window_years < 20
+    if analysis_year is not None and not start <= analysis_year <= end:
+        raise CalculationError(f"分析年须在本次资料期（{start}–{end}年）内。")
+    if short_window and analysis_year is not None and window_years > 1:
+        raise CalculationError("不足20年的已选资料按完整自然年合并分析。")
+    combined = short_window and window_years > 1
     year = recommended_year if analysis_year is None else analysis_year
-    mask = years == year
+    analysis_start = start if combined else year
+    analysis_end = end if combined else year
+    mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, rho, 60)
     extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
-    dates = [t for t in times if t.year == year]
+    dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
     def groups(keys, choices):
         result = []
@@ -411,7 +443,11 @@ def build(
     def fmt(x):
         return f"{x:.2f}" if np.isfinite(x) else "—"
 
-    if analysis_year is not None:
+    if combined:
+        selection_note = "合并全部完整自然年统计"
+    elif window_years == 1:
+        selection_note = "仅有一个完整自然年，直接采用"
+    elif analysis_year is not None:
         selection_note = f"手动选择分析年，系统推荐年份为{recommended_year}年"
     elif deviation <= 0.02 + 1e-12:
         selection_note = "平风年中偏差最小"
@@ -422,9 +458,13 @@ def build(
         "分析高度": height,
         "时间步长": "1 h",
         "代表年份": str(year),
-        "20年起止年月": f"{start}年1月—{start + 19}年12月",
-        "20年平均风速": fmt(avg),
-        "10年平均风速": fmt(np.nanmean(v[years >= start + 10])),
+        "20年起止年月": f"{start}年1月—{end}年12月" if not short_window else "资料不足",
+        "20年平均风速": fmt(avg) if not short_window else "—",
+        "10年平均风速": fmt(np.nanmean(v[years >= end - 9])) if window_years >= 10 else "—",
+        "资料期": f"{start}年1月—{end}年12月",
+        "资料期年数": str(window_years),
+        "资料期平均风速": fmt(avg),
+        "分析期": f"{analysis_start}年1月—{analysis_end}年12月",
         "相对偏差": fmt(deviation * 100),
         "代表年选取说明": selection_note,
         "轮毂高度空气密度": f"{rho:.10g}",
@@ -456,8 +496,8 @@ def build(
     series = [
         (
             "近20年平均风速图",
-            range(start, start + 20),
-            [("年均风速 m/s", annual), ("20年均值 m/s", [avg] * 20)],
+            range(start, end + 1),
+            [("年均风速 m/s", annual), (f"{window_years}年均值 m/s", [avg] * window_years)],
             "annual",
         ),
         (
@@ -495,7 +535,13 @@ def build(
             "rows": [
                 [f"{i}月", fmt(speed), fmt(power)] for i, (speed, power) in enumerate(months, 1)
             ]
-            + [["全年平均", fields["年平均风速"], fields["年平均风功率密度"]]],
+            + [
+                [
+                    "分析期平均" if combined else "全年平均",
+                    fields["年平均风速"],
+                    fields["年平均风功率密度"],
+                ]
+            ],
             "summary_rows": 1,
         },
         "风速和风功率密度日变化图": {
@@ -530,6 +576,9 @@ def build(
         return {
             "year": year,
             "height": float(height),
+            "window_years": window_years,
+            "analysis_start_year": analysis_start,
+            "analysis_end_year": analysis_end,
             "fields": fields,
             "tables": tables,
             "charts": list(assessment_charts(series, fit)),
@@ -548,7 +597,7 @@ def build(
         for cell, value in zip(doc.tables[table].rows[index].cells, values, strict=True):
             fill_cell(cell, value)
 
-    for i in range(11):
+    for i in range(min(11, window_years)):
         j = i + 11
         row(
             0,
@@ -556,11 +605,22 @@ def build(
             [
                 start + i,
                 fmt(annual[i]),
-                start + j if j < 20 else "/",
-                fmt(annual[j]) if j < 20 else "/",
+                start + j if j < window_years else "/",
+                fmt(annual[j]) if j < window_years else "/",
             ],
         )
-    row(0, 12, ["20年平均", fmt(avg), "10年平均", fields["10年平均风速"]])
+    row(
+        0,
+        12,
+        [
+            f"{window_years}年平均",
+            fmt(avg),
+            "近10年平均" if short_window else "10年平均",
+            fields["10年平均风速"] if window_years >= 10 else "资料不足",
+        ],
+    )
+    for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
+        unused._tr.getparent().remove(unused._tr)
     for table_index, table in enumerate(tables.values(), 1):
         for row_index, values in enumerate(table["rows"], 1):
             row(table_index, row_index, values)
@@ -576,7 +636,8 @@ def build(
             shape.height = Emu(round(shape.width * image.px_height / image.px_width))
 
     for title, labels, ss, kind in series:
-        bind_image(shapes[title], figure(title, labels, ss, kind), preserve_ratio=kind == "rose")
+        caption = "资料期各年平均风速图" if kind == "annual" and short_window else title
+        bind_image(shapes[title], figure(caption, labels, ss, kind), preserve_ratio=kind == "rose")
     if not fit:
         shape = shapes["威布尔分布图"]._inline
         replaced_rids.add(shape.graphic.graphicData.pic.blipFill.blip.embed)
@@ -586,7 +647,7 @@ def build(
             para.clear()
             new = deepcopy(shapes["风向频率玫瑰图"]._inline)
             new.docPr.id = doc.part.next_id
-            new.docPr.name = "20年风向频率玫瑰图"
+            new.docPr.name = f"{window_years}年风向频率玫瑰图"
             drawing = OxmlElement("w:drawing")
             para.add_run()._r.append(drawing)
             drawing.append(new)
@@ -617,7 +678,8 @@ def build(
         pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
     )
     fields["倍数法结果"] = (
-        f"{year} 年分析高度 {height} m 的年平均风速为 {extreme['mean_speed']:.2f} m/s，"
+        f"{fields['分析期'] if combined else f'{year} 年'}分析高度 {height} m 的"
+        f"{'平均风速' if combined else '年平均风速'}为 {extreme['mean_speed']:.2f} m/s，"
         f"采用倍数 {extreme_multiplier:g}，场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
         f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
@@ -631,8 +693,44 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
-        hits = [m for m in re.finditer(r"【([^】]+)】", txt) if m[1] in fields]
-        for m in reversed(hits):
+        if short_window and "按年平均风速相对20年平均风速" in txt:
+            para.clear().add_run(
+                f"本次采用{fields['资料期']}的中尺度数据，共{window_years}个自然年。"
+                f"{height} m 高度资料期平均风速为{fmt(avg)} m/s。"
+                + (
+                    f"近10年平均风速为{fields['10年平均风速']} m/s。"
+                    if window_years >= 10
+                    else "资料不足10年，仅列资料期均值。"
+                )
+                + f"分析期为{fields['分析期']}，{selection_note}。"
+                "结果反映现有资料期风况，长期代表性待补充资料后复核。"
+            )
+            return
+        if short_window and "选取代表年份为" in txt:
+            para.clear().add_run(
+                f"分析期为{fields['分析期']}。采用{height} m 高度风速、风向资料，时间步长为 1 h。"
+            )
+            return
+        hits = [(m, fields[m[1]]) for m in re.finditer(r"【([^】]+)】", txt) if m[1] in fields]
+        if short_window:
+            labels = {
+                "近20年各年风速表": "资料期各年风速表",
+                "近20年平均风速图": "资料期各年平均风速图",
+                "20年风向频率玫瑰图": f"{window_years}年资料期风向频率玫瑰图",
+                "代表年份": "分析年份",
+                "代表年年平均": "分析期平均",
+                "代表年": "分析期" if combined else "分析年",
+                "全年": "分析期" if combined else "全年",
+            }
+            hits.extend(
+                (m, labels[m[0]])
+                for m in re.finditer(
+                    r"【[^】]+】|" + "|".join(map(re.escape, labels)),
+                    txt,
+                )
+                if m[0] in labels and m[0] != labels[m[0]]
+            )
+        for m, value in sorted(hits, key=lambda pair: pair[0].start(), reverse=True):
             offsets = np.cumsum([0] + [len(r.text) for r in runs])
             left = next(i for i in range(len(runs)) if offsets[i] <= m.start() < offsets[i + 1])
             right = next(
@@ -642,7 +740,7 @@ def build(
             suffix = runs[right].text[m.end() - offsets[right] :]
             for i in range(left + 1, right + 1):
                 runs[i].text = ""
-            runs[left].text = prefix + fields[m[1]] + suffix
+            runs[left].text = prefix + value + suffix
             runs[left].font.color.rgb = RGBColor.from_string("008000")
             runs[left].font.highlight_color = None
 

@@ -121,7 +121,7 @@ def get_assessment_source(file_id: str, request: Request):
     record = local.get("assessment-files", file_id)
     if record["kind"] != "source":
         raise CalculationError("上传文件用途不匹配。")
-    if "density_by_year" in record:
+    if "density_by_year" in record and "window_years" in record:
         return record
     return {
         **record,

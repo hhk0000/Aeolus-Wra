@@ -2935,3 +2935,15 @@
   background: var(--ui-sage-soft);
   font-weight: 700;
 }
+
+.ww-assessment-period > .field {
+  max-width: 22rem;
+}
+.ww-assessment-period > .ww-inline-note {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.ww-assessment-plot .ww-rose-figure {
+  max-width: 720px;
+  margin-inline: auto;
+}

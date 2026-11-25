@@ -80,7 +80,7 @@ const names: Record<string, string> = {
   IEC_C: "IEC C",
 };
 
-function Plot({
+export function Plot({
   rows,
   fields,
   title,

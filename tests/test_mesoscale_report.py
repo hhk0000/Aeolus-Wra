@@ -78,7 +78,22 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         assert table["rows"] == [
             [cell.text for cell in row.cells] for row in doc.tables[index].rows[1:]
         ]
-    assert len(output["charts"]) == 6
+    assert [chart["plot"] for chart in output["charts"]] == [
+        "monthly",
+        "hourly",
+        "frequency",
+        "rose",
+        "rose",
+        "weibull",
+    ]
+    monthly, hourly, frequency, direction, energy, fit = output["charts"]
+    assert monthly["rows"][0] == {"period": 1, "mean_speed": 5.0, "power_density": 84.0}
+    assert len(hourly["rows"]) == 24 and hourly["rows"][2]["mean_speed"] is None
+    assert frequency["fields"] == ["frequency", "energy_frequency"]
+    assert direction["rows"][0]["degrees"] == 0
+    assert energy["energy"] is True
+    assert fit["fit"]["k"] > 0
+    assert all("image" not in chart for chart in output["charts"])
     archive_export = client.post(path + "/export", data={"source_id": data["id"], "density": "1.2"})
     assert archive_export.status_code == 200
 

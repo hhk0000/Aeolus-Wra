@@ -1,7 +1,6 @@
 """Single-point hourly mesoscale statistics and in-place v1 Word bindings."""
 
 import re
-from base64 import b64encode
 from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
@@ -236,6 +235,52 @@ def figure(title, labels, series, kind):
     return buf.getvalue()
 
 
+def assessment_charts(series, fit):
+    plot_types = {"freq": "frequency", "fit": "weibull"}
+    fields_by_kind = {
+        "line": ["mean_speed", "power_density"],
+        "freq": ["frequency", "energy_frequency"],
+        "fit": ["frequency", "fitted_frequency"],
+    }
+    for title, labels, values, kind in series:
+        if kind == "annual":
+            continue
+        if kind == "rose":
+            field, data = values[0]
+            yield {
+                "title": title,
+                "plot": "rose",
+                "energy": field == "energy_frequency",
+                "rows": [
+                    {"label": label, "degrees": i * 22.5, field: float(value)}
+                    for i, (label, value) in enumerate(zip(labels, data, strict=True))
+                ],
+            }
+            continue
+        plot = (
+            ("monthly" if len(labels) == 12 else "hourly") if kind == "line" else plot_types[kind]
+        )
+        fields = fields_by_kind[kind]
+        label_key = "period" if kind == "line" else "bin"
+        rows = [
+            {
+                label_key: label,
+                **{
+                    field: float(points[i]) if np.isfinite(points[i]) else None
+                    for field, (_, points) in zip(fields, values, strict=True)
+                },
+            }
+            for i, label in enumerate(labels)
+        ]
+        yield {
+            "title": title,
+            "plot": plot,
+            "fields": fields,
+            "rows": rows,
+            **({"fit": {"k": fit["k"], "c": fit["c"]}} if kind == "fit" and fit else {}),
+        }
+
+
 def build(
     template, raw, rho, project, factor=75.0, energy_file=None, location=None, analysis_year=None
 ):
@@ -343,8 +388,8 @@ def build(
             "line",
         ),
         ("风速和风能频率图", range(27), [("风速频率 %", f), ("风能频率 %", e)], "freq"),
-        ("风向频率玫瑰图", COMPASS, [("", direction)], "rose"),
-        ("风能频率玫瑰图", COMPASS, [("", energy)], "rose"),
+        ("风向频率玫瑰图", COMPASS, [("frequency", direction)], "rose"),
+        ("风能频率玫瑰图", COMPASS, [("energy_frequency", energy)], "rose"),
     ]
     if fit:
         series.append(
@@ -402,14 +447,7 @@ def build(
             "height": float(height),
             "fields": fields,
             "tables": tables,
-            "charts": [
-                {
-                    "title": title,
-                    "image": b64encode(figure(title, labels, values, kind)).decode("ascii"),
-                }
-                for title, labels, values, kind in series
-                if kind != "annual"
-            ],
+            "charts": list(assessment_charts(series, fit)),
         }
     doc = Document(BytesIO(template))
 

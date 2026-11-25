@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { Plot } from "./InteractiveResultView";
+import { RoseChart } from "./RoseChart";
 
 type Source = {
   id: string;
@@ -40,7 +42,15 @@ type Result = {
       summary_rows?: number;
     }
   >;
-  charts: { title: string; image: string }[];
+  charts: {
+    title: string;
+    image?: string;
+    plot?: string;
+    rows?: Record<string, unknown>[];
+    fields?: string[];
+    energy?: boolean;
+    fit?: Record<string, unknown>;
+  }[];
 };
 type Template = { id: string; version: string; title: string };
 
@@ -130,7 +140,13 @@ export default function MesoscaleWorkspace({
     )
       .then(async (saved) => {
         if (controller.signal.aborted) return;
-        if (!saved.tables && sourceId && density > 0 && density < 3) {
+        const usesReportImages = saved.charts.some((chart) => !chart.rows);
+        if (
+          (!saved.tables || usesReportImages) &&
+          sourceId &&
+          density > 0 &&
+          density < 3
+        ) {
           const refreshed = await api<{ id: string }>(
             "/reports/assessment/runs",
             {
@@ -327,8 +343,8 @@ export default function MesoscaleWorkspace({
   );
 
   const period = source?.year && analysisYear !== undefined && (
-    <div className="ww-fields ww-fields-two">
-      <label>
+    <div className="ww-assessment-period">
+      <label className="field">
         分析年
         <select
           aria-label="分析年"
@@ -353,18 +369,10 @@ export default function MesoscaleWorkspace({
           ))}
         </select>
       </label>
-      <label>
-        分析高度（m）
-        <input readOnly value={source.height} />
-      </label>
-      <label>
-        分析年起点
-        <input readOnly value={analysisYear + "-01-01 00:00"} />
-      </label>
-      <label>
-        分析年终点（不含）
-        <input readOnly value={analysisYear + 1 + "-01-01 00:00"} />
-      </label>
+      <p className="ww-inline-note" role="status">
+        分析时段 {analysisYear}-01-01 00:00 至 {analysisYear + 1}-01-01
+        00:00（不含终点） · {source.height} m
+      </p>
     </div>
   );
 
@@ -787,10 +795,28 @@ export default function MesoscaleWorkspace({
               <p>当前资料无法生成这张图。</p>
             ) : (
               <>
-                <img
-                  src={"data:image/png;base64," + chart.image}
-                  alt={chart.title}
-                />
+                <div className="ww-assessment-plot">
+                  {chart.rows && chart.plot === "rose" ? (
+                    <RoseChart
+                      rows={chart.rows}
+                      title={chart.title}
+                      energy={chart.energy}
+                    />
+                  ) : chart.rows && chart.fields ? (
+                    <Plot
+                      rows={chart.rows}
+                      fields={chart.fields}
+                      title={chart.title}
+                      outputId={chart.plot}
+                      fit={chart.fit}
+                    />
+                  ) : chart.image ? (
+                    <img
+                      src={"data:image/png;base64," + chart.image}
+                      alt={chart.title}
+                    />
+                  ) : null}
+                </div>
                 {statistics && (
                   <div className="ww-table-scroll ww-assessment-table">
                     <table className="ww-result-table">

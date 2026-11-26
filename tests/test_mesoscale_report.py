@@ -124,11 +124,17 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
             client.get(f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/source").content
         )
     )
-    assert turbine_table._tbl.xml == original.tables[14]._tbl.xml
-    assert formal_doc.tables[-1]._tbl.xml == original.tables[15]._tbl.xml
+    assert [[cell.text for cell in row.cells] for row in turbine_table.rows] == [
+        [cell.text for cell in row.cells] for row in original.tables[14].rows
+    ]
+    assert [[cell.text for cell in row.cells] for row in formal_doc.tables[-1].rows] == [
+        [cell.text for cell in row.cells] for row in original.tables[15].rows
+    ]
     net_value = turbine_table.rows[1].cells[9].paragraphs[0].runs[0]
     assert net_value.text == "15328.8"
     assert str(net_value.font.highlight_color) == "YELLOW (7)"
+    assert net_value.font.name == "Times New Roman"
+    assert net_value._r.xpath("./w:rPr/w:rFonts/@w:eastAsia") == ["宋体"]
     direction_text = next(p for p in formal_doc.paragraphs if "主要风向为" in p.text)
     assert all(
         str(run.font.color.rgb) != "008000"
@@ -139,7 +145,9 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert "年上网电量为750.00万kWh" in approved_text
     assert "【北纬31.34813571°】" in approved_text
     assert "【上海农投横沙新洲绿电直连项目】" in approved_text
-    assert "【换图】" in approved_text
+    assert "【换图】" not in approved_text
+    grade_paragraph = next(p for p in formal_doc.paragraphs if "风功率密度等级为" in p.text)
+    assert any(run.text.endswith("级") and run.bold is False for run in grade_paragraph.runs)
     assert "近20年平均风速为5.00" in approved_text
     for shape in formal_doc.inline_shapes:
         assert shape.width == 5040000

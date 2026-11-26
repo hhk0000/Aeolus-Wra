@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 from io import BytesIO
-from math import ceil, cos, floor, isfinite, pi, sin
+from math import ceil, cos, floor, hypot, isfinite, pi, sin
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -82,7 +82,33 @@ def draw_rose(draw, box, compass, values, *, sectors=False):
         draw.line(points + points[:1], fill=BLUE, width=5, joint="curve")
 
 
-def draw_cartesian(image, box, labels, values, kind):
+def short_dashes(draw, start, end, color, phase=0):
+    x, y = start
+    dx, dy = end[0] - x, end[1] - y
+    length = hypot(dx, dy)
+    if not length:
+        return phase
+    dash, period = 12, 20
+    distance = -phase
+    while distance < length:
+        a = max(0, distance)
+        b = min(length, distance + dash)
+        if b > a:
+            draw.line(
+                (
+                    x + dx * a / length,
+                    y + dy * a / length,
+                    x + dx * b / length,
+                    y + dy * b / length,
+                ),
+                fill=color,
+                width=6,
+            )
+        distance += period
+    return (phase + length) % period
+
+
+def draw_cartesian(image, box, labels, values, kind, *, approved_layout=False):
     draw = ImageDraw.Draw(image)
     left, top, right, bottom = box
     series = [column for _, column in values]
@@ -103,6 +129,8 @@ def draw_cartesian(image, box, labels, values, kind):
             step = next((s for s in (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50) if span / 8 <= s), 100)
             minimum = max(0, floor((min(available) - step * 0.35) / step) * step)
         top_value = max(minimum + step, ceil(peak / step) * step)
+        if approved_layout and kind in {"line", "freq"}:
+            top_value += step
         domains.append((minimum, top_value, step))
 
     def y(value, index):
@@ -142,17 +170,22 @@ def draw_cartesian(image, box, labels, values, kind):
         color = BLUE if index == 0 else GOLD if kind == "fit" else RED
         is_bar = annual or kind == "freq" or kind == "fit" and index == 0
         previous = None
+        phase = 0
         for x, value in zip(centers, column, strict=True):
             if not isfinite(value):
                 previous = None
+                phase = 0
                 continue
             height = y(value, index)
             if is_bar:
-                half = min(62, unit_width * (0.17 if kind == "freq" else 0.24))
+                width_fraction = (0.12 if approved_layout else 0.17) if kind == "freq" else 0.24
+                half = min(62, unit_width * width_fraction)
                 center = x + ((2 * index - 1) * half if kind == "freq" else 0)
                 draw.rectangle((center - half, height, center + half, bottom), fill=color)
                 continue
-            if previous and dual and index == 1:
+            if previous and dual and index == 1 and approved_layout:
+                phase = short_dashes(draw, previous, (x, height), color, phase)
+            elif previous and dual and index == 1:
                 px, py = previous
                 for part in (0, 2, 4, 6):
                     a, b = part / 8, (part + 1) / 8
@@ -169,7 +202,7 @@ def draw_cartesian(image, box, labels, values, kind):
             elif previous:
                 draw.line([previous, (x, height)], fill=color, width=6)
             if dual:
-                marker = 10
+                marker = (13 if index else 19) if approved_layout else 10
                 if index:
                     draw.rectangle(
                         (x - marker, height - marker, x + marker, height + marker), fill=color
@@ -222,7 +255,19 @@ def formal_figure(
             for index, name in enumerate(legend):
                 x = (0.35 + index * 0.19) * WIDTH
                 color = BLUE if index == 0 else RED
-                draw.rectangle((x, 53, x + 22, 73), fill=color)
+                if approved_layout and dual:
+                    start, end = (x - 14, 63), (x + 26, 63)
+                    if index:
+                        short_dashes(draw, start, end, color)
+                        draw.rectangle((x - 4, 54, x + 14, 72), fill=color)
+                    else:
+                        draw.line((start, end), fill=color, width=6)
+                        draw.polygon(
+                            [(x - 8, 63), (x + 5, 50), (x + 18, 63), (x + 5, 76)],
+                            fill=color,
+                        )
+                else:
+                    draw.rectangle((x, 53, x + 22, 73), fill=color)
                 label(draw, (x + 31, 63), name, anchor="lm")
         left, top, right, bottom = (
             171,
@@ -230,7 +275,9 @@ def formal_figure(
             WIDTH - (180 if dual else 64),
             height - (144 if annual else 112),
         )
-        draw_cartesian(image, (left, top, right, bottom), labels, main, kind)
+        draw_cartesian(
+            image, (left, top, right, bottom), labels, main, kind, approved_layout=approved_layout
+        )
         rotated_label(
             image, (43, (top + bottom) / 2), "风速（m/s）" if annual or dual else "频率（%）"
         )

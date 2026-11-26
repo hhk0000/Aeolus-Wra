@@ -997,6 +997,9 @@ def build(
             png,
             preserve_ratio=formal_layout or kind in ("rose", "freq", "fit"),
         )
+        if approved_layout:
+            picture_paragraph = shape._inline.xpath("ancestor::w:p[1]")[0]
+            approved_assessment_template.clear_generated_chart_note(picture_paragraph.getnext())
         if fit_label:
             shapes[title]._inline.docPr.set("descr", fit_label)
     if not fit and not approved_layout:
@@ -1271,6 +1274,8 @@ def build(
                 bound.text = prefix + value + suffix
             bound.font.color.rgb = RGBColor.from_string("008000")
             bound.font.highlight_color = None
+            if approved_layout and m[0] == "【风功率密度等级】":
+                bound.font.bold = False
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
 
@@ -1279,6 +1284,8 @@ def build(
     for section in doc.sections:
         for para in section.header.paragraphs:
             replace(para)
+    if approved_layout:
+        approved_assessment_template.apply_body_typefaces(doc.element.body)
     doc.core_properties.comments = "前期中尺度评估 · mesoscale-v1"
     upd = OxmlElement("w:updateFields")
     current_rids = {

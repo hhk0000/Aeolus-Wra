@@ -3,6 +3,7 @@
 import re
 from io import BytesIO
 
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 from PIL import Image, ImageOps
@@ -106,3 +107,44 @@ def select_thunderstorm_section(doc, enabled):
     if not enabled:
         for child in children[start:end]:
             doc.element.body.remove(child)
+
+
+def clear_generated_chart_note(caption):
+    if caption is None or caption.tag != qn("w:p"):
+        return
+    nodes = list(caption.iter(qn("w:t")))
+    joined = "".join(node.text or "" for node in nodes)
+    note = re.search(r"[ \u3000]*【换图】[ \u3000]*$", joined)
+    if note is None:
+        return
+    remaining = note.start()
+    for node in nodes:
+        value = node.text or ""
+        node.text = value[:remaining]
+        remaining = max(0, remaining - len(value))
+
+
+def apply_body_typefaces(body):
+    start = next(
+        index
+        for index, element in enumerate(body)
+        if element.tag == qn("w:p")
+        and "".join(node.text or "" for node in element.iter(qn("w:t"))).strip() == "风能资源"
+    )
+    for element in body[start:]:
+        for run in element.iter(qn("w:r")):
+            if not any(node.text for node in run.iter(qn("w:t"))):
+                continue
+            props = run.find(qn("w:rPr"))
+            if props is None:
+                props = OxmlElement("w:rPr")
+                run.insert(0, props)
+            fonts = props.find(qn("w:rFonts"))
+            if fonts is None:
+                fonts = OxmlElement("w:rFonts")
+                style = props.find(qn("w:rStyle"))
+                props.insert(0 if style is None else props.index(style) + 1, fonts)
+            fonts.attrib.clear()
+            fonts.set(qn("w:eastAsia"), "宋体")
+            for script in ("ascii", "hAnsi", "cs"):
+                fonts.set(qn(f"w:{script}"), "Times New Roman")

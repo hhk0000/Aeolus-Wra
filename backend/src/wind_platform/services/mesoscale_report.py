@@ -1117,9 +1117,6 @@ def build(
                 "风速倍数": f"{extreme_multiplier:g}",
                 "倍数法场址风速": f"{extreme['site_speed']:.2f}",
                 "倍数法标准风速": f"{extreme['multiplier_standard']:.2f}",
-                "实际参与比选的方法": methods,
-                "场址最大风速": f"{extreme['adopted_site']:.2f}",
-                "采用方法": extreme["adopted_method"],
                 "标准空气密度下最大风速": f"{extreme['adopted']:.2f}",
                 "勾选并完成计算时输出本小节": "",
             }
@@ -1177,20 +1174,31 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if approved_layout and "【实际参与比选的方法】" in txt:
+            approved_assessment_template.revise_extreme_conclusion(
+                para, "【标准空气密度下最大风速】"
+            )
+            txt = para.text
+        if approved_layout and txt.endswith(approved_assessment_template.PRESSURE_HEIGHT_NOTE):
+            approved_assessment_template.remove_pressure_height_note(para)
+            txt = para.text
         if "【空气密度说明】" in txt or (
             "【100 m处空气密度】" in txt and "【轮毂高度空气密度】" in txt
         ):
+            density_digits = 3 if approved_layout else 6
             if density_adjustment:
                 temp_source = "按源文件识别" if mean_temperature_c is None else "由分析配置填写"
                 description = (
-                    f"分析期资料最高风速层为 {height} m，采用空气密度 {source_density:.6f} kg/m³。"
+                    f"分析期资料最高风速层为 {height} m，"
+                    f"采用空气密度 {source_density:.{density_digits}f} kg/m³。"
                     f"同期平均气温为 {temperature:.2f} ℃（{temp_source}）。"
                     f"按 GB/T 18710—2002 式（B3）推导的等温高度折算，"
-                    f"轮毂高度 {hub_height:g} m 处的空气密度为 {rho:.6f} kg/m³。"
+                    f"轮毂高度 {hub_height:g} m 处的空气密度为 {rho:.{density_digits}f} kg/m³。"
                 )
             else:
                 description = (
-                    f"分析期资料风速层与轮毂高度均为 {height} m，采用空气密度 {rho:.6f} kg/m³。"
+                    f"分析期资料风速层与轮毂高度均为 {height} m，"
+                    f"采用空气密度 {rho:.{density_digits}f} kg/m³。"
                 )
             if approved_layout:
                 fields["空气密度说明"] = description
@@ -1282,7 +1290,9 @@ def build(
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
             if approved_layout:
-                approved_assessment_template.style_inserted_numbers(bound)
+                approved_assessment_template.style_inserted_numbers(
+                    bound, density_units=m[0] == "【空气密度说明】"
+                )
 
     for para in doc.paragraphs:
         replace(para)

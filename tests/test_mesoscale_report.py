@@ -156,6 +156,10 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     grade_paragraph = next(p for p in formal_doc.paragraphs if "风功率密度等级为" in p.text)
     assert any(run.text.strip() == "级" and run.bold is False for run in grade_paragraph.runs)
     assert "近20年平均风速为5.00" in approved_text
+    assert "采用空气密度 1.200 kg/m³" in approved_text
+    assert "风压法沿用风压参考值的原高度基准" not in approved_text
+    assert "50 年一遇最大风速取 26.83 m/s" in approved_text
+    assert "IEC III 类及以上的风电机组，最终结果以厂家复核为准" in approved_text
     for shape in formal_doc.inline_shapes:
         assert shape.width == 5040000
         picture = shape._inline.graphic.graphicData.pic
@@ -488,7 +492,7 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     assert "（3）五日雷暴法【勾选并完成计算时输出本小节】" in paragraphs
     assert any("近20年平均风速为【20年平均风速】" in paragraph for paragraph in paragraphs)
     assert any(
-        "（五日雷暴法）" in paragraph and "取其中最大值" in paragraph for paragraph in paragraphs
+        f"50 年一遇最大风速取 {extreme['adopted']:.2f} m/s" in paragraph for paragraph in paragraphs
     )
 
     two_years = hourly + hourly[hourly.index("\n") + 1 :].replace("2023", "2022")

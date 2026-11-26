@@ -134,8 +134,9 @@ def apply_typefaces(run):
         fonts.set(qn(f"w:{script}"), "Times New Roman")
 
 
-def style_inserted_numbers(run):
-    parts = re.split(r"([-−+]?[0-9]+(?:[.,][0-9]+)*)", run.text)
+def style_inserted_numbers(run, *, density_units=False):
+    unit = r"(?: kg/m³)?" if density_units else ""
+    parts = re.split(rf"([-−+]?[0-9]+(?:[.,][0-9]+)*{unit})", run.text)
     if len(parts) == 1:
         return
     prototype = deepcopy(run._r)
@@ -164,3 +165,47 @@ def apply_formula_typefaces(body):
             if not any(node.text for node in run.iter(qn("w:t"))):
                 continue
             apply_typefaces(run)
+
+
+PRESSURE_HEIGHT_NOTE = "风压法沿用风压参考值的原高度基准。"
+EXTREME_CONCLUSION = (
+    " m/s。对照《风力发电机组设计要求》（GB/T 18451.1—2022）及 IEC 相关标准，"
+    "拟定采用安全等级为 IEC III 类及以上的风电机组，最终结果以厂家复核为准。"
+)
+
+
+def remove_pressure_height_note(paragraph):
+    if not paragraph.text.endswith(PRESSURE_HEIGHT_NOTE):
+        return
+    remaining = len(PRESSURE_HEIGHT_NOTE)
+    for run in reversed(paragraph.runs):
+        if remaining == 0:
+            break
+        count = min(remaining, len(run.text))
+        if count:
+            run.text = run.text[:-count]
+            remaining -= count
+
+
+def revise_extreme_conclusion(paragraph, speed):
+    runs = [run for run in paragraph.runs if run.text]
+    black = runs[0]._r
+    green = next(run._r for run in runs if run.text == speed and is_green(run._r))
+    anchor = next(iter(paragraph._p.findall(qn("w:commentRangeEnd"))), None)
+    for template, text in (
+        (
+            black,
+            "综合以上方法计算结果，出于安全保守考虑，"
+            "推荐风电场区范围内标准空气密度下的 50 年一遇最大风速取 ",
+        ),
+        (green, speed),
+        (black, EXTREME_CONCLUSION),
+    ):
+        new = Run(deepcopy(template), paragraph)
+        new.text = text
+        if anchor is None:
+            paragraph._p.append(new._r)
+        else:
+            anchor.addprevious(new._r)
+    for run in runs:
+        paragraph._p.remove(run._r)

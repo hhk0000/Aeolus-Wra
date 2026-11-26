@@ -119,18 +119,28 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     turbine_table = next(
         table for table in formal_doc.tables if table.rows[0].cells[0].text == "序号"
     )
+    original = Document(
+        BytesIO(
+            client.get(f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/source").content
+        )
+    )
+    assert turbine_table._tbl.xml == original.tables[14]._tbl.xml
+    assert formal_doc.tables[-1]._tbl.xml == original.tables[15]._tbl.xml
     net_value = turbine_table.rows[1].cells[9].paragraphs[0].runs[0]
-    assert net_value.text == "7500.00"
-    assert str(net_value.font.color.rgb) == "008000" and net_value.font.highlight_color is None
+    assert net_value.text == "15328.8"
+    assert str(net_value.font.highlight_color) == "YELLOW (7)"
     direction_text = next(p for p in formal_doc.paragraphs if "主要风向为" in p.text)
     assert all(
         str(run.font.color.rgb) != "008000"
         for run in direction_text.runs
         if "主要风向为" in run.text
     )
-    assert "尾流后理论年发电量合计为 10000.00 MWh" in "\n".join(
-        p.text for p in formal_doc.paragraphs
-    )
+    approved_text = "\n".join(p.text for p in formal_doc.paragraphs)
+    assert "年上网电量为750.00万kWh" in approved_text
+    assert "【北纬31.34813571°】" in approved_text
+    assert "【上海农投横沙新洲绿电直连项目】" in approved_text
+    assert "【换图】" in approved_text
+    assert "近20年平均风速为5.00" in approved_text
     for shape in formal_doc.inline_shapes:
         assert shape.width == 5040000
         picture = shape._inline.graphic.graphicData.pic
@@ -460,7 +470,8 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     )
     assert report.status_code == 200
     paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
-    assert "（3）五日雷暴法" in paragraphs
+    assert "（3）五日雷暴法【勾选并完成计算时输出本小节】" in paragraphs
+    assert any("近20年平均风速为【20年平均风速】" in paragraph for paragraph in paragraphs)
     assert any(
         "（五日雷暴法）" in paragraph and "取其中最大值" in paragraph for paragraph in paragraphs
     )

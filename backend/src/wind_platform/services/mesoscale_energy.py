@@ -10,10 +10,6 @@ from wind_platform.services.energy_workbook import workbook_csv
 
 
 def energy_table(table, raw, factor, fill):
-    prototype = deepcopy(table.rows[1]._tr)
-    total = table.rows[-1]._tr
-    for row in list(table.rows)[1:-1]:
-        table._tbl.remove(row._tr)
     rows = []
     if raw and raw.startswith(b"PK"):
         raw = workbook_csv(raw).encode("utf-8")
@@ -52,6 +48,27 @@ def energy_table(table, raw, factor, fill):
             raise CalculationError(
                 "发电量表需要CSV/制表符文本，含唯一序号、尾流后理论年发电量(MWh)、单机容量(MW)，能量非负、容量为正。"
             ) from exc
+    if table is not None:
+        fill_energy_table(table, rows, factor, fill)
+    if not rows:
+        return {}
+    base = sum(r[1] for r in rows)
+    net = base * factor / 100
+    mw = sum(r[2] for r in rows)
+    return {
+        "理论电量合计": f"{base:.2f}",
+        "单机理论电量均值": f"{base / len(rows):.2f}",
+        "年上网电量": f"{net / 10:.2f}",
+        "年装机满发利用小时": f"{net / mw:.1f}",
+        "容量系数": f"{net / mw / 8760:.3f}",
+    }
+
+
+def fill_energy_table(table, rows, factor, fill):
+    prototype = deepcopy(table.rows[1]._tr)
+    total = table.rows[-1]._tr
+    for row in list(table.rows)[1:-1]:
+        table._tbl.remove(row._tr)
     for i, (r, base, mw) in enumerate(rows):
         total.addprevious(deepcopy(prototype))
         net = base * factor / 100
@@ -71,16 +88,9 @@ def energy_table(table, raw, factor, fill):
         fill(cell, "—")
     fill(total_cells[0], "平均值" if rows else "待上传各风机发电量估算表")
     if not rows:
-        return {}
+        return
     base = sum(r[1] for r in rows)
     net = base * factor / 100
     mw = sum(r[2] for r in rows)
     for i, value in [(8, base / len(rows)), (9, net / len(rows)), (10, net / mw)]:
         fill(total_cells[i], f"{value:.2f}")
-    return {
-        "理论电量合计": f"{base:.2f}",
-        "单机理论电量均值": f"{base / len(rows):.2f}",
-        "年上网电量": f"{net / 10:.2f}",
-        "年装机满发利用小时": f"{net / mw:.1f}",
-        "容量系数": f"{net / mw / 8760:.3f}",
-    }

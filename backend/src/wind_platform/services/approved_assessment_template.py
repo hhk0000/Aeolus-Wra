@@ -5,6 +5,7 @@ from io import BytesIO
 
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from PIL import Image, ImageOps
 
 from wind_platform.core.calculations import CalculationError
 
@@ -23,7 +24,21 @@ SAMPLE_FIELDS = {
 }
 
 
-def restore_chart_anchors(doc, titles):
+def is_green(run):
+    props = run.find(qn("w:rPr"))
+    if props is None:
+        return False
+    color = props.find(qn("w:color"))
+    highlight = props.find(qn("w:highlight"))
+    return (
+        color is not None
+        and color.get(qn("w:val")) in {"008000", "00B050"}
+        and (highlight is None or highlight.get(qn("w:val")) == "none")
+        and props.find(qn("w:shd")) is None
+    )
+
+
+def restore_chart_anchors(doc, titles, *, sample_title=None):
     for paragraph in doc.paragraphs:
         for shape in paragraph._p.xpath(".//w:pict/*[local-name()='shape']"):
             title = shape.get("id")
@@ -36,8 +51,17 @@ def restore_chart_anchors(doc, titles):
             if not width or not height or len(images) != 1:
                 raise CalculationError(f"评估模板图位无效：{title}")
             rid = images[0].get(qn("r:id"))
+            image = BytesIO(doc.part.related_parts[rid].blob)
+            if title == sample_title:
+                with Image.open(image) as raw:
+                    sample = ImageOps.expand(
+                        raw.convert("RGB"), border=max(6, round(raw.width * 0.008)), fill="#FFEA65"
+                    )
+                image = BytesIO()
+                sample.save(image, format="PNG")
+                image.seek(0)
             picture = paragraph.add_run().add_picture(
-                BytesIO(doc.part.related_parts[rid].blob),
+                image,
                 width=Pt(float(width[1])),
                 height=Pt(float(height[1])),
             )
@@ -46,7 +70,7 @@ def restore_chart_anchors(doc, titles):
             old.getparent().remove(old)
 
 
-def restore_sample_fields(paragraphs):
+def restore_sample_fields(paragraphs, fields):
     prefix = "AeolusReviewField_"
     for paragraph in paragraphs:
         for bookmark in paragraph._p.xpath("./w:bookmarkStart"):
@@ -54,7 +78,7 @@ def restore_sample_fields(paragraphs):
             if not name.startswith(prefix):
                 continue
             field = SAMPLE_FIELDS.get(int(name.removeprefix(prefix)))
-            if not field:
+            if field not in fields:
                 continue
             start = paragraph._p.index(bookmark)
             end = next(
@@ -68,7 +92,7 @@ def restore_sample_fields(paragraphs):
                 for element in paragraph._p[start + 1 : paragraph._p.index(end)]
                 for node in element.iter(qn("w:t"))
             ]
-            if text_nodes:
+            if text_nodes and all(is_green(node.getparent()) for node in text_nodes):
                 text_nodes[0].text = f"【{field}】"
                 for node in text_nodes[1:]:
                     node.text = ""

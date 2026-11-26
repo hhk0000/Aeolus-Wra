@@ -4,7 +4,6 @@ import math
 import re
 from copy import deepcopy
 from datetime import datetime
-from functools import partial
 from io import BytesIO
 from itertools import pairwise
 
@@ -881,18 +880,26 @@ def build(
     doc = Document(BytesIO(template))
     if approved_layout:
         chart_titles = {"威布尔分布图", *(item[0] for item in series)}
-        approved_assessment_template.restore_chart_anchors(doc, chart_titles)
+        approved_assessment_template.restore_chart_anchors(
+            doc, chart_titles, sample_title=None if fit else "威布尔分布图"
+        )
 
-    def fill_cell(cell, value, *, unhighlight=False):
+    def fill_cell(cell, value):
+        if approved_layout:
+            runs = [run for paragraph in cell.paragraphs for run in paragraph.runs if run.text]
+            if (
+                value is None
+                or not runs
+                or not all(approved_assessment_template.is_green(run._r) for run in runs)
+            ):
+                return
+            runs[0].text = str(value)
+            for extra in runs[1:]:
+                extra.text = ""
+            return
         runs = cell.paragraphs[0].runs
         run = runs[0] if runs else cell.paragraphs[0].add_run()
         run.text = str(value)
-        if unhighlight:
-            pending = run.text.startswith("待") or run.text in ("—", "平均值")
-            run.font.color.rgb = RGBColor.from_string("000000" if pending else "008000")
-            run.font.highlight_color = None
-            for shade in run._r.xpath("./w:rPr/w:shd"):
-                shade.getparent().remove(shade)
         for extra in runs[1:]:
             extra.text = ""
 
@@ -908,8 +915,8 @@ def build(
             [
                 start + i,
                 fmt(annual[i]),
-                start + j if j < window_years else "/",
-                fmt(annual[j]) if j < window_years else "/",
+                start + j if j < window_years else None if approved_layout else "/",
+                fmt(annual[j]) if j < window_years else None if approved_layout else "/",
             ],
         )
     row(
@@ -917,13 +924,18 @@ def build(
         12,
         [
             f"{window_years}年平均",
-            fmt(avg),
+            None if approved_layout and short_window else fmt(avg),
             "近10年平均" if short_window else "10年平均",
-            fields["10年平均风速"] if window_years >= 10 else "资料不足",
+            fields["10年平均风速"]
+            if window_years >= 10
+            else None
+            if approved_layout
+            else "资料不足",
         ],
     )
-    for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
-        unused._tr.getparent().remove(unused._tr)
+    if not approved_layout:
+        for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
+            unused._tr.getparent().remove(unused._tr)
     for table_index, table in enumerate(tables.values(), 1):
         for row_index, values in enumerate(table["rows"], 1):
             if formal_layout and table_index == 3 and row_index <= 26:
@@ -987,7 +999,7 @@ def build(
         )
         if fit_label:
             shapes[title]._inline.docPr.set("descr", fit_label)
-    if not fit:
+    if not fit and not approved_layout:
         shape = shapes["威布尔分布图"]._inline
         replaced_rids.add(shape.graphic.graphicData.pic.blipFill.blip.embed)
         shape.getparent().remove(shape)
@@ -1030,14 +1042,8 @@ def build(
         anchor._p.addprevious(caption._p)
     from wind_platform.services.mesoscale_energy import energy_table
 
-    energy_index, sensitivity_index = (14, 15) if approved_layout else (6, 7)
     fields.update(
-        energy_table(
-            doc.tables[energy_index],
-            energy_file,
-            factor,
-            partial(fill_cell, unhighlight=approved_layout),
-        )
+        energy_table(None if approved_layout else doc.tables[6], energy_file, factor, fill_cell)
     )
     if formal_layout:
         for frequencies_at_bins, field in (
@@ -1053,14 +1059,17 @@ def build(
             else ""
         )
     # Sensitivity methodology has not been approved; suppress the reference project's numbers.
-    for rr in doc.tables[sensitivity_index].rows[2:]:
-        for cc in rr.cells:
-            if re.search(r"\d", cc.text):
-                fill_cell(cc, "待复核")
+    if not approved_layout:
+        for rr in doc.tables[7].rows[2:]:
+            for cc in rr.cells:
+                if re.search(r"\d", cc.text):
+                    fill_cell(cc, "待复核")
     for para in doc.paragraphs:
         if "本阶段理论年发电量综合修正系数暂按" in para.text:
             for run in para.runs:
-                if run.text == "75":
+                if run.text == "75" and (
+                    not approved_layout or approved_assessment_template.is_green(run._r)
+                ):
                     run.text = f"{factor:g}"
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
@@ -1109,10 +1118,11 @@ def build(
                 "勾选并完成计算时输出本小节": "",
             }
         )
-        for field in ("参数A", "参数k", "容量系数", "年装机满发利用小时", "年上网电量"):
-            fields.setdefault(field, "待补")
-        for field in ("纬度", "经度", "海拔高度", "不确定因素影响范围"):
-            fields.setdefault(field, "待补")
+        if short_window:
+            for field in ("20年起止年月", "20年平均风速", "代表年份", "相对偏差", "代表年选取说明"):
+                fields.pop(field, None)
+        if window_years < 10:
+            fields.pop("10年平均风速", None)
         if thunderstorm:
             fields.update(
                 {
@@ -1127,17 +1137,17 @@ def build(
                     "五日雷暴法标准风速": f"{extreme['thunderstorm']['standard_speed']:.2f}",
                 }
             )
-        approved_assessment_template.restore_sample_fields(doc.paragraphs)
+        approved_assessment_template.restore_sample_fields(doc.paragraphs, fields)
         for section in doc.sections:
-            approved_assessment_template.restore_sample_fields(section.header.paragraphs)
+            approved_assessment_template.restore_sample_fields(section.header.paragraphs, fields)
 
     paragraphs = doc.paragraphs
     for para in paragraphs:
-        if para.text == "本节按标准空气密度口径比较两种方法的估算结果。":
+        if not approved_layout and para.text == "本节按标准空气密度口径比较两种方法的估算结果。":
             para.clear().add_run(
                 "本节比较各启用方法在场址空气密度下的估算结果，再将最大值折算至标准空气密度。"
             )
-        if thunderstorm and para.text.startswith("【前期风速判断】"):
+        if not approved_layout and thunderstorm and para.text.startswith("【前期风速判断】"):
             para.insert_paragraph_before("（3）五日雷暴法", style=para.style)
             para.insert_paragraph_before(
                 f"采用 {thunderstorm['year']} 年 {thunderstorm['height']:g} m 高度的"
@@ -1176,9 +1186,12 @@ def build(
                 description = (
                     f"分析期资料风速层与轮毂高度均为 {height} m，采用空气密度 {rho:.6f} kg/m³。"
                 )
-            para.clear().add_run(description)
-            return
-        if short_window and "按年平均风速相对20年平均风速" in txt:
+            if approved_layout:
+                fields["空气密度说明"] = description
+            else:
+                para.clear().add_run(description)
+                return
+        if not approved_layout and short_window and "按年平均风速相对20年平均风速" in txt:
             para.clear().add_run(
                 f"本次采用{fields['资料期']}的中尺度数据，共{window_years}个自然年。"
                 f"{height} m 高度资料期平均风速为{fmt(avg)} m/s。"
@@ -1191,7 +1204,7 @@ def build(
                 "结果反映现有资料期风况，长期代表性待补充资料后复核。"
             )
             return
-        if short_window and "选取代表年份为" in txt:
+        if not approved_layout and short_window and "选取代表年份为" in txt:
             para.clear().add_run(
                 f"分析期为{fields['分析期']}。采用{height} m 高度风速、风向资料，"
                 f"时间步长为 {fields['时间步长']}。"
@@ -1207,7 +1220,7 @@ def build(
             for m in re.finditer(r"【([^】]+)】", txt)
             if m[1] in fields
         ]
-        if short_window:
+        if short_window and not approved_layout:
             labels = {
                 "近20年各年风速表": "资料期各年风速表",
                 "近20年平均风速图": "资料期各年平均风速图",
@@ -1232,6 +1245,11 @@ def build(
             right = next(
                 i for i in range(left, len(runs)) if offsets[i] < m.end() <= offsets[i + 1]
             )
+            if approved_layout and any(
+                run.text and not approved_assessment_template.is_green(run._r)
+                for run in runs[left : right + 1]
+            ):
+                continue
             prefix = runs[left].text[: m.start() - offsets[left]]
             suffix = runs[right].text[m.end() - offsets[right] :]
             if approved_layout and suffix:

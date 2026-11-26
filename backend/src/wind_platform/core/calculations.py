@@ -42,6 +42,14 @@ def density(temperature_c, pressure_pa=None, altitude_m=None, kelvin_offset=273.
     return (353.05 / t) * math.exp(-0.034 * altitude_m / t)
 
 
+def density_at_height(
+    source_density: float, height_delta: float, mean_temperature_c: float
+) -> float:
+    """Relative form of GB/T 18710—2002 B.3 with the same mean temperature at both heights."""
+    temperature = mean_temperature_c + 273
+    return source_density * math.exp(-0.034 * height_delta / temperature)
+
+
 def wind_statistics(speed, rho: float, interval_minutes: float) -> dict:
     v = numbers(speed)
     v = v[np.isfinite(v)]

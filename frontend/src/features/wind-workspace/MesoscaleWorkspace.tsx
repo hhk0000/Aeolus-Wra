@@ -23,6 +23,8 @@ type Source = {
   deviation?: number;
   density_by_year?: Record<string, number>;
   density_constant?: number | null;
+  temperature_by_year?: Record<string, number>;
+  temperature_period?: number | null;
 };
 type Assessment = {
   source?: Source;
@@ -33,6 +35,8 @@ type Assessment = {
   pressureOverride?: string;
   multiplier: string;
   density: string;
+  hubHeight?: string;
+  meanTemperature?: string;
   factor: string;
   manualLocation: boolean;
   lat: string;
@@ -78,6 +82,16 @@ function identifiedDensity(
 type Result = {
   year: number;
   height: number;
+  hub_height_m?: number;
+  density_adjustment?: {
+    source_height_m: number;
+    hub_height_m: number;
+    source_density: number;
+    hub_density: number;
+    mean_temperature_c: number;
+    temperature_source: "file" | "manual";
+  } | null;
+  power_density_grade?: { description: string };
   interval_minutes?: number;
   monthly_roses?: Record<
     "frequency" | "energy_frequency",
@@ -234,9 +248,22 @@ export default function MesoscaleWorkspace({
   const analysisEnd = shortWindow ? source?.end_year : analysisYear;
   const sourceDensity = identifiedDensity(source, analysisYear);
   const density = sourceDensity ?? Number(state.density);
+  const hubHeight = state.hubHeight ? Number(state.hubHeight) : undefined;
+  const needsDensityAdjustment =
+    !!source && hubHeight !== undefined && hubHeight !== source.height;
+  const sourceTemperature = shortWindow
+    ? (source?.temperature_period ?? undefined)
+    : analysisYear === undefined
+      ? undefined
+      : source?.temperature_by_year?.[analysisYear];
+  const manualTemperature = state.meanTemperature
+    ? Number(state.meanTemperature)
+    : undefined;
+  const analysisTemperature = manualTemperature ?? sourceTemperature;
   const needsSourceRefresh =
     !!sourceId &&
     (source?.density_by_year === undefined ||
+      source.temperature_by_year === undefined ||
       source.window_years === undefined ||
       source.interval_minutes === undefined);
 
@@ -338,7 +365,8 @@ export default function MesoscaleWorkspace({
             usesReportImages ||
             saved.extreme?.mean_speed_used === undefined ||
             !saved.monthly_roses ||
-            !saved.weibull_charts) &&
+            !saved.weibull_charts ||
+            !saved.power_density_grade) &&
           sourceId &&
           density > 0 &&
           density < 3
@@ -348,6 +376,10 @@ export default function MesoscaleWorkspace({
             {
               source_id: sourceId,
               density,
+              hub_height_m: hubHeight,
+              mean_temperature_c: needsDensityAdjustment
+                ? manualTemperature
+                : undefined,
               analysis_year: chosenYear,
               extreme: {
                 multiplier,
@@ -386,6 +418,9 @@ export default function MesoscaleWorkspace({
     state.runId,
     sourceId,
     density,
+    hubHeight,
+    manualTemperature,
+    needsDensityAdjustment,
     selectedAnalysisYear,
     multiplier,
     pressureId,
@@ -423,6 +458,12 @@ export default function MesoscaleWorkspace({
     analysisYears.includes(analysisYear) &&
     density > 0 &&
     density < 3 &&
+    (hubHeight === undefined ||
+      (hubHeight > 0 && Number.isFinite(hubHeight))) &&
+    (!needsDensityAdjustment ||
+      (analysisTemperature !== undefined &&
+        analysisTemperature >= -100 &&
+        analysisTemperature <= 100)) &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
     (pressureOverride === undefined ||
@@ -444,6 +485,7 @@ export default function MesoscaleWorkspace({
       source: undefined,
       runId: undefined,
       analysisYear: undefined,
+      meanTemperature: undefined,
       manualLocation: false,
       lat: "",
       lon: "",
@@ -471,6 +513,7 @@ export default function MesoscaleWorkspace({
           density: "",
           runId: undefined,
           analysisYear: undefined,
+          meanTemperature: undefined,
           manualLocation: false,
           lat: "",
           lon: "",
@@ -500,6 +543,10 @@ export default function MesoscaleWorkspace({
       const run = await api<{ id: string }>("/reports/assessment/runs", {
         source_id: source.id,
         density,
+        hub_height_m: hubHeight,
+        mean_temperature_c: needsDensityAdjustment
+          ? manualTemperature
+          : undefined,
         analysis_year: selectedAnalysisYear,
         extreme: extremeOptions,
       });
@@ -522,6 +569,10 @@ export default function MesoscaleWorkspace({
       const form = new FormData();
       form.set("source_id", source.id);
       form.set("density", String(density));
+      if (hubHeight !== undefined) form.set("hub_height_m", String(hubHeight));
+      if (needsDensityAdjustment && manualTemperature !== undefined) {
+        form.set("mean_temperature_c", String(manualTemperature));
+      }
       if (selectedAnalysisYear !== undefined) {
         form.set("analysis_year", String(selectedAnalysisYear));
       }
@@ -594,6 +645,7 @@ export default function MesoscaleWorkspace({
                 setResultError("");
                 change({
                   analysisYear: value ? Number(value) : undefined,
+                  meanTemperature: undefined,
                   runId: undefined,
                 });
               }}
@@ -789,7 +841,7 @@ export default function MesoscaleWorkspace({
                   <fieldset disabled={busy} className="ww-report-controls">
                     <div className="ww-fields ww-fields-two">
                       <label>
-                        空气密度
+                        源层空气密度
                         <input
                           aria-label="空气密度"
                           aria-describedby="assessment-density-note"
@@ -820,9 +872,63 @@ export default function MesoscaleWorkspace({
                           kg/m³ ·{" "}
                           {sourceDensity !== undefined
                             ? "从源文件自动识别"
-                            : "未识别到密度，请手动填写"}
+                            : "请填写最高风速层空气密度"}
                         </small>
                       </label>
+                      <label>
+                        轮毂高度（m）
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          placeholder={
+                            source ? `默认 ${source.height} m` : undefined
+                          }
+                          value={state.hubHeight ?? ""}
+                          onChange={(event) => {
+                            setResult(undefined);
+                            change({
+                              hubHeight: event.target.value,
+                              runId: undefined,
+                            });
+                          }}
+                        />
+                        <small className="ww-inline-note">
+                          {needsDensityAdjustment
+                            ? `源风速层为 ${source?.height} m，按式（B3）折算密度。`
+                            : "留空时采用导入数据的最高风速层。"}
+                        </small>
+                      </label>
+                      {needsDensityAdjustment && (
+                        <label className="ww-wide">
+                          分析期平均气温（℃）
+                          <input
+                            type="number"
+                            min="-100"
+                            max="100"
+                            step="any"
+                            required={sourceTemperature === undefined}
+                            value={state.meanTemperature ?? ""}
+                            placeholder={
+                              sourceTemperature === undefined
+                                ? "请输入同期平均气温"
+                                : `源文件 ${sourceTemperature.toFixed(2)} ℃`
+                            }
+                            onChange={(event) => {
+                              setResult(undefined);
+                              change({
+                                meanTemperature: event.target.value,
+                                runId: undefined,
+                              });
+                            }}
+                          />
+                          <small className="ww-inline-note">
+                            {sourceTemperature === undefined
+                              ? "未识别到同期气温，填写后可计算轮毂空气密度。"
+                              : "留空使用源文件统计值，也可手动覆盖。"}
+                          </small>
+                        </label>
+                      )}
                       <label>
                         综合修正系数（%）
                         <input
@@ -1123,6 +1229,8 @@ export default function MesoscaleWorkspace({
                 ? `${result.analysis_start_year}–${result.analysis_end_year}`
                 : result.year}{" "}
               年 · {result.height} m
+              {result.density_adjustment &&
+                `风速层 · 轮毂 ${result.density_adjustment.hub_height_m} m · 密度 ${result.density_adjustment.hub_density.toFixed(6)} kg/m³`}
               {result.window_years
                 ? ` · 基准资料 ${result.window_years} 年`
                 : ""}
@@ -1190,6 +1298,12 @@ export default function MesoscaleWorkspace({
                   )}
               </div>
             )}
+            {active === "风速和风功率密度月变化图" &&
+              result?.power_density_grade && (
+                <p className="ww-inline-note">
+                  {result.power_density_grade.description}
+                </p>
+              )}
             {resultError ? (
               <p role="alert">{resultError}</p>
             ) : !state.runId ? (

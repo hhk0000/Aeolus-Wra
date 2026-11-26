@@ -121,7 +121,12 @@ def get_assessment_source(file_id: str, request: Request):
     record = local.get("assessment-files", file_id)
     if record["kind"] != "source":
         raise CalculationError("上传文件用途不匹配。")
-    if {"density_by_year", "window_years", "interval_minutes"} <= record.keys():
+    if {
+        "density_by_year",
+        "temperature_by_year",
+        "window_years",
+        "interval_minutes",
+    } <= record.keys():
         return record
     return {
         **record,
@@ -187,7 +192,12 @@ class ExtremeOptions(BaseModel):
         }
 
 
-class AssessmentOptions(BaseModel):
+class AssessmentHeights(BaseModel):
+    hub_height_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    mean_temperature_c: float | None = Field(default=None, ge=-100, le=100)
+
+
+class AssessmentOptions(AssessmentHeights):
     source_id: str
     density: float = Field(gt=0, lt=3)
     analysis_year: int | None = None
@@ -206,6 +216,8 @@ def run_assessment(options: AssessmentOptions, request: Request):
         analysis_year=options.analysis_year,
         extreme_multiplier=options.extreme.multiplier,
         pressure_station=options.extreme.station(local),
+        hub_height_m=options.hub_height_m,
+        mean_temperature_c=options.mean_temperature_c,
     )
     saved = local.put("assessment-runs", results)
     return {"id": saved["id"]}
@@ -225,7 +237,7 @@ def get_assessment(run_id: str, request: Request):
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
-    async with request.form(max_files=2, max_fields=11) as form:
+    async with request.form(max_files=2, max_fields=13) as form:
         upload = form.get("data")
         source_id = form.get("source_id")
         local = request.app.state.wind_store
@@ -247,6 +259,12 @@ async def export_registered(key: str, version: str, request: Request):
             analysis_year = int(year_text) if year_text else None
         except ValueError as exc:
             raise CalculationError("分析年须为自然年年份。") from exc
+        try:
+            heights = AssessmentHeights.model_validate(
+                {key: form.get(key) or None for key in AssessmentHeights.model_fields}
+            )
+        except ValidationError as exc:
+            raise CalculationError("请检查轮毂高度和分析期平均气温。") from exc
         energy = form.get("energy")
         if energy is not None and (
             not isinstance(energy, UploadFile) or energy.size is None or energy.size > 4 * MIB
@@ -288,6 +306,8 @@ async def export_registered(key: str, version: str, request: Request):
             extreme_multiplier=extreme.multiplier,
             pressure_station=extreme.station(local),
             weibull_method=str(form.get("weibull_method", "mle")),
+            hub_height_m=heights.hub_height_m,
+            mean_temperature_c=heights.mean_temperature_c,
         )
     return Response(
         result,

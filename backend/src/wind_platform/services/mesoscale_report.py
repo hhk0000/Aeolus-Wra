@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from wind_platform.core.calculations import (
     COMPASS,
     CalculationError,
+    density_at_height,
     frequencies,
     rose,
     wind_statistics,
@@ -24,10 +25,12 @@ from wind_platform.core.calculations import (
 from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import decode_text, preview, split_line
 from wind_platform.services.assessment_extreme import DEFAULT_MULTIPLIER, extreme_wind
+from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_word_charts import formal_figure
 
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
+MEASUREMENT_HEIGHT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*m(?![/A-Za-z\d²³])", re.I)
 WEIBULL_METHOD_LABELS = {
     "mle": "二参数最大似然法（MLE）",
     "least-squares": "累计概率线性最小二乘",
@@ -47,7 +50,7 @@ def density_metadata(preamble):
 
 
 def hourly_records(raw):
-    height, records, _, _ = _read_hourly(raw)
+    height, records, _, _, _ = _read_hourly(raw)
     return height, records
 
 
@@ -56,6 +59,11 @@ def _read_hourly(raw, source_details=False):
     ti = detected["detected"]["timestamp_column"]
     if detected["detected"]["time_column"] is not None:
         raise CalculationError("中尺度 TXT 须使用单列日期时间。")
+    text, _ = decode_text(raw)
+    header_line = detected["header_line"]
+    delimiter = detected["delimiter"]
+    lines = text.splitlines()
+    data_lines = lines[header_line:]
     columns = {}
     for quantity in ("speed", "direction"):
         candidates = [
@@ -67,26 +75,46 @@ def _read_hourly(raw, source_details=False):
             and not channel["ambiguous"]
             and channel["index"] != ti
         ]
+        if quantity == "direction" and "speed" in columns:
+            has_directions = bool(candidates)
+            candidates = [c for c in candidates if c["height"] == columns["speed"]["height"]]
+            if has_directions and not candidates:
+                raise CalculationError("风速与风向高度不同，最高风速层须有同高风向。")
+        elif candidates:
+            heights = {channel["height"] for channel in candidates}
+            highest = max(heights)
+            if len(heights) > 1:
+                highest_recorded = None
+                for line in data_lines:
+                    row = split_line(line, delimiter)
+                    for channel in candidates:
+                        if highest_recorded is not None and channel["height"] <= highest_recorded:
+                            continue
+                        try:
+                            value = float(row[channel["index"]])
+                        except (IndexError, ValueError):
+                            continue
+                        if math.isfinite(value) and value >= 0:
+                            highest_recorded = channel["height"]
+                    if highest_recorded == highest:
+                        break
+                if highest_recorded is not None:
+                    highest = highest_recorded
+            candidates = [c for c in candidates if c["height"] == highest]
         if len(candidates) != 1:
             raise CalculationError(
-                "须识别到唯一的一列带高度的平均风速和风向。"
+                "须在最高风速层识别到唯一的一列平均风速和同高风向。"
                 "支持 Speed_100m / Direction_100m 或 Anem125m / Vane125m 等表头。"
             )
         columns[quantity] = candidates[0]
     speed, direction = columns["speed"], columns["direction"]
     height = speed["height"]
-    if height != direction["height"]:
-        raise CalculationError("风速与风向高度不同，请使用同一分析高度。")
     vi, di = speed["index"], direction["index"]
     speed_header, direction_header = detected["headers"][vi], detected["headers"][di]
     if not re.search(r"\bm\s*/\s*s\b", speed_header, re.I) or not re.search(
         r"°|\bdeg\b", direction_header, re.I
     ):
         raise CalculationError("平均风速须为 m/s，风向须为度（° 或 Deg）。")
-    text, _ = decode_text(raw)
-    header_line = detected["header_line"]
-    delimiter = detected["delimiter"]
-    lines = text.splitlines()
     preamble = "\n".join(lines[: header_line - 1]) if source_details else ""
     density_columns = (
         [
@@ -97,10 +125,38 @@ def _read_hourly(raw, source_details=False):
         if source_details
         else []
     )
+    at_layer, untagged = [], []
+    for index in density_columns:
+        layer = MEASUREMENT_HEIGHT.search(detected["headers"][index])
+        if layer and float(layer[1]) == height:
+            at_layer.append(index)
+        elif not layer:
+            untagged.append(index)
+    density_columns = at_layer or untagged
     density_index = density_columns[0] if len(density_columns) == 1 else None
+    temperatures = {}
+    temperature_column = None
+    temperature_kelvin = False
+    if source_details:
+        candidates = [
+            c
+            for c in detected["suggestions"]
+            if c["quantity"] == "temperature"
+            and c["statistic"] == "mean"
+            and not c["ambiguous"]
+            and re.search(
+                r"(?:°|º|�)\s*[CK]\b|℃|(?:\[|\()\s*[CK]\s*(?:\]|\))|(?<=[_\s])[CK]$",
+                detected["headers"][c["index"]],
+                re.I,
+            )
+        ]
+        preferred = [c for c in candidates if c["height"] == height] or candidates
+        if len(preferred) == 1:
+            temperature_column = preferred[0]["index"]
+            temperature_kelvin = preferred[0]["unit"] == "K"
     densities = {}
     records = {}
-    for n, line in enumerate(lines[header_line:], header_line + 1):
+    for n, line in enumerate(data_lines, header_line + 1):
         if not line.strip():
             continue
         try:
@@ -115,14 +171,21 @@ def _read_hourly(raw, source_details=False):
             records[dt] = (v, d)
         except (IndexError, ValueError) as exc:
             raise CalculationError(f"第 {n} 行时间重复、偏离10分钟网格或数值无效。") from exc
-        if density_index is not None and density_index < len(row):
+        for index, bucket in ((density_index, densities), (temperature_column, temperatures)):
+            if index is None or index >= len(row):
+                continue
             try:
-                value = float(row[density_index])
+                value = float(row[index])
             except ValueError:
                 continue
-            if 0 < value < 3:
-                total, count = densities.get(dt.year, (0.0, 0))
-                densities[dt.year] = (total + value, count + 1)
+            if bucket is temperatures:
+                value -= 273.15 if temperature_kelvin else 0
+                if not -100 <= value <= 100:
+                    continue
+            elif not 0 < value < 3:
+                continue
+            total, count = bucket.get(dt.year, (0.0, 0))
+            bucket[dt.year] = (total + value, count + 1)
     if not records:
         raise CalculationError("TXT 无数据。")
     return (
@@ -130,6 +193,7 @@ def _read_hourly(raw, source_details=False):
         records,
         preamble,
         densities,
+        temperatures,
     )
 
 
@@ -198,8 +262,14 @@ def select_year(height, records, interval_minutes=None):
     return height, times, v, d, years, start, annual, avg, start + idx, interval_minutes
 
 
+def period_mean(buckets, start, end):
+    totals = [value for year, value in buckets.items() if start <= year <= end]
+    count = sum(n for _, n in totals)
+    return sum(total for total, _ in totals) / count if count else None
+
+
 def assessment_source(raw):
-    height, records, preamble, densities = _read_hourly(raw, source_details=True)
+    height, records, preamble, densities, temperatures = _read_hourly(raw, source_details=True)
     coordinates = {}
     for label, key, positive, negative in (
         ("Latitude", "lat", "N", "S"),
@@ -220,6 +290,9 @@ def assessment_source(raw):
         "coordinates": coordinates,
         "density_by_year": {str(y): total / count for y, (total, count) in densities.items()},
         "density_constant": density_metadata(preamble),
+        "temperature_by_year": {
+            str(y): total / count for y, (total, count) in temperatures.items()
+        },
         "interval_minutes": record_interval(records),
     }
     try:
@@ -229,16 +302,13 @@ def assessment_source(raw):
     except CalculationError as exc:
         return {**source, "window_years": 0, "coverage_error": str(exc)}
     end = start + len(annual) - 1
-    density_totals = [value for y, value in densities.items() if start <= y <= end]
-    density_count = sum(count for _, count in density_totals)
     return {
         **source,
         "start_year": start,
         "end_year": end,
         "window_years": len(annual),
-        "density_period": sum(total for total, _ in density_totals) / density_count
-        if density_count
-        else None,
+        "density_period": period_mean(densities, start, end),
+        "temperature_period": period_mean(temperatures, start, end),
         "coverage_error": None,
         "year": year,
         "mean_speed": mean,
@@ -496,10 +566,16 @@ def build(
     pressure_station=None,
     weibull_method="mle",
     formal_layout=False,
+    hub_height_m=None,
+    mean_temperature_c=None,
 ):
     if weibull_method not in WEIBULL_METHOD_LABELS:
         raise CalculationError("请选择有效的威布尔拟合算法。")
-    height, times, v, d, years, start, annual, avg, recommended_year, interval_minutes = hourly(raw)
+    needs_temperature = hub_height_m is not None and mean_temperature_c is None
+    source_height, records, _, _, temperatures = _read_hourly(raw, source_details=needs_temperature)
+    height, times, v, d, years, start, annual, avg, recommended_year, interval_minutes = (
+        select_year(source_height, records)
+    )
     window_years = len(annual)
     end = start + window_years - 1
     short_window = window_years < 20
@@ -511,9 +587,30 @@ def build(
     year = recommended_year if analysis_year is None else analysis_year
     analysis_start = start if combined else year
     analysis_end = end if combined else year
+    hub_height = float(height) if hub_height_m is None else hub_height_m
+    source_density = rho
+    density_adjustment = None
+    if hub_height != float(height):
+        temperature = mean_temperature_c
+        if temperature is None:
+            temperature = period_mean(temperatures, analysis_start, analysis_end)
+        if temperature is None:
+            raise CalculationError("源风速层与轮毂高度不同，请填写分析期平均气温（℃）。")
+        rho = density_at_height(source_density, hub_height - float(height), temperature)
+        if not 0 < rho < 3:
+            raise CalculationError("折算后的空气密度超出有效范围，请检查高度、温度和源密度。")
+        density_adjustment = {
+            "source_height_m": float(height),
+            "hub_height_m": hub_height,
+            "source_density": source_density,
+            "hub_density": rho,
+            "mean_temperature_c": temperature,
+            "temperature_source": "file" if mean_temperature_c is None else "manual",
+        }
     mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
-    stats = wind_statistics(a, rho, interval_minutes)
+    stats = wind_statistics(a, source_density, interval_minutes)
+    power_grade = classify_power_density(float(height), stats["power_density"], combined=combined)
     extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
@@ -522,7 +619,9 @@ def build(
         for x in choices:
             sub = a[(np.array(keys) == x) & np.isfinite(a)]
             result.append(
-                (sub.mean(), (0.5 * rho * sub**3).mean()) if len(sub) else (np.nan, np.nan)
+                (sub.mean(), (0.5 * source_density * sub**3).mean())
+                if len(sub)
+                else (np.nan, np.nan)
             )
         return np.array(result)
 
@@ -722,6 +821,9 @@ def build(
         return {
             "year": year,
             "height": float(height),
+            "hub_height_m": hub_height,
+            "density_adjustment": density_adjustment,
+            "power_density_grade": power_grade,
             "window_years": window_years,
             "interval_minutes": interval_minutes,
             "monthly_roses": monthly_roses,
@@ -900,6 +1002,7 @@ def build(
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
+    fields["风功率密度等级及评价待校审"] = power_grade["description"].removesuffix("。")
     fields["风压法结果"] = pressure_result_text(
         pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
     )
@@ -920,6 +1023,21 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if "【100 m处空气密度】" in txt and "【轮毂高度空气密度】" in txt:
+            if density_adjustment:
+                temp_source = "按源文件识别" if mean_temperature_c is None else "由分析配置填写"
+                description = (
+                    f"分析期资料最高风速层为 {height} m，采用空气密度 {source_density:.6f} kg/m³。"
+                    f"同期平均气温为 {temperature:.2f} ℃（{temp_source}）。"
+                    f"按 GB/T 18710—2002 式（B3）推导的等温高度折算，"
+                    f"轮毂高度 {hub_height:g} m 处的空气密度为 {rho:.6f} kg/m³。"
+                )
+            else:
+                description = (
+                    f"分析期资料风速层与轮毂高度均为 {height} m，采用空气密度 {rho:.6f} kg/m³。"
+                )
+            para.clear().add_run(description)
+            return
         if short_window and "按年平均风速相对20年平均风速" in txt:
             para.clear().add_run(
                 f"本次采用{fields['资料期']}的中尺度数据，共{window_years}个自然年。"
@@ -939,7 +1057,16 @@ def build(
                 f"时间步长为 {fields['时间步长']}。"
             )
             return
-        hits = [(m, fields[m[1]]) for m in re.finditer(r"【([^】]+)】", txt) if m[1] in fields]
+        hits = [
+            (
+                m,
+                f"{hub_height:g}"
+                if m[1] == "分析高度" and txt[: m.start()].endswith("轮毂高度")
+                else fields[m[1]],
+            )
+            for m in re.finditer(r"【([^】]+)】", txt)
+            if m[1] in fields
+        ]
         if short_window:
             labels = {
                 "近20年各年风速表": "资料期各年风速表",

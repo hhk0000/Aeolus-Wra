@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
+from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 from wind_platform.services.pressure_location import match_pressure
 
@@ -450,3 +451,62 @@ def test_assessment_source_lookup_recognizes_density_in_older_upload(tmp_path):
     response = client.get("/api/v1/reports/assessment/files/source/" + saved["id"])
     assert response.status_code == 200
     assert response.json()["density_by_year"] == {"2022": 1.09}
+
+
+def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    raw = (
+        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tSpeed_120m [m/s]\t"
+        b"Direction_120m [Deg]\tSpeed_125m [m/s]\tDirection_125m [Deg]\t"
+        b"Air Density_120m [kg/m3]\tAir Temperature_120m [K]\n"
+        b"2025-01-01 00:00\t4\t90\t7\t90\t\t\t1.211\t288.15\n"
+        b"2025-01-01 01:00\t5\t90\t8\t90\t\t\t1.211\t288.15\n"
+        b"2025-12-31 23:00\t6\t90\t9\t90\t\t\t1.211\t288.15\n"
+    )
+    path = "/api/v1/reports/assessment"
+    response = client.post(path + "/files/source", files={"file": ("wind.txt", raw)})
+    assert response.status_code == 200, response.text
+    source = response.json()
+    assert source["height"] == 120
+    assert source["density_period"] == pytest.approx(1.211)
+    assert source["temperature_period"] == pytest.approx(15)
+    options = {"source_id": source["id"], "density": 1.211, "hub_height_m": 125}
+    response = client.post(path + "/runs", json=options)
+    assert response.status_code == 200, response.text
+    output = client.get(f"{path}/runs/{response.json()['id']}").json()
+    adjustment = output["density_adjustment"]
+    assert adjustment["hub_density"] == pytest.approx(1.21028539)
+    assert adjustment["temperature_source"] == "file"
+    assert output["extreme"]["density"] == adjustment["hub_density"]
+    assert output["power_density_grade"]["height_m"] == 120
+    assert output["power_density_grade"]["grade"] == "2"
+    assert output["power_density_grade"]["power_density"] == pytest.approx(319.704)
+    report = client.post("/api/v1/reports/templates/mesoscale/1.2.0/export", data=options)
+    assert report.status_code == 200
+    paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
+    assert any("轮毂高度 125 m 处的空气密度为 1.210285" in p for p in paragraphs)
+    assert any("120 m 风速层年平均风功率密度" in p and "为 2 级" in p for p in paragraphs)
+    no_temperature = raw.replace(b"288.15", b"")
+    source = client.post(
+        path + "/files/source", files={"file": ("no-temp.txt", no_temperature)}
+    ).json()
+    options["source_id"] = source["id"]
+    assert client.post(path + "/runs", json=options).status_code == 422
+    assert (
+        client.post(path + "/runs", json={**options, "mean_temperature_c": 15}).status_code == 200
+    )
+
+
+@pytest.mark.parametrize(
+    ("height", "power_density", "grade"),
+    [
+        (100, 409.99, "2"),
+        (100, 410, "3"),
+        (110, 430, "3"),
+        (120, 2750, "7"),
+        (120, 2750.1, None),
+        (125, 450, None),
+    ],
+)
+def test_assessment_power_density_grade_boundaries(height, power_density, grade):
+    assert classify_power_density(height, power_density)["grade"] == grade

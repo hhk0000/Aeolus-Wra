@@ -4,6 +4,7 @@ import math
 import re
 from copy import deepcopy
 from datetime import datetime
+from functools import partial
 from io import BytesIO
 from itertools import pairwise
 
@@ -11,6 +12,7 @@ import numpy as np
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, RGBColor
 from PIL import Image, ImageDraw, ImageFont
 
@@ -24,6 +26,7 @@ from wind_platform.core.calculations import (
 )
 from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import decode_text, preview, split_line
+from wind_platform.services import approved_assessment_template
 from wind_platform.services.assessment_extreme import (
     DEFAULT_MULTIPLIER,
     extreme_wind,
@@ -534,9 +537,7 @@ def assessment_charts(series, fit):
         }
 
 
-def pressure_result_text(station, speed, site_speed, density):
-    if station is None:
-        return "尚未取得基本风压，风压法结果待补。"
+def pressure_source_text(station):
     name = station["name"]
     province = station.get("province", "")
     if station.get("manual"):
@@ -551,6 +552,13 @@ def pressure_result_text(station, speed, site_speed, density):
             f"采用风压库《{station['library']}》的{name}站"
             f"（经度 {station['lon']:g}°，纬度 {station['lat']:g}°）。"
         )
+    return source
+
+
+def pressure_result_text(station, speed, site_speed, density):
+    if station is None:
+        return "尚未取得基本风压，风压法结果待补。"
+    source = pressure_source_text(station)
     return (
         f"{source}50 年一遇基本风压为 {station['pressure']:g} kN/m²，"
         f"标准空气密度参考风速为 {speed:.2f} m/s。按场址空气密度 {density:g} kg/m³ "
@@ -572,6 +580,7 @@ def build(
     pressure_station=None,
     weibull_method="mle",
     formal_layout=False,
+    approved_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
     thunderstorm_options=None,
@@ -869,11 +878,20 @@ def build(
             "extreme": extreme,
         }
     doc = Document(BytesIO(template))
+    if approved_layout:
+        chart_titles = {"威布尔分布图", *(item[0] for item in series)}
+        approved_assessment_template.restore_chart_anchors(doc, chart_titles)
 
-    def fill_cell(cell, value):
+    def fill_cell(cell, value, *, unhighlight=False):
         runs = cell.paragraphs[0].runs
         run = runs[0] if runs else cell.paragraphs[0].add_run()
         run.text = str(value)
+        if unhighlight:
+            pending = run.text.startswith("待") or run.text in ("—", "平均值")
+            run.font.color.rgb = RGBColor.from_string("000000" if pending else "008000")
+            run.font.highlight_color = None
+            for shade in run._r.xpath("./w:rPr/w:shd"):
+                shade.getparent().remove(shade)
         for extra in runs[1:]:
             extra.text = ""
 
@@ -1008,7 +1026,15 @@ def build(
         anchor._p.addprevious(caption._p)
     from wind_platform.services.mesoscale_energy import energy_table
 
-    fields.update(energy_table(doc, energy_file, factor, fill_cell))
+    energy_index, sensitivity_index = (14, 15) if approved_layout else (6, 7)
+    fields.update(
+        energy_table(
+            doc.tables[energy_index],
+            energy_file,
+            factor,
+            partial(fill_cell, unhighlight=approved_layout),
+        )
+    )
     if formal_layout:
         for frequencies_at_bins, field in (
             (f, "风速频率最高区间"),
@@ -1023,7 +1049,7 @@ def build(
             else ""
         )
     # Sensitivity methodology has not been approved; suppress the reference project's numbers.
-    for rr in doc.tables[7].rows[2:]:
+    for rr in doc.tables[sensitivity_index].rows[2:]:
         for cc in rr.cells:
             if re.search(r"\d", cc.text):
                 fill_cell(cc, "待复核")
@@ -1058,6 +1084,48 @@ def build(
         if extreme["adopted"] is not None
         else "待补齐风压法结果后，再取各方法的较大值形成前期判断。"
     )
+    if approved_layout:
+        approved_assessment_template.select_thunderstorm_section(doc, thunderstorm is not None)
+        fields.update(
+            {
+                "风功率密度等级": fields["风功率密度等级及评价待校审"],
+                "基本风压": f"{pressure_station['pressure']:g}",
+                "风压来源": pressure_source_text(pressure_station).rstrip("。"),
+                "风压法标准风速": f"{extreme['pressure_standard']:.2f}",
+                "风压法场址风速": f"{extreme['pressure_site']:.2f}",
+                "场址空气密度": f"{rho:g}",
+                "分析期平均风速": f"{extreme['mean_speed_used']:.2f}",
+                "风速倍数": f"{extreme_multiplier:g}",
+                "倍数法场址风速": f"{extreme['site_speed']:.2f}",
+                "倍数法标准风速": f"{extreme['multiplier_standard']:.2f}",
+                "实际参与比选的方法": methods,
+                "场址最大风速": f"{extreme['adopted_site']:.2f}",
+                "采用方法": extreme["adopted_method"],
+                "标准空气密度下最大风速": f"{extreme['adopted']:.2f}",
+                "勾选并完成计算时输出本小节": "",
+            }
+        )
+        for field in ("参数A", "参数k", "容量系数", "年装机满发利用小时", "年上网电量"):
+            fields.setdefault(field, "待补")
+        for field in ("纬度", "经度", "海拔高度", "不确定因素影响范围"):
+            fields.setdefault(field, "待补")
+        if thunderstorm:
+            fields.update(
+                {
+                    "五日雷暴分析年": str(thunderstorm["year"]),
+                    "样本均值": f"{thunderstorm['mean']:.2f}",
+                    "样本标准差": f"{thunderstorm['stdev']:.2f}",
+                    "C₁": f"{thunderstorm['c1']:g}",
+                    "C₂": f"{thunderstorm['c2']:g}",
+                    "α": f"{thunderstorm['alpha']:.4f}",
+                    "u": f"{thunderstorm['u']:.2f}",
+                    "五日雷暴法场址风速": f"{thunderstorm['site_speed']:.2f}",
+                    "五日雷暴法标准风速": f"{extreme['thunderstorm']['standard_speed']:.2f}",
+                }
+            )
+        approved_assessment_template.restore_sample_fields(doc.paragraphs)
+        for section in doc.sections:
+            approved_assessment_template.restore_sample_fields(section.header.paragraphs)
 
     paragraphs = doc.paragraphs
     for para in paragraphs:
@@ -1089,7 +1157,9 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
-        if "【100 m处空气密度】" in txt and "【轮毂高度空气密度】" in txt:
+        if "【空气密度说明】" in txt or (
+            "【100 m处空气密度】" in txt and "【轮毂高度空气密度】" in txt
+        ):
             if density_adjustment:
                 temp_source = "按源文件识别" if mean_temperature_c is None else "由分析配置填写"
                 description = (
@@ -1164,6 +1234,8 @@ def build(
             runs[left].text = prefix + value + suffix
             runs[left].font.color.rgb = RGBColor.from_string("008000")
             runs[left].font.highlight_color = None
+            for shade in runs[left]._r.xpath("./w:rPr/w:shd"):
+                shade.getparent().remove(shade)
 
     for para in doc.paragraphs:
         replace(para)
@@ -1172,8 +1244,6 @@ def build(
             replace(para)
     doc.core_properties.comments = "前期中尺度评估 · mesoscale-v1"
     upd = OxmlElement("w:updateFields")
-    from docx.oxml.ns import qn
-
     current_rids = {
         s._inline.graphic.graphicData.pic.blipFill.blip.embed for s in doc.inline_shapes
     }

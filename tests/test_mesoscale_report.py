@@ -96,7 +96,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.2.0"
+    assert entry["version"] == "1.3.0"
     assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
@@ -113,8 +113,15 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     )
     assert formal.status_code == 200
     formal_doc = Document(BytesIO(formal.content))
-    assert len(formal_doc.inline_shapes) == 7
+    assert len(formal_doc.inline_shapes) == 8
     assert formal_doc.tables[3].rows[1].cells[0].text == "0"
+    assert any(s._inline.docPr.name == "风电机组布置示意图" for s in formal_doc.inline_shapes)
+    turbine_table = next(
+        table for table in formal_doc.tables if table.rows[0].cells[0].text == "序号"
+    )
+    net_value = turbine_table.rows[1].cells[9].paragraphs[0].runs[0]
+    assert net_value.text == "7500.00"
+    assert str(net_value.font.color.rgb) == "008000" and net_value.font.highlight_color is None
     assert "尾流后理论年发电量合计为 10000.00 MWh" in "\n".join(
         p.text for p in formal_doc.paragraphs
     )
@@ -442,13 +449,15 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     assert extreme["adopted_method"] == "五日雷暴法"
     assert extreme["adopted"] == pytest.approx(site_speed * sqrt(1.2 / 1.225))
     report = client.post(
-        "/api/v1/reports/templates/mesoscale/1.2.0/export",
+        "/api/v1/reports/templates/mesoscale/1.3.0/export",
         data={**options, "extreme": dumps(options["extreme"])},
     )
     assert report.status_code == 200
     paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
     assert "（3）五日雷暴法" in paragraphs
-    assert any("取五日雷暴法" in paragraph for paragraph in paragraphs)
+    assert any(
+        "（五日雷暴法）" in paragraph and "取其中最大值" in paragraph for paragraph in paragraphs
+    )
 
     two_years = hourly + hourly[hourly.index("\n") + 1 :].replace("2023", "2022")
     source = client.post(path + "/files/source", files={"file": ("two-years.txt", two_years)})

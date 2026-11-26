@@ -9,8 +9,7 @@ from wind_platform.core.calculations import CalculationError
 from wind_platform.services.energy_workbook import workbook_csv
 
 
-def energy_table(doc, raw, factor, fill):
-    table = doc.tables[6]
+def energy_table(table, raw, factor, fill):
     prototype = deepcopy(table.rows[1]._tr)
     total = table.rows[-1]._tr
     for row in list(table.rows)[1:-1]:

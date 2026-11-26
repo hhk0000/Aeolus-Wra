@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1] / "report_templates"
 RENDERERS = {
     "mesoscale-v1": mesoscale_report.build,
     "mesoscale-formal": partial(mesoscale_report.build, formal_layout=True),
+    "mesoscale-approved": partial(mesoscale_report.build, formal_layout=True, approved_layout=True),
 }
 
 

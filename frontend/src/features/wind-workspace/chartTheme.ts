@@ -10,12 +10,16 @@ export const EXCEL = {
   weibull: "#b68400",
   font: '"Times New Roman", SimSun, "宋体", serif',
   tickSize: 11,
+  tickLength: 5,
   text: "#404040",
   grid: "#D9D9D9",
   axis: "#808080",
   plotBorder: "#808080",
   marker: 3,
-  lineWidth: 2,
+  diamondSize: 8,
+  squareSize: 7,
+  lineWidth: 2.2,
+  roseLineWidth: 2.6,
 };
 
 export function excelSvgProps() {

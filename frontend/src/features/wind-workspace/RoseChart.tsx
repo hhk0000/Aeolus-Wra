@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
+import { computeRoseNiceScale } from "./chartScale";
 
 type Row = Record<string, unknown>;
 
@@ -31,31 +32,32 @@ export function RoseChart({
 }) {
   const textSize = useChartTextSize();
   const [hover, setHover] = useState("");
-  const w = 900,
-    h = 680,
-    cx = 450,
-    cy = 340;
-  const compassSize = textSize(compact ? 34 : 18);
-  const percentageSize = textSize(compact ? (overlay ? 22 : 30) : 17);
-  const labelGap = Math.max(36, Math.ceil(compassSize * 0.85));
+  const w = 760,
+    h = 616,
+    cx = 380,
+    cy = 308;
+  const compassSize = textSize(compact ? 26 : 16);
+  const percentageSize = textSize(compact ? (overlay ? 20 : 24) : 15);
+  const labelGap = Math.max(26, Math.ceil(compassSize * 0.9));
   const longestLabel = Math.max(
     1,
     ...rows.map((row) => String(row.label ?? row.degrees ?? "").length),
   );
-  const framePadding = 16;
+  const framePadding = 14;
   const labelR = Math.min(
-    316,
-    cy - Math.ceil(compassSize * 0.7) - framePadding,
+    284,
+    cy - Math.ceil(compassSize * 0.72) - framePadding,
     cx - Math.ceil((longestLabel * compassSize) / 2) - framePadding,
   );
-  const maxR = labelR - labelGap;
+  const maxR = Math.max(80, labelR - labelGap);
   const key = energy ? "energy_frequency" : "frequency";
   const color = lineColor ?? EXCEL.series[energy ? 1 : 0];
   const rawMax = Math.max(
     0.001,
     ...[...rows, ...(overlay?.rows ?? [])].map((r) => Number(r[key]) || 0),
   );
-  const max = Math.max(1, Math.ceil(Math.max(rawMax, radialMax ?? 0) / 5) * 5);
+  const roseScale = computeRoseNiceScale(Math.max(rawMax, radialMax ?? 0));
+  const max = roseScale.max;
   const point = (a: number, r: number): [number, number] => [
     cx + Math.sin((a * Math.PI) / 180) * r,
     cy - Math.cos((a * Math.PI) / 180) * r,
@@ -70,7 +72,7 @@ export function RoseChart({
         <p>暂无可绘制的方向数据</p>
       </div>
     );
-  const ringValues = [0.2, 0.4, 0.6, 0.8, 1].map((t) => max * t);
+  const ringValues = roseScale.ticks;
   const ringPoints = (value: number) =>
     rows
       .map((r) => point(angleOf(r), (value / max) * maxR).join(","))
@@ -149,7 +151,7 @@ export function RoseChart({
             fill={rose === "filled" ? color : "none"}
             fillOpacity={rose === "filled" ? 0.25 : 0}
             stroke={color}
-            strokeWidth="2"
+            strokeWidth={EXCEL.roseLineWidth}
           />
           {!!overlay?.rows.length && (
             <polygon
@@ -160,7 +162,7 @@ export function RoseChart({
                 .join(" ")}
               fill="none"
               stroke={overlay.color}
-              strokeWidth="4"
+              strokeWidth="3.2"
               strokeDasharray="10 5"
             />
           )}
@@ -169,23 +171,10 @@ export function RoseChart({
             const p = point(a, (Number(r[key]) / max) * maxR);
             return (
               <circle
-                key={`marker-${i}`}
-                cx={p[0]}
-                cy={p[1]}
-                r={3}
-                fill={color}
-              />
-            );
-          })}
-          {rows.map((r, i) => {
-            const a = angleOf(r);
-            const p = point(a, (Number(r[key]) / max) * maxR);
-            return (
-              <circle
                 key={i}
                 cx={p[0]}
                 cy={p[1]}
-                r={6}
+                r={7}
                 fill="transparent"
                 onMouseEnter={() =>
                   setHover(`${r.label}: ${Number(r[key]).toFixed(2)}%`)
@@ -201,13 +190,13 @@ export function RoseChart({
             {hover}
           </text>
           <rect
-            x="1"
-            y="1"
-            width={w - 2}
-            height={h - 2}
+            x="0.5"
+            y="0.5"
+            width={w - 1}
+            height={h - 1}
             fill="none"
-            stroke={EXCEL.axis}
-            strokeWidth="2"
+            stroke={EXCEL.plotBorder}
+            strokeWidth="1"
           />
         </svg>
       </div>

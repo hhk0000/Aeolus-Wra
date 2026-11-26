@@ -155,3 +155,13 @@
 - 打通「分析配置」与「图表可视化中心」的同屏即时反馈闭环：在「02 风资源分析」「03 相关性分析」「05 长期参考」内嵌真实计算成果速览看板（代表高度平均风速、风功率密度、空气密度、综合切变指数 α、相关性 r/R²、测风年风年判定）与单图表一键直达胶囊；图表中心「调整分析配置 →」移入随滚动吸顶的筛选工具栏（`.ww-gallery-filter`），下滑浏览长图与数据表时全程固定可点，并按当前筛选（相关性/同期对比/长期参考/常规分析）精准回跳对应配置步骤。
 - 优化「01 数据资料」通道映射表（支持「全部列 / 待确认与缺支臂 / 风速风向 / 温压湿」快速筛选及空白风速支臂一键补全）；在「报告预览」新增工程核心指标一页纸摘要与全项目测风塔核心指标横向汇总表；在「自动审查中心」新增状态筛选与「查阅图表 ↗ / 前往补充配置 →」闭环跳转。
 - `scripts/check.py` 全通过（78 项 pytest、Ruff、ESLint、Prettier、`tsc -b && vite build`），离线产物 `frontend/dist` 已重建并通过 Playwright 浏览器回归验收。
+
+## 2026-11-24 标准图表模板校准（接续 GPT `ca4c849`）
+
+- 基于 GPT 提交 `ca4c849`（`codex/correlation-word-20261123`，已完成相关性任务重命名/删除及 Word 导出图幅预设），在 `read_wind_measurement_reference` 分支继续完善图表样式标准模板。
+- 对照 `.local/antigravity-inputs/wind-measurement-reference.xlsx` 的 41 个原生图表 XML（`chart1–41`）与网格/纵横比参数，保持**中文宋体 + 英文/数字 Times New Roman**（`EXCEL.font`）及红蓝基线，重点重构比例、绘图区格子、外伸刻度线与坐标轴整洁间距：
+  - 新增 `frontend/src/features/wind-workspace/chartScale.ts`：实现 Excel 风格 `1/2/2.5/5×10ⁿ` 坐标步长（`computeNiceScale`）、双轴同网格分段对齐（`computeDualNiceScales`，5 等分网格下左轴风速 `0.0` 与右轴风功率密度 `0` 同时落在整数/整半刻度）以及风玫瑰整数百分比刻度环（`computeRoseNiceScale`）。
+  - 更新 `chartTheme.ts` 与 `InteractiveResultView.tsx`：月变化双轴 `840×540`（1.556:1 对齐 `chart40` 1.555:1）、24h 日变化 `860×532`（1.617:1 对齐 `chart39` 1.618:1）、风速与风能频率 `840×540`（1.556:1 对齐 `chart41` 1.554:1，修正原 2.35:1 过扁问题）；补全四边 `#808080` 绘图框、横纵 `#D9D9D9` 主网格与 5px 外伸主刻度线；右轴标题「风功率密度 (W/m²)」改为右侧居中顺时针旋转 90°；收紧双轴菱形/方块标记与簇状柱宽比例（对齐 `gapWidth=150`）。
+  - 更新 `RoseChart.tsx`：画幅改为 `760×616`（1.234:1 对齐 `chart1/chart14` 1.235:1 及月度小图 1.243:1），移除顶点圆点以匹配 Excel `<c:marker><c:symbol val="none"/></c:marker>`，线宽 2.6px，外框 1px，网格环采用整百分比步长。
+  - 更新 `BaseResultView.tsx`：各月 24h 日变化 12 小图改为 `480×298`（1.611:1 对齐 `chart27–38` 1.616:1）并补齐四边边框、双轴整刻度、外伸刻度线与紧凑标记；同步升级长期年际图、相关性散点图（`680×450`）与切变风廓线图（`840×480`，同步修正图注“绿点”为“蓝点”）。
+- 验证：`prettier --check .`、`eslint .`、`tsc -b && vite build`（911ms）及 `ruff check` / `ruff format --check` 均通过；后端代码未改动。尚未重新在桌面浏览器截屏复核及重启离线服务。

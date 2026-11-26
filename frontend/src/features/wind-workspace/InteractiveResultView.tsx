@@ -5,6 +5,11 @@ import { BaseResultView, DataTable } from "./BaseResultView";
 import ReportExport from "./ReportExport";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
+import {
+  computeDualNiceScales,
+  computeNiceScale,
+  formatAxisTick,
+} from "./chartScale";
 import { RoseChart } from "./RoseChart";
 import { addReportCharts, removeReportCharts } from "./chartReports";
 import { reportSnapshot } from "./reportSnapshot";
@@ -111,15 +116,28 @@ function Plot({
   const [hover, setHover] = useState("");
   const dualAxis =
     fields.includes("power_density") && fields.includes("mean_speed");
+  const isFrequencyPlot = outputId === "frequency" || outputId === "weibull";
+  const isHourlyPlot = outputId === "hourly" || outputId === "monthly-hourly";
   const axisSize = textSize(13);
-  const w = rose ? 900 : dualAxis ? 900 : 800,
-    h = rose ? 680 : dualAxis ? 540 : 340,
-    L = dualAxis ? Math.max(90, 5 * axisSize + 12) : 65,
-    R = dualAxis ? w - Math.max(90, 4 * axisSize + 16) : 725,
-    T = fit ? 54 : dualAxis ? 3 * axisSize + 24 : 35,
-    B = dualAxis ? 440 : 275;
-  const cx = rose ? 450 : 400,
-    cy = rose ? 310 : 165;
+  const tickLen = EXCEL.tickLength;
+  const w = rose ? 760 : isHourlyPlot && dualAxis ? 860 : 840,
+    h = rose
+      ? 616
+      : dualAxis
+        ? isHourlyPlot
+          ? 532
+          : 540
+        : isFrequencyPlot
+          ? 540
+          : 500,
+    L = Math.max(82, Math.round(4.6 * axisSize + 24)),
+    R = dualAxis
+      ? w - Math.max(86, Math.round(4.8 * axisSize + 24))
+      : w - Math.max(28, Math.round(axisSize * 1.8)),
+    T = fit ? Math.max(54, textSize(22) + 26) : Math.max(36, axisSize + 22),
+    B = h - Math.max(66, Math.round(axisSize * 3.8 + 18));
+  const cx = rose ? 380 : 400,
+    cy = rose ? 308 : 165;
   const base = 80,
     maxR = 200;
   const point = (a: number, r: number) => [
@@ -131,25 +149,77 @@ function Plot({
     Math.max(0.001, ...rows.map((r) => Number(r[roseKey]) || 0)) * 1.1;
   const rp = (r: Row) =>
     point(Number(r.degrees), base + (Number(r[roseKey]) / max) * maxR);
-  const limits = (f: string) => {
-    const shared = fields.includes("power_density") ? [f] : fields;
-    const vals = rows
+
+  const valuesFor = (keys: string[]) =>
+    rows
       .flatMap((r) =>
-        shared.map((key) => (r[key] == null ? NaN : Number(r[key]))),
+        keys.map((key) => (r[key] == null ? NaN : Number(r[key]))),
       )
       .filter(Number.isFinite);
-    const lo = density ? densityMinimum : Math.min(0, ...vals);
-    const hi = density
-      ? (densityMaximum ??
-        Math.max(lo + 0.01, Math.ceil(Math.max(...vals) * 20) / 20))
-      : Math.max(0.001, ...vals) * 1.1;
-    return [lo, hi];
+
+  const dualScales = dualAxis
+    ? (() => {
+        const leftVals = valuesFor(["mean_speed"]);
+        const rightVals = valuesFor(["power_density"]);
+        return computeDualNiceScales(
+          Math.min(0, ...leftVals),
+          Math.max(0.001, ...leftVals),
+          Math.min(0, ...rightVals),
+          Math.max(1, ...rightVals),
+          5,
+        );
+      })()
+    : null;
+
+  const singleScale = !dualAxis
+    ? (() => {
+        const vals = valuesFor(fields.length ? fields : ["mean_speed"]);
+        const dataMin = vals.length ? Math.min(...vals) : 0;
+        const dataMax = vals.length ? Math.max(...vals) : 1;
+        if (density) {
+          const lo = densityMinimum;
+          const hi =
+            densityMaximum ?? Math.max(lo + 0.01, Math.ceil(dataMax * 20) / 20);
+          return computeNiceScale(lo, hi, {
+            targetSteps: 5,
+            fixedMin: true,
+            fixedMax: densityMaximum !== undefined,
+          });
+        }
+        return computeNiceScale(
+          Math.min(0, dataMin),
+          Math.max(0.001, dataMax),
+          {
+            targetSteps: isFrequencyPlot ? 6 : 5,
+            fixedMin: Math.min(0, dataMin) === 0,
+          },
+        );
+      })()
+    : null;
+
+  const scaleFor = (f: string) =>
+    dualScales
+      ? f === "power_density"
+        ? dualScales.right
+        : dualScales.left
+      : singleScale!;
+
+  const tickKindFor = (f: string) => {
+    if (f === "power_density") return "power" as const;
+    if (f === "mean_speed") return "speed" as const;
+    if (density || f === "density") return "density" as const;
+    if (isFrequencyPlot) return "frequency" as const;
+    if (outputId === "turbulence") return "ti" as const;
+    return "auto" as const;
   };
+
   const x = (i: number) => L + ((i + 0.5) / Math.max(1, rows.length)) * (R - L);
   const y = (v: number, f: string) => {
-    const [lo, hi] = limits(f);
-    return B - ((v - lo) / (hi - lo || 1)) * (B - T);
+    const scale = scaleFor(f);
+    return B - ((v - scale.min) / (scale.max - scale.min || 1)) * (B - T);
   };
+  const yTicks = dualScales ? dualScales.left.ticks : singleScale!.ticks;
+  const xStep = Math.max(1, Math.ceil(rows.length / 26));
   const highlightedBin =
     outputId === "turbulence"
       ? rows.findIndex((row) => Number(row.bin) === 15)
@@ -279,58 +349,96 @@ function Plot({
             </>
           ) : (
             <>
+              {rows.map((_, i) => (
+                <line
+                  key={`v-${i}`}
+                  x1={x(i)}
+                  x2={x(i)}
+                  y1={T}
+                  y2={B}
+                  stroke={EXCEL.grid}
+                  strokeWidth="1"
+                />
+              ))}
+              {yTicks.map((tickVal, idx) => {
+                const py =
+                  B -
+                  ((tickVal -
+                    (dualScales ? dualScales.left.min : singleScale!.min)) /
+                    ((dualScales ? dualScales.left.max : singleScale!.max) -
+                      (dualScales ? dualScales.left.min : singleScale!.min) ||
+                      1)) *
+                    (B - T);
+                const leftField = fields[0] ?? "mean_speed";
+                const leftScale = scaleFor(leftField);
+                const rightScale = dualScales?.right;
+                const rightTick = rightScale
+                  ? rightScale.ticks[idx]
+                  : undefined;
+                return (
+                  <g key={`y-${idx}`}>
+                    <line
+                      x1={L}
+                      x2={R}
+                      y1={py}
+                      y2={py}
+                      stroke={EXCEL.grid}
+                      strokeWidth="1"
+                    />
+                    <line
+                      x1={L - tickLen}
+                      x2={L}
+                      y1={py}
+                      y2={py}
+                      stroke={EXCEL.axis}
+                      strokeWidth="1"
+                    />
+                    <text
+                      x={L - tickLen - 5}
+                      y={py + Math.round(axisSize * 0.34)}
+                      textAnchor="end"
+                      fill={dualAxis ? seriesColor(leftField, 0) : EXCEL.text}
+                      fontSize={axisSize}
+                    >
+                      {formatAxisTick(
+                        tickVal,
+                        leftScale.step,
+                        tickKindFor(leftField),
+                      )}
+                    </text>
+                    {dualAxis && rightScale && rightTick !== undefined && (
+                      <>
+                        <line
+                          x1={R}
+                          x2={R + tickLen}
+                          y1={py}
+                          y2={py}
+                          stroke={EXCEL.axis}
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={R + tickLen + 5}
+                          y={py + Math.round(axisSize * 0.34)}
+                          textAnchor="start"
+                          fill={seriesColor("power_density", 1)}
+                          fontSize={axisSize}
+                        >
+                          {formatAxisTick(rightTick, rightScale.step, "power")}
+                        </text>
+                      </>
+                    )}
+                  </g>
+                );
+              })}
               <rect
                 x={L}
                 y={T}
                 width={R - L}
                 height={B - T}
                 fill="none"
-                stroke={EXCEL.axis}
+                stroke={EXCEL.plotBorder}
                 strokeWidth="1"
               />
-              {dualAxis &&
-                rows.map((_, i) => (
-                  <line
-                    key={`v-${i}`}
-                    x1={x(i)}
-                    x2={x(i)}
-                    y1={T}
-                    y2={B}
-                    stroke={EXCEL.grid}
-                    strokeWidth="1"
-                  />
-                ))}
-              {[0, 1, 2, 3, 4].map((i) => (
-                <g key={i}>
-                  <line
-                    x1={L}
-                    x2={R}
-                    y1={T + (i * (B - T)) / 4}
-                    y2={T + (i * (B - T)) / 4}
-                    stroke={EXCEL.grid}
-                    strokeWidth="1"
-                  />
-                  {(dualAxis ? fields.slice(0, 2) : fields.slice(0, 1)).map(
-                    (f, j) => {
-                      const [lo, hi] = limits(f);
-                      return (
-                        <text
-                          key={f}
-                          x={j ? R + 6 : L - 6}
-                          y={T + (i * (B - T)) / 4}
-                          textAnchor={j ? "start" : "end"}
-                          fill={seriesColor(f, j)}
-                          fontSize={textSize(13)}
-                        >
-                          {(hi - (i * (hi - lo)) / 4).toFixed(
-                            density && hi - lo < 0.04 ? 3 : 2,
-                          )}
-                        </text>
-                      );
-                    },
-                  )}
-                </g>
-              ))}
               {fields.map((f, j) => (
                 <g key={f}>
                   {isBar(f) &&
@@ -340,21 +448,21 @@ function Plot({
                         (r[f] == null || !Number.isFinite(Number(r[f])))
                       )
                         return null;
-                      const barW =
-                        ((R - L) / Math.max(1, rows.length)) *
-                        (density ? 0.66 : 0.34);
+                      const slotW = (R - L) / Math.max(1, rows.length);
+                      const barW = slotW * (density ? 0.56 : 0.29);
+                      const gap = density ? 0 : Math.min(2, slotW * 0.04);
                       return (
                         <rect
                           key={`bar-${i}`}
                           x={
                             density
                               ? x(i) - barW / 2
-                              : x(i) -
-                                barW +
-                                (f === "energy_frequency" ? barW : 0)
+                              : f === "energy_frequency"
+                                ? x(i) + gap / 2
+                                : x(i) - barW - gap / 2
                           }
                           y={y(Number(r[f]), f)}
-                          width={barW * (density ? 1 : 0.9)}
+                          width={Math.max(1, barW)}
                           height={Math.max(0, B - y(Number(r[f]), f))}
                           fill={seriesColor(f, j)}
                         >
@@ -376,7 +484,7 @@ function Plot({
                           .join(" ")}
                         fill="none"
                         stroke={seriesColor(f, j)}
-                        strokeWidth={dualAxis ? 3 : EXCEL.lineWidth}
+                        strokeWidth={EXCEL.lineWidth}
                         strokeDasharray={
                           f === "power_density" ? "6 4" : undefined
                         }
@@ -395,19 +503,19 @@ function Plot({
                             >
                               {j === 0 ? (
                                 <rect
-                                  x={x(i) - 7}
-                                  y={y(Number(r[f]), f) - 7}
-                                  width="14"
-                                  height="14"
+                                  x={x(i) - EXCEL.diamondSize / 2}
+                                  y={y(Number(r[f]), f) - EXCEL.diamondSize / 2}
+                                  width={EXCEL.diamondSize}
+                                  height={EXCEL.diamondSize}
                                   transform={`rotate(45 ${x(i)} ${y(Number(r[f]), f)})`}
                                   fill={seriesColor(f, j)}
                                 />
                               ) : (
                                 <rect
-                                  x={x(i) - 5}
-                                  y={y(Number(r[f]), f) - 5}
-                                  width="10"
-                                  height="10"
+                                  x={x(i) - EXCEL.squareSize / 2}
+                                  y={y(Number(r[f]), f) - EXCEL.squareSize / 2}
+                                  width={EXCEL.squareSize}
+                                  height={EXCEL.squareSize}
                                   fill={seriesColor(f, j)}
                                 />
                               )}
@@ -461,31 +569,39 @@ function Plot({
                     </circle>
                   );
                 })}
-              {rows.map(
-                (r, i) =>
-                  i % Math.max(1, Math.ceil(rows.length / 24)) === 0 && (
+              {rows.map((r, i) => (
+                <g key={`x-${i}`}>
+                  <line
+                    x1={x(i)}
+                    x2={x(i)}
+                    y1={B}
+                    y2={B + tickLen}
+                    stroke={EXCEL.axis}
+                    strokeWidth="1"
+                  />
+                  {i % xStep === 0 && (
                     <text
-                      key={i}
                       x={x(i)}
-                      y={B + 22}
+                      y={B + tickLen + axisSize + 4}
                       textAnchor="middle"
-                      fontSize={textSize(13)}
+                      fontSize={axisSize}
                       fill={i === highlightedBin ? "#235e9a" : EXCEL.text}
                     >
                       {String(r.period ?? r.bin ?? r.label ?? "")}
                       {outputId === "monthly" ? "月" : ""}
                     </text>
-                  ),
-              )}
+                  )}
+                </g>
+              ))}
             </>
           )}
           {!rose && (
             <>
               <text
                 x={(L + R) / 2}
-                y={h - 4}
+                y={h - 10}
                 textAnchor="middle"
-                fontSize={textSize(13)}
+                fontSize={axisSize}
                 fill={EXCEL.text}
               >
                 {outputId === "monthly" || outputId === "density"
@@ -501,24 +617,29 @@ function Plot({
                           : ""}
               </text>
               <text
-                transform={`translate(${dualAxis ? axisSize + 4 : 16} ${(T + B) / 2}) rotate(-90)`}
+                transform={`translate(${Math.max(18, axisSize + 6)} ${(T + B) / 2}) rotate(-90)`}
                 textAnchor="middle"
-                fontSize={textSize(13)}
-                fill={fields.length ? seriesColor(fields[0], 0) : EXCEL.text}
+                fontSize={axisSize}
+                fill={
+                  dualAxis && fields.length
+                    ? seriesColor(fields[0], 0)
+                    : EXCEL.text
+                }
               >
                 {outputId === "turbulence"
                   ? "湍流强度"
-                  : fields[0] === "mean_speed"
-                    ? "风速 (m/s)"
-                    : fields[0] === "power_density"
-                      ? "风功率密度 (W/m²)"
-                      : (names[fields[0]] ?? "")}
+                  : isFrequencyPlot
+                    ? "频率 (%)"
+                    : fields[0] === "mean_speed"
+                      ? "风速 (m/s)"
+                      : fields[0] === "power_density"
+                        ? "风功率密度 (W/m²)"
+                        : (names[fields[0]] ?? "")}
               </text>
               {dualAxis && (
                 <text
-                  x={w - 14}
-                  y={T - axisSize - 12}
-                  textAnchor="end"
+                  transform={`translate(${w - Math.max(18, axisSize + 6)} ${(T + B) / 2}) rotate(90)`}
+                  textAnchor="middle"
                   fontSize={axisSize}
                   fill={colors[1]}
                 >

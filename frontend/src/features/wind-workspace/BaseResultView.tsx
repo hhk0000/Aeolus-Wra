@@ -3,6 +3,11 @@ import { api, downloadJson } from "./api";
 import type { Run, RunOutput } from "./api";
 import { useChartTextSize } from "./chartText";
 import { EXCEL } from "./chartTheme";
+import {
+  computeDualNiceScales,
+  computeNiceScale,
+  formatAxisTick,
+} from "./chartScale";
 import { RoseChart } from "./RoseChart";
 import { AxisRange } from "./AxisRangeControl";
 import { defaultAxisRange, getAxisRange } from "./axisRange";
@@ -395,37 +400,111 @@ function CartesianPlot({
           : ["mean_speed", ...(!isAnnual ? ["power_density"] : [])];
   const used = keys.filter((key) => rows.some((r) => numeric(r[key])));
   if (!used.length || !rows.length) return null;
-  const tickSize = compact ? 17 : 13;
+  const tickSize = compact ? 14 : 13;
   const axisSize = textSize(tickSize);
+  const tickLen = compact ? 4 : EXCEL.tickLength;
   const dual = used.includes("power_density");
   const w = isAnnual
-      ? Math.max(900, rows.length * axisSize * 1.5 + 160)
+      ? Math.max(840, rows.length * axisSize * 1.5 + 160)
       : compact
         ? 480
-        : 900,
-    h = compact ? 250 : isAnnual ? 390 : 350,
-    left = compact ? 48 : dual ? Math.max(66, 5 * axisSize + 12) : 66,
-    right = compact ? 433 : dual ? w - Math.max(70, 4 * axisSize + 16) : w - 70,
-    top = compact ? 18 : dual ? 2 * axisSize + 22 : 35,
-    bottom = compact ? 215 : 285;
-  const maxFor = (key: string) =>
-    isAnnual && annualMaximum !== undefined
-      ? annualMaximum
-      : Math.max(
-          1e-6,
-          ...rows.map((r) => Number(r[key]) || 0),
-          ...(key === "mean_speed"
-            ? means.map((r) => Number(r.mean_speed) || 0)
-            : []),
-        ) * 1.15;
-  const minFor = (key: string) =>
-    isAnnual
-      ? annualMinimum
-      : Math.min(0, ...rows.map((r) => Number(r[key]) || 0));
+        : 840,
+    h = compact ? 298 : isAnnual ? 440 : 480,
+    left = compact
+      ? Math.max(46, Math.round(axisSize * 2.8 + 10))
+      : Math.max(76, Math.round(axisSize * 4.4 + 20)),
+    right = compact
+      ? w - Math.max(46, Math.round(axisSize * 2.8 + 10))
+      : dual
+        ? w - Math.max(84, Math.round(axisSize * 4.6 + 22))
+        : w - Math.max(28, Math.round(axisSize * 1.6)),
+    top = compact ? 18 : Math.max(32, axisSize + 18),
+    bottom = compact
+      ? h - Math.max(34, axisSize + 20)
+      : isAnnual
+        ? h - Math.max(84, Math.round(axisSize * 4.5 + 24))
+        : h - Math.max(64, Math.round(axisSize * 3.6 + 18));
+
+  const valuesForKey = (key: string) => [
+    ...rows
+      .map((r) => (numeric(r[key]) ? Number(r[key]) : NaN))
+      .filter(Number.isFinite),
+    ...(key === "mean_speed"
+      ? means
+          .map((r) => (numeric(r.mean_speed) ? Number(r.mean_speed) : NaN))
+          .filter(Number.isFinite)
+      : []),
+  ];
+
+  const dualScales = dual
+    ? (() => {
+        const leftVals = valuesForKey("mean_speed");
+        const rightVals = valuesForKey("power_density");
+        return computeDualNiceScales(
+          Math.min(0, ...leftVals),
+          Math.max(0.001, ...leftVals),
+          Math.min(0, ...rightVals),
+          Math.max(1, ...rightVals),
+          5,
+        );
+      })()
+    : null;
+
+  const singleScale = !dual
+    ? (() => {
+        const primaryKey = used[0];
+        const vals = used.flatMap(valuesForKey);
+        const dataMin = vals.length ? Math.min(...vals) : 0;
+        const dataMax = vals.length ? Math.max(...vals) : 1;
+        if (isAnnual) {
+          const lo = annualMinimum;
+          const hi = annualMaximum ?? Math.max(lo + 0.1, dataMax);
+          return computeNiceScale(lo, hi, {
+            targetSteps: 5,
+            fixedMin: true,
+            fixedMax: annualMaximum !== undefined,
+          });
+        }
+        return computeNiceScale(
+          Math.min(0, dataMin),
+          Math.max(primaryKey === "alpha" ? 0.05 : 0.001, dataMax),
+          {
+            targetSteps: 5,
+            fixedMin: Math.min(0, dataMin) === 0,
+          },
+        );
+      })()
+    : null;
+
+  const scaleFor = (key: string) =>
+    dualScales
+      ? key === "power_density"
+        ? dualScales.right
+        : dualScales.left
+      : singleScale!;
+
+  const tickKindFor = (key: string) => {
+    if (key === "power_density") return "power" as const;
+    if (key === "mean_speed")
+      return isAnnual && annualCustomAxis
+        ? ("density" as const)
+        : ("speed" as const);
+    if (isTI) return "ti" as const;
+    if (isShear) return "shear" as const;
+    if (isFrequency) return "frequency" as const;
+    if (outputId === "density") return "density" as const;
+    return "auto" as const;
+  };
+
+  const yTicks = dualScales ? dualScales.left.ticks : singleScale!.ticks;
   const x = (i: number) => left + ((i + 0.5) / rows.length) * (right - left);
-  const y = (value: number, key: string) =>
-    bottom -
-    ((value - minFor(key)) / (maxFor(key) - minFor(key))) * (bottom - top);
+  const y = (value: number, key: string) => {
+    const scale = scaleFor(key);
+    return (
+      bottom -
+      ((value - scale.min) / (scale.max - scale.min || 1)) * (bottom - top)
+    );
+  };
   const label = (row: Record<string, unknown>) =>
     String(row.period ?? row.bin ?? row.label ?? row.group ?? "");
   return (
@@ -436,19 +515,10 @@ function CartesianPlot({
         aria-label="真实计算结果图"
         fontFamily={EXCEL.font}
         fontWeight="700"
-        fontSize={textSize(tickSize)}
+        fontSize={axisSize}
       >
         <rect width={w} height={h} fill="white" />
-        <line x1={left} y1={top} x2={left} y2={bottom} stroke={EXCEL.axis} />
-        <line
-          x1={left}
-          y1={bottom}
-          x2={right}
-          y2={bottom}
-          stroke={EXCEL.axis}
-        />
-        {compact &&
-          dual &&
+        {(dual || !isAnnual) &&
           rows.map((_, i) => (
             <line
               key={`v-${i}`}
@@ -459,41 +529,64 @@ function CartesianPlot({
               stroke={EXCEL.grid}
             />
           ))}
-        {[0, 1, 2, 3, 4].map((n) => (
-          <g key={n}>
-            <line
-              x1={left}
-              x2={right}
-              y1={top + (n * (bottom - top)) / 4}
-              y2={top + (n * (bottom - top)) / 4}
-              stroke={EXCEL.grid}
-            />
-            <text
-              x={left - 8}
-              y={top + (n * (bottom - top)) / 4 + 4}
-              textAnchor="end"
-              fontSize={textSize(tickSize)}
-              fill={EXCEL.text}
-            >
-              {(
-                maxFor(used[0]) -
-                (n / 4) * (maxFor(used[0]) - minFor(used[0]))
-              ).toFixed(
-                isTI || isShear ? 3 : isAnnual && annualCustomAxis ? 2 : 1,
-              )}
-            </text>
-            {dual && (
+        {yTicks.map((tickVal, n) => {
+          const leftScale = scaleFor(used[0]);
+          const py =
+            bottom -
+            ((tickVal - leftScale.min) / (leftScale.max - leftScale.min || 1)) *
+              (bottom - top);
+          const rightScale = dualScales?.right;
+          const rightTick = rightScale ? rightScale.ticks[n] : undefined;
+          return (
+            <g key={n}>
+              <line x1={left} x2={right} y1={py} y2={py} stroke={EXCEL.grid} />
+              <line
+                x1={left - tickLen}
+                x2={left}
+                y1={py}
+                y2={py}
+                stroke={EXCEL.axis}
+              />
               <text
-                x={right + 8}
-                y={top + (n * (bottom - top)) / 4 + 4}
-                fontSize={textSize(tickSize)}
-                fill={palette[1]}
+                x={left - tickLen - 4}
+                y={py + Math.round(axisSize * 0.34)}
+                textAnchor="end"
+                fontSize={axisSize}
+                fill={dual ? palette[0] : EXCEL.text}
               >
-                {(maxFor("power_density") * (1 - n / 4)).toFixed(0)}
+                {formatAxisTick(tickVal, leftScale.step, tickKindFor(used[0]))}
               </text>
-            )}
-          </g>
-        ))}
+              {dual && rightScale && rightTick !== undefined && (
+                <>
+                  <line
+                    x1={right}
+                    x2={right + tickLen}
+                    y1={py}
+                    y2={py}
+                    stroke={EXCEL.axis}
+                  />
+                  <text
+                    x={right + tickLen + 4}
+                    y={py + Math.round(axisSize * 0.34)}
+                    fontSize={axisSize}
+                    fill={palette[1]}
+                  >
+                    {formatAxisTick(rightTick, rightScale.step, "power")}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })}
+        <rect
+          x={left}
+          y={top}
+          width={right - left}
+          height={bottom - top}
+          fill="none"
+          stroke={EXCEL.plotBorder}
+          strokeWidth="1"
+        />
         {(!isAnnual || bars ? used : []).map((key, k) => (
           <g key={key}>
             {(isAnnual || isFrequency || outputId === "density") &&
@@ -536,13 +629,9 @@ function CartesianPlot({
                 <polyline
                   fill="none"
                   stroke={seriesColor(key, k)}
-                  strokeWidth={compact && dual ? 2.5 : EXCEL.lineWidth}
+                  strokeWidth={compact && dual ? 2 : EXCEL.lineWidth}
                   strokeDasharray={
-                    dual && key === "power_density"
-                      ? compact
-                        ? "6 4"
-                        : "1 2"
-                      : undefined
+                    dual && key === "power_density" ? "6 4" : undefined
                   }
                   points={rows
                     .map((row, i) =>
@@ -561,19 +650,19 @@ function CartesianPlot({
                     <g key={i}>
                       {k === 0 ? (
                         <rect
-                          x={cx - 6}
-                          y={cy - 6}
-                          width="12"
-                          height="12"
+                          x={cx - 3.2}
+                          y={cy - 3.2}
+                          width="6.4"
+                          height="6.4"
                           transform={`rotate(45 ${cx} ${cy})`}
                           fill={seriesColor(key, k)}
                         />
                       ) : (
                         <rect
-                          x={cx - 5}
-                          y={cy - 5}
-                          width="10"
-                          height="10"
+                          x={cx - 2.8}
+                          y={cy - 2.8}
+                          width="5.6"
+                          height="5.6"
                           fill={seriesColor(key, k)}
                         />
                       )}
@@ -626,21 +715,27 @@ function CartesianPlot({
               )}
             </g>
           ))}
-        {rows.map(
-          (row, i) =>
-            (isAnnual ||
+        {rows.map((row, i) => (
+          <g key={i}>
+            <line
+              x1={x(i)}
+              x2={x(i)}
+              y1={bottom}
+              y2={bottom + tickLen}
+              stroke={EXCEL.axis}
+            />
+            {(isAnnual ||
               i % Math.max(1, Math.ceil(rows.length / (compact ? 8 : 13))) ===
                 0) && (
               <text
-                key={i}
                 x={isAnnual ? 0 : x(i)}
-                y={isAnnual ? 0 : bottom + 20}
+                y={isAnnual ? 0 : bottom + tickLen + axisSize + 3}
                 transform={
                   isAnnual
                     ? "translate(" +
                       x(i) +
                       " " +
-                      (bottom + 13) +
+                      (bottom + tickLen + 11) +
                       ") rotate(-45)"
                     : undefined
                 }
@@ -650,15 +745,16 @@ function CartesianPlot({
               >
                 {isAnnual ? label(row).slice(0, 4) : label(row)}
               </text>
-            ),
-        )}
+            )}
+          </g>
+        ))}
         {!compact && (
           <>
             <text
               x={(left + right) / 2}
-              y={h - 6}
+              y={h - 8}
               textAnchor="middle"
-              fontSize={textSize(tickSize)}
+              fontSize={axisSize}
               fill={EXCEL.text}
             >
               {outputId === "monthly" || outputId === "density"
@@ -675,9 +771,8 @@ function CartesianPlot({
             </text>
             {dual && (
               <text
-                x={w - 14}
-                y={top - axisSize - 12}
-                textAnchor="end"
+                transform={`translate(${w - Math.max(18, axisSize + 6)} ${(top + bottom) / 2}) rotate(90)`}
+                textAnchor="middle"
                 fontSize={axisSize}
                 fill={palette[1]}
               >
@@ -685,10 +780,10 @@ function CartesianPlot({
               </text>
             )}
             <text
-              transform={`translate(${dual ? axisSize + 4 : 14} ${(top + bottom) / 2}) rotate(-90)`}
+              transform={`translate(${Math.max(18, axisSize + 6)} ${(top + bottom) / 2}) rotate(-90)`}
               textAnchor="middle"
-              fontSize={textSize(tickSize)}
-              fill={EXCEL.text}
+              fontSize={axisSize}
+              fill={dual ? palette[0] : EXCEL.text}
             >
               {isAnnual ? "平均风速(m/s)" : labels[used[0]]}
             </text>
@@ -739,13 +834,19 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
         <p>没有同期有效样本</p>
       </div>
     );
-  const w = 640,
-    h = 430,
-    L = 70,
-    R = 610,
-    T = Math.max(78, textSize(68) + 8),
-    B = 366;
-  const max = Math.max(1, ...points.flat()) * 1.08;
+  const w = 680,
+    h = 450,
+    L = 74,
+    R = 646,
+    T = Math.max(82, textSize(70) + 10),
+    B = 382;
+  const tickLen = EXCEL.tickLength;
+  const scale = computeNiceScale(0, Math.max(1, ...points.flat()), {
+    targetSteps: 5,
+    fixedMin: true,
+    integerOnly: true,
+  });
+  const max = scale.max;
   const x = (v: number) => L + (v / max) * (R - L);
   const y = (v: number) => B - (v / max) * (B - T);
   return (
@@ -758,51 +859,65 @@ export function ScatterPlot({ row }: { row: Record<string, unknown> }) {
       fontSize={textSize(13)}
     >
       <rect width={w} height={h} fill="white" />
+      {scale.ticks.map((tickVal) => (
+        <g key={tickVal}>
+          <line
+            x1={L}
+            x2={R}
+            y1={y(tickVal)}
+            y2={y(tickVal)}
+            stroke={EXCEL.grid}
+          />
+          <line
+            x1={x(tickVal)}
+            x2={x(tickVal)}
+            y1={T}
+            y2={B}
+            stroke={EXCEL.grid}
+          />
+          <line
+            x1={L - tickLen}
+            x2={L}
+            y1={y(tickVal)}
+            y2={y(tickVal)}
+            stroke={EXCEL.axis}
+          />
+          <line
+            x1={x(tickVal)}
+            x2={x(tickVal)}
+            y1={B}
+            y2={B + tickLen}
+            stroke={EXCEL.axis}
+          />
+          <text
+            x={L - tickLen - 5}
+            y={y(tickVal) + 4}
+            fontSize={textSize(13)}
+            textAnchor="end"
+            fill={EXCEL.text}
+          >
+            {formatAxisTick(tickVal, scale.step)}
+          </text>
+          <text
+            x={x(tickVal)}
+            y={B + tickLen + textSize(13) + 3}
+            fontSize={textSize(13)}
+            textAnchor="middle"
+            fill={EXCEL.text}
+          >
+            {formatAxisTick(tickVal, scale.step)}
+          </text>
+        </g>
+      ))}
       <rect
         x={L}
         y={T}
         width={R - L}
         height={B - T}
         fill="none"
-        stroke={EXCEL.axis}
+        stroke={EXCEL.plotBorder}
         strokeWidth="1"
       />
-      {[0.25, 0.5, 0.75, 1].map((f) => (
-        <g key={f}>
-          <line
-            x1={L}
-            x2={R}
-            y1={y(f * max)}
-            y2={y(f * max)}
-            stroke={EXCEL.grid}
-          />
-          <line
-            x1={x(f * max)}
-            x2={x(f * max)}
-            y1={T}
-            y2={B}
-            stroke={EXCEL.grid}
-          />
-          <text
-            x={L - 6}
-            y={y(f * max) + 3}
-            fontSize={textSize(13)}
-            textAnchor="end"
-            fill={EXCEL.text}
-          >
-            {(f * max).toFixed(0)}
-          </text>
-          <text
-            x={x(f * max)}
-            y={B + 16}
-            fontSize={textSize(13)}
-            textAnchor="middle"
-            fill={EXCEL.text}
-          >
-            {(f * max).toFixed(0)}
-          </text>
-        </g>
-      ))}
       {points.map(([a, b], i) => (
         <circle
           key={i}
@@ -901,14 +1016,31 @@ function ShearPlots({
     height: number;
     mean_speed: number;
   }[];
-  const maxH = Math.max(1, ...profile.map((p) => p.height)) * 1.1;
-  const maxV = Math.max(1, ...profile.map((p) => p.mean_speed)) * 1.2;
-  const x = (v: number) => 65 + (v / maxV) * 700,
-    y = (h: number) => 285 - (h / maxH) * 245;
+  const w = 840,
+    h = 480,
+    L = 74,
+    R = 804,
+    T = 36,
+    B = 410;
+  const tickLen = EXCEL.tickLength;
+  const hScale = computeNiceScale(
+    0,
+    Math.max(10, ...profile.map((p) => p.height)),
+    { targetSteps: 5, fixedMin: true, integerOnly: true },
+  );
+  const vScale = computeNiceScale(
+    0,
+    Math.max(1, ...profile.map((p) => p.mean_speed)),
+    { targetSteps: 5, fixedMin: true },
+  );
+  const maxH = hScale.max;
+  const maxV = vScale.max;
+  const x = (v: number) => L + (v / maxV) * (R - L),
+    y = (ht: number) => B - (ht / maxH) * (B - T);
   const curve = Array.from({ length: 60 }, (_, i) => (maxH * (i + 1)) / 60)
     .map(
-      (h) =>
-        `${x(Math.exp(Number(summary?.intercept)) * h ** Number(summary?.alpha))},${y(h)}`,
+      (ht) =>
+        `${x(Math.exp(Number(summary?.intercept)) * ht ** Number(summary?.alpha))},${y(ht)}`,
     )
     .join(" ");
   return (
@@ -918,65 +1050,78 @@ function ShearPlots({
         {display(summary?.r_squared)}
       </h3>
       <svg
-        viewBox="0 0 900 350"
+        viewBox={`0 0 ${w} ${h}`}
         role="img"
         aria-label="同支臂实测风廓线与幂律拟合"
         fontFamily={EXCEL.font}
         fontWeight="700"
         fontSize={textSize(13)}
       >
-        <rect width="900" height="350" fill="white" />
-        <rect
-          x="65"
-          y="30"
-          width="700"
-          height="255"
-          fill="none"
-          stroke={EXCEL.axis}
-          strokeWidth="1"
-        />
-        {[0, 1, 2, 3, 4].map((n) => (
-          <g key={n}>
+        <rect width={w} height={h} fill="white" />
+        {hScale.ticks.map((ht) => (
+          <g key={`h-${ht}`}>
+            <line x1={L} x2={R} y1={y(ht)} y2={y(ht)} stroke={EXCEL.grid} />
             <line
-              x1="65"
-              x2="765"
-              y1={y((n * maxH) / 4)}
-              y2={y((n * maxH) / 4)}
-              stroke={EXCEL.grid}
+              x1={L - tickLen}
+              x2={L}
+              y1={y(ht)}
+              y2={y(ht)}
+              stroke={EXCEL.axis}
             />
             <text
-              x="56"
-              y={y((n * maxH) / 4) + 4}
+              x={L - tickLen - 5}
+              y={y(ht) + 4}
               textAnchor="end"
               fontSize={textSize(13)}
               fill={EXCEL.text}
             >
-              {((n * maxH) / 4).toFixed(0)}
+              {formatAxisTick(ht, hScale.step)}
             </text>
+          </g>
+        ))}
+        {vScale.ticks.map((v) => (
+          <g key={`v-${v}`}>
+            <line x1={x(v)} x2={x(v)} y1={T} y2={B} stroke={EXCEL.grid} />
+            <line
+              x1={x(v)}
+              x2={x(v)}
+              y1={B}
+              y2={B + tickLen}
+              stroke={EXCEL.axis}
+            />
             <text
-              x={x((n * maxV) / 4)}
-              y="306"
+              x={x(v)}
+              y={B + tickLen + textSize(13) + 4}
               textAnchor="middle"
               fontSize={textSize(13)}
               fill={EXCEL.text}
             >
-              {((n * maxV) / 4).toFixed(1)}
+              {formatAxisTick(v, vScale.step, "speed")}
             </text>
           </g>
         ))}
+        <rect
+          x={L}
+          y={T}
+          width={R - L}
+          height={B - T}
+          fill="none"
+          stroke={EXCEL.plotBorder}
+          strokeWidth="1"
+        />
         <polyline
           points={curve}
           fill="none"
           stroke={EXCEL.series[1]}
-          strokeDasharray="5 3"
-          strokeWidth="2"
+          strokeDasharray="6 4"
+          strokeWidth={EXCEL.lineWidth}
         />
         {profile.map((p) => (
           <circle
             key={p.height}
             cx={x(p.mean_speed)}
             cy={y(p.height)}
-            r="5"
+            r="4.5"
             fill={EXCEL.series[0]}
           >
             <title>
@@ -984,17 +1129,22 @@ function ShearPlots({
             </title>
           </circle>
         ))}
-        <text x="65" y="20" fontSize={textSize(13)} fill={EXCEL.text}>
-          高度 m
+        <text
+          transform={`translate(20 ${(T + B) / 2}) rotate(-90)`}
+          textAnchor="middle"
+          fontSize={textSize(13)}
+          fill={EXCEL.text}
+        >
+          高度 (m)
         </text>
         <text
-          x="450"
-          y="333"
+          x={(L + R) / 2}
+          y={h - 10}
           fontSize={textSize(13)}
           textAnchor="middle"
           fill={EXCEL.text}
         >
-          风速 m/s · 实测同期均值（绿点） / 幂律拟合（虚线）
+          风速 (m/s) · 实测同期均值（蓝点） / 幂律拟合（红虚线）
         </text>
       </svg>
       <div className="ww-month-grid">

@@ -713,16 +713,7 @@ export default function MesoscaleWorkspace({
             className="ww-panel ww-assessment-panel"
           >
             <div className="ww-assessment-head">
-              <div>
-                <h2>{tabs[tab]}</h2>
-                <p className="ww-inline-note">
-                  {tab === 0
-                    ? "导入单点中尺度逐时或 10 分钟资料，并填写项目地点以自动匹配 50 年基本风压。"
-                    : tab === 1
-                      ? "核对分析年、空气密度、轮毂高度与极值风压参数，确认后生成评估图表与统计表。"
-                      : "核对资料期各自然年平均风速与偏差，支持自动推荐或手动指定分析年。"}
-                </p>
-              </div>
+              <h2>{tabs[tab]}</h2>
               {source?.year && tab === 0 && (
                 <span className="ww-status ready">已识别资料</span>
               )}
@@ -734,8 +725,8 @@ export default function MesoscaleWorkspace({
               <div className="ww-assessment-stack">
                 <div className="ww-assessment-group">
                   <div className="ww-assessment-group-head">
-                    <h3>中尺度风速风向资料</h3>
-                    <span>支持 ERA5 / 格林威治 TXT（10 min 或 1 h）</span>
+                    <h3>中尺度数据</h3>
+                    <span>ERA5 / 格林威治 · 10 min 或 1 h TXT</span>
                   </div>
                   <label
                     className={`ww-assessment-dropzone${busy ? " is-busy" : ""}`}
@@ -758,14 +749,11 @@ export default function MesoscaleWorkspace({
                     />
                     <strong>
                       {busy
-                        ? "正在解析中尺度资料…"
+                        ? "正在解析资料…"
                         : source
-                          ? "点击或拖入新的 TXT 文件以替换当前资料"
-                          : "点击选择或拖入中尺度 TXT 文件"}
+                          ? "点击或拖入新 TXT 替换当前资料"
+                          : "点击选择或拖入中尺度 TXT"}
                     </strong>
-                    <span>
-                      自动识别时间步长、最高风速层高度、空气密度与气温列
-                    </span>
                   </label>
                   {source && (
                     <div className="ww-assessment-file">
@@ -829,11 +817,10 @@ export default function MesoscaleWorkspace({
 
                 <div className="ww-assessment-group">
                   <div className="ww-assessment-group-head">
-                    <h3>项目地点与风压匹配</h3>
-                    <span>按区县 → 地市 → 省级参考站自动匹配</span>
+                    <h3>项目地点</h3>
                   </div>
                   <label className="field">
-                    项目地点（用于匹配风压）
+                    省 / 市 / 区县（匹配 50 年基本风压）
                     <input
                       type="text"
                       maxLength={120}
@@ -866,7 +853,7 @@ export default function MesoscaleWorkspace({
                       type="button"
                       onClick={() => setTab(1)}
                     >
-                      下一步：风资源分析 →
+                      进入风资源分析
                     </button>
                   </div>
                 )}
@@ -920,12 +907,11 @@ export default function MesoscaleWorkspace({
                   >
                     <div className="ww-assessment-group">
                       <div className="ww-assessment-group-head">
-                        <h3>基础气象与高度参数</h3>
-                        <span>源层与轮毂高度不同时自动按式（B3）折算密度</span>
+                        <h3>基础气象与高度</h3>
                       </div>
                       <div className="ww-fields ww-fields-two">
                         <label>
-                          源层空气密度
+                          源层空气密度（kg/m³）
                           <input
                             aria-label="空气密度"
                             aria-describedby="assessment-density-note"
@@ -949,15 +935,14 @@ export default function MesoscaleWorkspace({
                               });
                             }}
                           />
-                          <small
-                            id="assessment-density-note"
-                            className="ww-inline-note"
-                          >
-                            kg/m³ ·{" "}
-                            {sourceDensity !== undefined
-                              ? "从源文件自动识别"
-                              : "请填写最高风速层空气密度"}
-                          </small>
+                          {sourceDensity !== undefined && (
+                            <small
+                              id="assessment-density-note"
+                              className="ww-inline-note"
+                            >
+                              源文件自动识别
+                            </small>
+                          )}
                         </label>
                         <label>
                           轮毂高度（m）
@@ -977,11 +962,12 @@ export default function MesoscaleWorkspace({
                               });
                             }}
                           />
-                          <small className="ww-inline-note">
-                            {needsDensityAdjustment
-                              ? `源风速层为 ${source?.height} m，按式（B3）折算密度。`
-                              : "留空时采用导入数据的最高风速层。"}
-                          </small>
+                          {needsDensityAdjustment && (
+                            <small className="ww-inline-note">
+                              源层 {source?.height} m，按 GB/T 18710
+                              式（B3）折算密度
+                            </small>
+                          )}
                         </label>
                         {needsDensityAdjustment && (
                           <label className="ww-wide">
@@ -1006,11 +992,11 @@ export default function MesoscaleWorkspace({
                                 });
                               }}
                             />
-                            <small className="ww-inline-note">
-                              {sourceTemperature === undefined
-                                ? "未识别到同期气温，填写后可计算轮毂空气密度。"
-                                : "留空使用源文件统计值，也可手动覆盖。"}
-                            </small>
+                            {sourceTemperature === undefined && (
+                              <small className="ww-inline-note">
+                                源文件缺气温列，请手填以折算轮毂密度
+                              </small>
+                            )}
                           </label>
                         )}
                       </div>
@@ -1018,8 +1004,7 @@ export default function MesoscaleWorkspace({
 
                     <div className="ww-assessment-group">
                       <div className="ww-assessment-group-head">
-                        <h3>极值风压与发电量修正</h3>
-                        <span>50 年一遇最大风速对比与可选机组发电量表</span>
+                        <h3>极值风压与发电量</h3>
                       </div>
                       <div className="ww-fields ww-fields-three">
                         <div className="ww-field-with-action">
@@ -1081,9 +1066,6 @@ export default function MesoscaleWorkspace({
                               })
                             }
                           />
-                          <small className="ww-inline-note">
-                            默认 5，可按项目依据调整。
-                          </small>
                         </label>
                         <label>
                           综合修正系数（%）
@@ -1098,9 +1080,6 @@ export default function MesoscaleWorkspace({
                               change({ factor: event.target.value })
                             }
                           />
-                          <small className="ww-inline-note">
-                            用于机组理论发电量折减。
-                          </small>
                         </label>
                       </div>
                       <div className="ww-energy-upload-row">
@@ -1114,7 +1093,7 @@ export default function MesoscaleWorkspace({
                           />
                           {state.energy
                             ? "更换机组发电量表"
-                            : "+ 上传机组发电量表（可选）"}
+                            : "上传机组发电量表"}
                         </label>
                         {state.energy ? (
                           <div className="ww-energy-file-pill">
@@ -1129,7 +1108,7 @@ export default function MesoscaleWorkspace({
                           </div>
                         ) : (
                           <span className="ww-inline-note">
-                            支持 XLSX、CSV 或 TSV，用于自动填充表 2.3-1
+                            可选 · XLSX / CSV / TSV
                           </span>
                         )}
                       </div>
@@ -1253,7 +1232,7 @@ export default function MesoscaleWorkspace({
                           className="ww-button"
                           onClick={() => onNavigate(2)}
                         >
-                          查看已有结果 →
+                          查看结果
                         </button>
                       )}
                     </div>
@@ -1413,7 +1392,7 @@ export default function MesoscaleWorkspace({
                 onNavigate(1);
               }}
             >
-              调整分析配置 →
+              调整配置
             </button>
             {state.runId && (
               <button
@@ -1421,7 +1400,7 @@ export default function MesoscaleWorkspace({
                 type="button"
                 onClick={() => onNavigate(3)}
               >
-                前往导出报告
+                导出报告
               </button>
             )}
           </div>
@@ -1649,12 +1628,7 @@ export default function MesoscaleWorkspace({
   return (
     <section className="ww-panel ww-assessment ww-assessment-export-card">
       <div className="ww-assessment-head">
-        <div>
-          <h2>风资源评估报告</h2>
-          <p className="ww-inline-note">
-            基于当前计算成果与内置标准模板生成可编辑的 Word 半成品报告。
-          </p>
-        </div>
+        <h2>风资源评估报告</h2>
         {template && (
           <span className="ww-status ready">
             {template.title} · v{template.version}

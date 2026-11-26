@@ -110,7 +110,7 @@ export default function AnalysisWorkspace(props: Props) {
                 onChange((current) => ({ ...current, activeTab: "data" }))
               }
             >
-              管理数据资料 →
+              管理数据资料
             </button>
           </div>
         )}
@@ -130,9 +130,8 @@ export default function AnalysisWorkspace(props: Props) {
         </div>
       </div>
       <div className="ww-workspace-footer">
-        <span>本机计算 · 来源与版本可追溯 · 每项结果独立提示适用条件</span>
         <button className="ww-text-button" onClick={() => onOpenGallery()}>
-          查看计算图表 →
+          查看图表
         </button>
       </div>
     </div>

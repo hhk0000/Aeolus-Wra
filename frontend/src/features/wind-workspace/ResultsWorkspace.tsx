@@ -326,7 +326,6 @@ export function ResultsWorkspace({
       <section className="ww-results-hero is-compact">
         <div className="ww-results-hero-copy">
           <h2>风资源计算成果</h2>
-          <span>图、表与运行快照共享同一组参数</span>
         </div>
         <div className="ww-results-hero-stats">
           <div>
@@ -436,7 +435,7 @@ export function ResultsWorkspace({
               )
             }
           >
-            调整分析配置 →
+            调整配置
           </button>
         </div>
       </div>

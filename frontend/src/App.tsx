@@ -30,14 +30,6 @@ const sections = [
   "自动审查中心",
   "规范库",
 ];
-const subtitles = [
-  "每一段风的旅程，从这里开始。",
-  "把分析思路，变成清晰的工作流。",
-  "让数据里的规律，清晰可见。",
-  "从分析到表达，让成果井然有序。",
-  "多一层核查，多一份从容。",
-  "让每一个结论，都有据可循。",
-];
 const icons = ["grid", "sliders", "chart", "file", "shield", "book"];
 const engineeringReport = "可研 / 初设";
 const reportTypes = [engineeringReport, "风资源评估"] as const;
@@ -532,10 +524,6 @@ function WorkspaceApp() {
     (sum, ws) => sum + (ws?.files.length ?? 0),
     0,
   );
-  const totalTowers = allWorkspaces.reduce(
-    (sum, ws) => sum + (ws?.towers.length ?? 0),
-    0,
-  );
   const totalRuns = allWorkspaces.reduce(
     (sum, ws) =>
       sum +
@@ -593,9 +581,7 @@ function WorkspaceApp() {
             Aeolus<span className="brand-caption">风资源分析工作空间</span>
           </span>
         </a>
-        <div className="workspace-label">
-          工作空间 <span>⌘</span>
-        </div>
+        <div className="workspace-label">工作空间</div>
         <nav aria-label="工作中心">
           {sections.map((s, i) => {
             if (reportType === "风资源评估" && i === 4 && page !== 4)
@@ -614,18 +600,6 @@ function WorkspaceApp() {
             );
           })}
         </nav>
-        <div className="sidebar-note">
-          <span className="small-icon">
-            <Icon name="shield" />
-          </span>
-          <strong>让每一步分析有迹可循</strong>
-          <p>
-            从原始数据到工程结论，
-            <br />
-            构建属于你的风资源工作流。
-          </p>
-          <span className="version">界面预览 · v0.1</span>
-        </div>
         <button
           className="profile profile-edit"
           type="button"
@@ -640,8 +614,8 @@ function WorkspaceApp() {
             )}
           </span>
           <span className="profile-copy">
-            <strong>{profile.nickname} 的工作空间</strong>
-            <small>编辑个人信息</small>
+            <strong>{profile.nickname}</strong>
+            <small>个人信息</small>
           </span>
           <span className="online-dot" />
         </button>
@@ -700,46 +674,27 @@ function WorkspaceApp() {
         <div className="content">
           {page === 0 ? (
             <div className="page-heading">
-              <div>
-                <div className="eyebrow">YOUR WIND, YOUR INSIGHT</div>
-                <h1>{sections[page]}</h1>
-                <p>{subtitles[page]}</p>
-              </div>
+              <h1>{sections[page]}</h1>
               <div className="heading-actions">
-                <span className="preview-badge">本机分析引擎</span>
                 <button className="primary" onClick={() => setModal(true)}>
-                  <Icon name="plus" size={17} />
+                  <Icon name="plus" size={16} />
                   新建项目
                 </button>
               </div>
             </div>
           ) : (
             <div className="page-heading is-compact">
-              <div>
-                <h1>{sections[page]}</h1>
-                <p>{subtitles[page]}</p>
-              </div>
+              <h1>{sections[page]}</h1>
             </div>
           )}
           {page === 0 ? (
             <>
               <section className="hero">
                 <div className="hero-copy">
-                  <span className="hero-tag">
-                    <span /> 风的价值，从洞察开始
-                  </span>
-                  <h2>
-                    让每一缕风，
-                    <br />
-                    成为可见的可能。
-                  </h2>
-                  <p>
-                    项目、数据、分析与成果，在一个空间自然衔接。
-                    <br />
-                    专注探索，让复杂的风资源分析变得井然有序。
-                  </p>
+                  <h2>风资源测算与评估</h2>
+                  <p>测风数据处理、长期订正与报告生成</p>
                   <button onClick={() => (current ? go(1) : setModal(true))}>
-                    开启分析工作流 <Icon name="arrow" size={17} />
+                    进入工作区
                   </button>
                 </div>
                 <div className="hero-cover" aria-hidden="true" />
@@ -747,44 +702,29 @@ function WorkspaceApp() {
               </section>
               <div className="stats">
                 {[
+                  ["项目", String(projects.length).padStart(2, "0"), "grid"],
                   [
-                    "项目空间",
-                    String(projects.length).padStart(2, "0"),
-                    "集中管理你的分析项目",
-                    "grid",
-                  ],
-                  [
-                    "测风数据",
+                    "测风资料",
                     totalFiles > 0 ? String(totalFiles).padStart(2, "0") : "—",
-                    totalFiles > 0
-                      ? `已接入 ${totalTowers} 座测风塔数据资料`
-                      : "等待接入真实测风数据",
                     "wind",
                   ],
                   [
                     "分析任务",
                     totalRuns > 0 ? String(totalRuns).padStart(2, "0") : "—",
-                    totalRuns > 0
-                      ? "本机计算快照已存档可追溯"
-                      : "按项目配置分析流程",
                     "chart",
                   ],
                   [
-                    "成果报告",
+                    "成果图表",
                     totalOutputs > 0
                       ? String(totalOutputs).padStart(2, "0")
                       : "—",
-                    totalOutputs > 0
-                      ? "图表与 Word 报告随时可导出"
-                      : "从图表到完整报告",
                     "file",
                   ],
-                ].map(([title, value, desc, icon], i) => (
+                ].map(([title, value, icon], i) => (
                   <div className="stat" key={title}>
                     <div>
                       <span>{title}</span>
                       <strong>{value}</strong>
-                      <small>{desc}</small>
                     </div>
                     <span className={`stat-icon tint${i}`}>
                       <Icon name={icon} />
@@ -793,12 +733,9 @@ function WorkspaceApp() {
                 ))}
               </div>
               <div className="section-title">
-                <div>
-                  <h2>
-                    我的项目 <span>{projects.length}</span>
-                  </h2>
-                  <p>有序组织，让每一次探索都有归处。</p>
-                </div>
+                <h2>
+                  我的项目 <span>{projects.length}</span>
+                </h2>
                 <label className="search">
                   <Icon name="search" size={17} />
                   <input
@@ -821,7 +758,6 @@ function WorkspaceApp() {
                     </button>
                   ))}
                 </div>
-                <span>按创建顺序排列</span>
               </div>
               <div className="project-grid">
                 {projects
@@ -871,12 +807,12 @@ function WorkspaceApp() {
                                   }
                                 />{" "}
                                 {pFiles > 0 || pRuns > 0
-                                  ? `已导入 ${pFiles} 份资料${pRuns > 0 ? ` · ${pRuns} 项分析` : ""}`
+                                  ? `${pFiles} 份资料${pRuns > 0 ? ` · ${pRuns} 项分析` : ""}`
                                   : p.demo
-                                    ? "探索示例工作流"
-                                    : "等待导入数据"}
+                                    ? "示例数据"
+                                    : "未导入数据"}
                               </span>
-                              <span>进入项目 →</span>
+                              <span>打开</span>
                             </div>
                           </div>
                         </button>
@@ -893,10 +829,9 @@ function WorkspaceApp() {
                   })}
                 <button className="new-card" onClick={() => setModal(true)}>
                   <span>
-                    <Icon name="plus" size={26} />
+                    <Icon name="plus" size={24} />
                   </span>
-                  <strong>创建新的风资源项目</strong>
-                  <p>从一个想法，开始新的探索</p>
+                  <strong>新建项目</strong>
                 </button>
               </div>
             </>
@@ -1095,10 +1030,8 @@ function WorkspaceApp() {
           )}
           <footer className="footer">
             <span>
-              <Icon name="wind" size={15} /> AEOLUS WRA{" "}
-              <span className="footer-divider">|</span> 让风的价值被看见
+              <Icon name="wind" size={14} /> AEOLUS WRA
             </span>
-            <span>原始数据留存 · 分析过程可追溯</span>
           </footer>
         </div>
       </main>
@@ -1242,11 +1175,7 @@ function WorkspaceApp() {
             >
               ×
             </button>
-            <span className="stat-icon tint0">
-              <Icon name="plus" size={24} />
-            </span>
-            <h2 id="modal-title">开始一段新的探索</h2>
-            <p className="muted">创建项目，组织你的测风数据与分析成果。</p>
+            <h2 id="modal-title">新建项目</h2>
             <form
               onSubmit={(e) => {
                 e.preventDefault();

@@ -263,10 +263,10 @@ button:disabled {
 .profile {
   width: 100%;
   border: 0;
-  border-top: 1px solid #dde5e0;
+  border-top: 1px solid var(--ui-line);
   background: transparent;
   text-align: left;
-  margin-top: 4px;
+  margin-top: auto;
   padding: 21px 8px;
   display: flex;
   align-items: center;
@@ -484,7 +484,7 @@ p {
   color: var(--ui-on-sage);
 }
 .hero {
-  height: 286px;
+  height: 232px;
   position: relative;
   background: var(--ui-illustration-tint);
   border-radius: 18px;
@@ -495,8 +495,8 @@ p {
 .hero-copy {
   position: relative;
   z-index: 2;
-  padding: 28px 35px;
-  max-width: 58%;
+  padding: 36px 38px;
+  max-width: 56%;
 }
 .hero-tag {
   font-size: 10px;
@@ -778,8 +778,9 @@ p {
   background: var(--ui-paper);
   border-radius: 14px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding: 20px;
+  padding: 18px 20px;
   box-shadow: var(--ui-shadow-card);
   transition:
     transform var(--ui-motion),
@@ -797,9 +798,9 @@ p {
 }
 .stat strong {
   display: block;
-  font-size: 29px;
+  font-size: 28px;
   line-height: 1;
-  margin: 15px 0 12px;
+  margin: 10px 0 0;
   font-weight: 600;
   letter-spacing: -1px;
   font-variant-numeric: tabular-nums;

@@ -1,11 +1,12 @@
 """Rebind the editable Shanghai example without changing the approved Word file."""
 
 import re
+from copy import deepcopy
 from io import BytesIO
 
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from docx.text.run import Run
 from PIL import Image, ImageOps
 
 from wind_platform.core.calculations import CalculationError
@@ -124,27 +125,42 @@ def clear_generated_chart_note(caption):
         remaining = max(0, remaining - len(value))
 
 
-def apply_body_typefaces(body):
-    start = next(
-        index
-        for index, element in enumerate(body)
-        if element.tag == qn("w:p")
-        and "".join(node.text or "" for node in element.iter(qn("w:t"))).strip() == "风能资源"
-    )
-    for element in body[start:]:
-        for run in element.iter(qn("w:r")):
+def apply_typefaces(run):
+    props = run.get_or_add_rPr()
+    fonts = props.get_or_add_rFonts()
+    fonts.attrib.clear()
+    fonts.set(qn("w:eastAsia"), "宋体")
+    for script in ("ascii", "hAnsi", "cs"):
+        fonts.set(qn(f"w:{script}"), "Times New Roman")
+
+
+def style_inserted_numbers(run):
+    parts = re.split(r"([-−+]?[0-9]+(?:[.,][0-9]+)*)", run.text)
+    if len(parts) == 1:
+        return
+    prototype = deepcopy(run._r)
+    current = run
+    run.text = parts[0]
+    for index, part in enumerate(parts[1:], 1):
+        if part:
+            following = Run(deepcopy(prototype), run._parent)
+            following.text = part
+            current._r.addnext(following._r)
+            current = following
+            if index % 2:
+                apply_typefaces(current._r)
+    if not parts[0]:
+        run._r.getparent().remove(run._r)
+
+
+def apply_formula_typefaces(body):
+    for table in body.xpath("./w:tbl"):
+        if not any(
+            re.fullmatch(r"[（(]1-[1-8][）)]", "".join(p.xpath(".//w:t/text()")).strip())
+            for p in table.xpath(".//w:p")
+        ):
+            continue
+        for run in table.iter(qn("w:r")):
             if not any(node.text for node in run.iter(qn("w:t"))):
                 continue
-            props = run.find(qn("w:rPr"))
-            if props is None:
-                props = OxmlElement("w:rPr")
-                run.insert(0, props)
-            fonts = props.find(qn("w:rFonts"))
-            if fonts is None:
-                fonts = OxmlElement("w:rFonts")
-                style = props.find(qn("w:rStyle"))
-                props.insert(0 if style is None else props.index(style) + 1, fonts)
-            fonts.attrib.clear()
-            fonts.set(qn("w:eastAsia"), "宋体")
-            for script in ("ascii", "hAnsi", "cs"):
-                fonts.set(qn(f"w:{script}"), "Times New Roman")
+            apply_typefaces(run)

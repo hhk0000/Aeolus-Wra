@@ -133,8 +133,15 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     net_value = turbine_table.rows[1].cells[9].paragraphs[0].runs[0]
     assert net_value.text == "15328.8"
     assert str(net_value.font.highlight_color) == "YELLOW (7)"
-    assert net_value.font.name == "Times New Roman"
-    assert net_value._r.xpath("./w:rPr/w:rFonts/@w:eastAsia") == ["宋体"]
+    assert (
+        net_value._r.rPr.xml
+        == original.tables[14].rows[1].cells[9].paragraphs[0].runs[0]._r.rPr.xml
+    )
+    old_heading = next(p for p in original.paragraphs if p.text == "风能资源")
+    new_heading = next(p for p in formal_doc.paragraphs if p.text == "风能资源")
+    assert new_heading._p.xml == old_heading._p.xml
+    value = formal_doc.tables[1].rows[1].cells[1].paragraphs[0].runs[0]
+    assert value.font.name == "Times New Roman"
     direction_text = next(p for p in formal_doc.paragraphs if "主要风向为" in p.text)
     assert all(
         str(run.font.color.rgb) != "008000"
@@ -147,7 +154,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert "【上海农投横沙新洲绿电直连项目】" in approved_text
     assert "【换图】" not in approved_text
     grade_paragraph = next(p for p in formal_doc.paragraphs if "风功率密度等级为" in p.text)
-    assert any(run.text.endswith("级") and run.bold is False for run in grade_paragraph.runs)
+    assert any(run.text.strip() == "级" and run.bold is False for run in grade_paragraph.runs)
     assert "近20年平均风速为5.00" in approved_text
     for shape in formal_doc.inline_shapes:
         assert shape.width == 5040000

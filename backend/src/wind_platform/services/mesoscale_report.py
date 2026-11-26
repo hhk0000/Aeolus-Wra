@@ -896,6 +896,7 @@ def build(
             runs[0].text = str(value)
             for extra in runs[1:]:
                 extra.text = ""
+            approved_assessment_template.style_inserted_numbers(runs[0])
             return
         runs = cell.paragraphs[0].runs
         run = runs[0] if runs else cell.paragraphs[0].add_run()
@@ -1074,6 +1075,8 @@ def build(
                     not approved_layout or approved_assessment_template.is_green(run._r)
                 ):
                     run.text = f"{factor:g}"
+                    if approved_layout:
+                        approved_assessment_template.style_inserted_numbers(run)
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
@@ -1278,6 +1281,8 @@ def build(
                 bound.font.bold = False
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
+            if approved_layout:
+                approved_assessment_template.style_inserted_numbers(bound)
 
     for para in doc.paragraphs:
         replace(para)
@@ -1285,7 +1290,7 @@ def build(
         for para in section.header.paragraphs:
             replace(para)
     if approved_layout:
-        approved_assessment_template.apply_body_typefaces(doc.element.body)
+        approved_assessment_template.apply_formula_typefaces(doc.element.body)
     doc.core_properties.comments = "前期中尺度评估 · mesoscale-v1"
     upd = OxmlElement("w:updateFields")
     current_rids = {

@@ -670,7 +670,9 @@ export default function MesoscaleWorkspace({
       </div>
     );
 
-  if (page === 1)
+  if (page === 1) {
+    const stepDone = [!!source?.year, !!state.runId, !!source?.year];
+    const selectedChartCount = titles.length - state.hidden.length;
     return (
       <div className="ww-workspace ww-assessment">
         <div className="ww-workspace-board">
@@ -678,6 +680,7 @@ export default function MesoscaleWorkspace({
             <div
               className="ww-primary-tabs"
               role="tablist"
+              aria-orientation="vertical"
               aria-label="资源评估配置"
             >
               {tabs.map((title, index) => (
@@ -694,7 +697,11 @@ export default function MesoscaleWorkspace({
                     setError("");
                   }}
                 >
-                  {title}
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <b className="ww-step-title">{title}</b>
+                  {stepDone[index] && (
+                    <i className="ww-step-ready" aria-hidden="true" />
+                  )}
                 </button>
               ))}
             </div>
@@ -703,137 +710,203 @@ export default function MesoscaleWorkspace({
             id="assessment-panel"
             role="tabpanel"
             aria-labelledby={"assessment-tab-" + tab}
-            className="ww-panel"
+            className="ww-panel ww-assessment-panel"
           >
-            <h2>{tabs[tab]}</h2>
-            {tab === 0 && (
-              <>
-                <label className="field">
-                  中尺度数据（10 分钟或逐小时 TXT）
-                  <input
-                    type="file"
-                    accept=".txt"
-                    disabled={busy}
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      event.currentTarget.value = "";
-                      void upload(file, "source");
-                    }}
-                  />
-                </label>
+            <div className="ww-assessment-head">
+              <div>
+                <h2>{tabs[tab]}</h2>
                 <p className="ww-inline-note">
-                  支持 ERA5 和格林威治，自动识别风速、风向和高度。
+                  {tab === 0
+                    ? "导入单点中尺度逐时或 10 分钟资料，并填写项目地点以自动匹配 50 年基本风压。"
+                    : tab === 1
+                      ? "核对分析年、空气密度、轮毂高度与极值风压参数，确认后生成评估图表与统计表。"
+                      : "核对资料期各自然年平均风速与偏差，支持自动推荐或手动指定分析年。"}
                 </p>
-                <label className="field">
-                  项目地点（用于匹配风压）
-                  <input
-                    type="text"
-                    maxLength={120}
-                    disabled={busy}
-                    placeholder="例如：河北省 张家口市 怀来县"
-                    value={state.place ?? place}
-                    aria-describedby="assessment-pressure-location-note"
-                    onChange={(event) =>
-                      change({
-                        place: event.target.value,
-                        pressureOverride: undefined,
-                        runId: undefined,
-                      })
-                    }
-                  />
-                </label>
-                <p
-                  id="assessment-pressure-location-note"
-                  className="ww-inline-note"
-                  role="status"
-                >
-                  {pressureNote}
-                </p>
-                {busy && <p role="status">正在读取资料…</p>}
-                {source && (
-                  <div className="ww-assessment-file">
-                    <div>
-                      <strong>{source.name}</strong>
-                      <p>
-                        {source.height} m ·{" "}
-                        {source.interval_minutes === 10 ? "10 min" : "1 h"} ·{" "}
-                        {source.first.slice(0, 10)} 至{" "}
-                        {source.last.slice(0, 10)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="ww-button project-delete-confirm"
+              </div>
+              {source?.year && tab === 0 && (
+                <span className="ww-status ready">已识别资料</span>
+              )}
+              {state.runId && tab === 1 && (
+                <span className="ww-status ready">成果已生成</span>
+              )}
+            </div>
+            {tab === 0 && (
+              <div className="ww-assessment-stack">
+                <div className="ww-assessment-group">
+                  <div className="ww-assessment-group-head">
+                    <h3>中尺度风速风向资料</h3>
+                    <span>支持 ERA5 / 格林威治 TXT（10 min 或 1 h）</span>
+                  </div>
+                  <label
+                    className={`ww-assessment-dropzone${busy ? " is-busy" : ""}`}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const file = event.dataTransfer.files?.[0];
+                      if (file) void upload(file, "source");
+                    }}
+                  >
+                    <input
+                      type="file"
+                      accept=".txt"
                       disabled={busy}
-                      onClick={() => removeDialog.current?.showModal()}
-                    >
-                      删除资料
-                    </button>
-                    <dialog
-                      ref={removeDialog}
-                      className="modal ww-concurrent-task-dialog"
-                      aria-labelledby="assessment-remove-title"
-                    >
-                      <h2 id="assessment-remove-title">删除中尺度资料</h2>
-                      <p>
-                        从当前工作区移除「{source.name}
-                        」，并清空当前分析结果。原始文件和历史计算记录会保留。
-                      </p>
-                      <div className="project-delete-actions">
-                        <button
-                          type="button"
-                          className="ww-button"
-                          autoFocus
-                          onClick={() => removeDialog.current?.close()}
-                        >
-                          取消
-                        </button>
-                        <button
-                          type="button"
-                          className="ww-button project-delete-confirm"
-                          onClick={removeSource}
-                        >
-                          确认删除
-                        </button>
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        void upload(file, "source");
+                      }}
+                    />
+                    <strong>
+                      {busy
+                        ? "正在解析中尺度资料…"
+                        : source
+                          ? "点击或拖入新的 TXT 文件以替换当前资料"
+                          : "点击选择或拖入中尺度 TXT 文件"}
+                    </strong>
+                    <span>
+                      自动识别时间步长、最高风速层高度、空气密度与气温列
+                    </span>
+                  </label>
+                  {source && (
+                    <div className="ww-assessment-file">
+                      <div>
+                        <strong>{source.name}</strong>
+                        <div className="ww-meta-pills">
+                          <span>{source.height} m</span>
+                          <span>
+                            {source.interval_minutes === 10 ? "10 min" : "1 h"}
+                          </span>
+                          <span>
+                            {source.first.slice(0, 10)} 至{" "}
+                            {source.last.slice(0, 10)}
+                          </span>
+                        </div>
                       </div>
-                    </dialog>
+                      <button
+                        type="button"
+                        className="ww-button is-compact is-danger"
+                        disabled={busy}
+                        onClick={() => removeDialog.current?.showModal()}
+                      >
+                        删除资料
+                      </button>
+                      <dialog
+                        ref={removeDialog}
+                        className="modal ww-concurrent-task-dialog"
+                        aria-labelledby="assessment-remove-title"
+                      >
+                        <h2 id="assessment-remove-title">删除中尺度资料</h2>
+                        <p>
+                          从当前工作区移除「{source.name}
+                          」，并清空当前分析结果。原始文件和历史计算记录会保留。
+                        </p>
+                        <div className="project-delete-actions">
+                          <button
+                            type="button"
+                            className="ww-button"
+                            autoFocus
+                            onClick={() => removeDialog.current?.close()}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className="ww-button project-delete-confirm"
+                            onClick={removeSource}
+                          >
+                            确认删除
+                          </button>
+                        </div>
+                      </dialog>
+                    </div>
+                  )}
+                  {source?.coverage_error && (
+                    <p className="ww-error" role="alert">
+                      {source.coverage_error}
+                    </p>
+                  )}
+                </div>
+
+                <div className="ww-assessment-group">
+                  <div className="ww-assessment-group-head">
+                    <h3>项目地点与风压匹配</h3>
+                    <span>按区县 → 地市 → 省级参考站自动匹配</span>
+                  </div>
+                  <label className="field">
+                    项目地点（用于匹配风压）
+                    <input
+                      type="text"
+                      maxLength={120}
+                      disabled={busy}
+                      placeholder="例如：河北省 张家口市 怀来县"
+                      value={state.place ?? place}
+                      aria-describedby="assessment-pressure-location-note"
+                      onChange={(event) =>
+                        change({
+                          place: event.target.value,
+                          pressureOverride: undefined,
+                          runId: undefined,
+                        })
+                      }
+                    />
+                  </label>
+                  <p
+                    id="assessment-pressure-location-note"
+                    className="ww-inline-note"
+                    role="status"
+                  >
+                    {pressureNote}
+                  </p>
+                </div>
+
+                {source?.year && (
+                  <div className="ww-assessment-actions">
+                    <button
+                      className="ww-button primary"
+                      type="button"
+                      onClick={() => setTab(1)}
+                    >
+                      下一步：风资源分析 →
+                    </button>
                   </div>
                 )}
-                {source?.coverage_error && (
-                  <p className="ww-error" role="alert">
-                    {source.coverage_error}
-                  </p>
-                )}
-                {source?.year && (
-                  <button
-                    className="ww-button primary"
-                    type="button"
-                    onClick={() => setTab(1)}
-                  >
-                    继续风资源分析
-                  </button>
-                )}
-              </>
+              </div>
             )}
             {tab === 1 && (
-              <>
-                {period || <p>请先上传覆盖至少一个完整自然年的中尺度资料。</p>}
-                {source?.year && (
-                  <p className="ww-inline-note">
-                    {source.start_year}–{source.end_year} 年 · 共 {windowYears}{" "}
-                    年资料
-                    {shortWindow
-                      ? windowYears === 1
-                        ? " · 直接分析该年"
-                        : " · 合并全部完整自然年统计"
-                      : ` · 选定 ${analysisYear} 年 · 偏差 ${deviation?.toFixed(2)}% · ${
-                          selectedAnalysisYear !== undefined
-                            ? "手动选择"
-                            : Math.abs(deviation ?? 0) > 2
-                              ? "无平风年，采用最小偏差年"
-                              : "平风年中偏差最小"
-                        }`}
-                  </p>
+              <div className="ww-assessment-stack">
+                {source?.year ? (
+                  <div className="ww-assessment-summary-strip">
+                    {period}
+                    <p className="ww-inline-note">
+                      {source.start_year}–{source.end_year} 年 · 共{" "}
+                      {windowYears} 年资料
+                      {shortWindow
+                        ? windowYears === 1
+                          ? " · 直接分析该年"
+                          : " · 合并全部完整自然年统计"
+                        : ` · 选定 ${analysisYear} 年 · 偏差 ${deviation?.toFixed(2)}% · ${
+                            selectedAnalysisYear !== undefined
+                              ? "手动选择"
+                              : Math.abs(deviation ?? 0) > 2
+                                ? "无平风年，采用最小偏差年"
+                                : "平风年中偏差最小"
+                          }`}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="ww-simple-empty">
+                    <p>
+                      请先在「01
+                      数据资料」上传覆盖至少一个完整自然年的中尺度资料。
+                    </p>
+                    <button
+                      type="button"
+                      className="ww-button"
+                      onClick={() => setTab(0)}
+                    >
+                      前往上传资料
+                    </button>
+                  </div>
                 )}
                 <form
                   onSubmit={(event) => {
@@ -841,286 +914,333 @@ export default function MesoscaleWorkspace({
                     void analyze();
                   }}
                 >
-                  <fieldset disabled={busy} className="ww-report-controls">
-                    <div className="ww-fields ww-fields-two">
-                      <label>
-                        源层空气密度
-                        <input
-                          aria-label="空气密度"
-                          aria-describedby="assessment-density-note"
-                          required
-                          readOnly={sourceDensity !== undefined}
-                          type="number"
-                          step="any"
-                          min="0.001"
-                          max="2.999"
-                          value={
-                            sourceDensity === undefined
-                              ? state.density
-                              : Number(sourceDensity.toPrecision(10))
-                          }
-                          onChange={(event) => {
-                            setResult(undefined);
-                            setResultError("");
-                            change({
-                              density: event.target.value,
-                              runId: undefined,
-                            });
-                          }}
-                        />
-                        <small
-                          id="assessment-density-note"
-                          className="ww-inline-note"
-                        >
-                          kg/m³ ·{" "}
-                          {sourceDensity !== undefined
-                            ? "从源文件自动识别"
-                            : "请填写最高风速层空气密度"}
-                        </small>
-                      </label>
-                      <label>
-                        轮毂高度（m）
-                        <input
-                          type="number"
-                          min="0.01"
-                          step="any"
-                          placeholder={
-                            source ? `默认 ${source.height} m` : undefined
-                          }
-                          value={state.hubHeight ?? ""}
-                          onChange={(event) => {
-                            setResult(undefined);
-                            change({
-                              hubHeight: event.target.value,
-                              runId: undefined,
-                            });
-                          }}
-                        />
-                        <small className="ww-inline-note">
-                          {needsDensityAdjustment
-                            ? `源风速层为 ${source?.height} m，按式（B3）折算密度。`
-                            : "留空时采用导入数据的最高风速层。"}
-                        </small>
-                      </label>
-                      {needsDensityAdjustment && (
-                        <label className="ww-wide">
-                          分析期平均气温（℃）
+                  <fieldset
+                    disabled={busy}
+                    className="ww-report-controls ww-assessment-stack"
+                  >
+                    <div className="ww-assessment-group">
+                      <div className="ww-assessment-group-head">
+                        <h3>基础气象与高度参数</h3>
+                        <span>源层与轮毂高度不同时自动按式（B3）折算密度</span>
+                      </div>
+                      <div className="ww-fields ww-fields-two">
+                        <label>
+                          源层空气密度
                           <input
+                            aria-label="空气密度"
+                            aria-describedby="assessment-density-note"
+                            required
+                            readOnly={sourceDensity !== undefined}
                             type="number"
-                            min="-100"
-                            max="100"
                             step="any"
-                            required={sourceTemperature === undefined}
-                            value={state.meanTemperature ?? ""}
-                            placeholder={
-                              sourceTemperature === undefined
-                                ? "请输入同期平均气温"
-                                : `源文件 ${sourceTemperature.toFixed(2)} ℃`
+                            min="0.001"
+                            max="2.999"
+                            value={
+                              sourceDensity === undefined
+                                ? state.density
+                                : Number(sourceDensity.toPrecision(10))
                             }
                             onChange={(event) => {
                               setResult(undefined);
+                              setResultError("");
                               change({
-                                meanTemperature: event.target.value,
+                                density: event.target.value,
+                                runId: undefined,
+                              });
+                            }}
+                          />
+                          <small
+                            id="assessment-density-note"
+                            className="ww-inline-note"
+                          >
+                            kg/m³ ·{" "}
+                            {sourceDensity !== undefined
+                              ? "从源文件自动识别"
+                              : "请填写最高风速层空气密度"}
+                          </small>
+                        </label>
+                        <label>
+                          轮毂高度（m）
+                          <input
+                            type="number"
+                            min="0.01"
+                            step="any"
+                            placeholder={
+                              source ? `默认 ${source.height} m` : undefined
+                            }
+                            value={state.hubHeight ?? ""}
+                            onChange={(event) => {
+                              setResult(undefined);
+                              change({
+                                hubHeight: event.target.value,
                                 runId: undefined,
                               });
                             }}
                           />
                           <small className="ww-inline-note">
-                            {sourceTemperature === undefined
-                              ? "未识别到同期气温，填写后可计算轮毂空气密度。"
-                              : "留空使用源文件统计值，也可手动覆盖。"}
+                            {needsDensityAdjustment
+                              ? `源风速层为 ${source?.height} m，按式（B3）折算密度。`
+                              : "留空时采用导入数据的最高风速层。"}
                           </small>
                         </label>
-                      )}
-                      <label>
-                        综合修正系数（%）
-                        <input
-                          required
-                          type="number"
-                          step="any"
-                          min="0.01"
-                          max="100"
-                          value={state.factor}
-                          onChange={(event) =>
-                            change({ factor: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label>
-                        平均风速倍数
-                        <input
-                          required
-                          type="number"
-                          step="any"
-                          value={state.multiplier}
-                          onChange={(event) =>
-                            change({
-                              multiplier: event.target.value,
-                              runId: undefined,
-                            })
-                          }
-                        />
-                        <small className="ww-inline-note">
-                          默认 5，可按项目依据调整。
-                        </small>
-                      </label>
-                      <div>
-                        <label>
-                          50 年基本风压（kN/m²）
-                          <input
-                            type="number"
-                            step="any"
-                            value={
-                              state.pressureOverride ??
-                              pressureStation?.pressure ??
-                              ""
-                            }
-                            aria-describedby="assessment-pressure-note"
-                            onChange={(event) =>
-                              change({
-                                pressureOverride: event.target.value,
-                                runId: undefined,
-                              })
-                            }
-                          />
-                          <small
-                            id="assessment-pressure-note"
-                            className="ww-inline-note"
-                          >
-                            {state.pressureOverride !== undefined &&
-                              "当前采用手填值 · "}
-                            {pressureNote}
-                          </small>
-                        </label>
-                        {state.pressureOverride !== undefined && (
-                          <button
-                            type="button"
-                            className="ww-button"
-                            onClick={() =>
-                              change({
-                                pressureOverride: undefined,
-                                runId: undefined,
-                              })
-                            }
-                          >
-                            恢复自动值
-                          </button>
+                        {needsDensityAdjustment && (
+                          <label className="ww-wide">
+                            分析期平均气温（℃）
+                            <input
+                              type="number"
+                              min="-100"
+                              max="100"
+                              step="any"
+                              required={sourceTemperature === undefined}
+                              value={state.meanTemperature ?? ""}
+                              placeholder={
+                                sourceTemperature === undefined
+                                  ? "请输入同期平均气温"
+                                  : `源文件 ${sourceTemperature.toFixed(2)} ℃`
+                              }
+                              onChange={(event) => {
+                                setResult(undefined);
+                                change({
+                                  meanTemperature: event.target.value,
+                                  runId: undefined,
+                                });
+                              }}
+                            />
+                            <small className="ww-inline-note">
+                              {sourceTemperature === undefined
+                                ? "未识别到同期气温，填写后可计算轮毂空气密度。"
+                                : "留空使用源文件统计值，也可手动覆盖。"}
+                            </small>
+                          </label>
                         )}
                       </div>
-                      <label className="ww-wide">
-                        机组发电量表（可选，XLSX、CSV 或 TSV）
-                        <input
-                          type="file"
-                          accept=".xlsx,.csv,.tsv,.txt"
-                          onChange={(event) =>
-                            void upload(event.target.files?.[0], "energy")
-                          }
-                        />
-                      </label>
                     </div>
-                    {state.energy && (
-                      <p>
-                        {state.energy.name}{" "}
-                        <button
-                          type="button"
-                          className="ww-button"
-                          onClick={() => change({ energy: undefined })}
-                        >
-                          移除机组表
-                        </button>
-                      </p>
-                    )}
-                    {source && !automaticLocation && (
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={state.manualLocation}
-                          onChange={(event) =>
-                            change({ manualLocation: event.target.checked })
-                          }
-                        />{" "}
-                        手动填写中尺度选点位置
-                      </label>
-                    )}
-                    {(automaticLocation || state.manualLocation) && (
-                      <div className="ww-fields ww-fields-three">
-                        <label>
-                          纬度（°）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-90"
-                            max="90"
-                            readOnly={automaticLocation}
-                            value={
-                              automaticLocation
-                                ? source!.coordinates.lat
-                                : state.lat
-                            }
-                            onChange={(event) =>
-                              change({ lat: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          经度（°）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-180"
-                            max="180"
-                            readOnly={automaticLocation}
-                            value={
-                              automaticLocation
-                                ? source!.coordinates.lon
-                                : state.lon
-                            }
-                            onChange={(event) =>
-                              change({ lon: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          海拔（m）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-500"
-                            max="9000"
-                            value={state.alt}
-                            placeholder="输入选点海拔"
-                            onChange={(event) =>
-                              change({ alt: event.target.value })
-                            }
-                          />
-                        </label>
+
+                    <div className="ww-assessment-group">
+                      <div className="ww-assessment-group-head">
+                        <h3>极值风压与发电量修正</h3>
+                        <span>50 年一遇最大风速对比与可选机组发电量表</span>
                       </div>
-                    )}
-                    <div
-                      role="group"
-                      aria-label="结果图表选项"
-                      className="ww-output-grid"
-                    >
-                      {titles.map((title) => (
-                        <label key={title}>
+                      <div className="ww-fields ww-fields-three">
+                        <div className="ww-field-with-action">
+                          <label>
+                            <span className="ww-label-row">
+                              <span>50 年基本风压（kN/m²）</span>
+                              {state.pressureOverride !== undefined && (
+                                <button
+                                  type="button"
+                                  className="ww-text-button ww-inline-reset"
+                                  onClick={() =>
+                                    change({
+                                      pressureOverride: undefined,
+                                      runId: undefined,
+                                    })
+                                  }
+                                >
+                                  恢复自动值
+                                </button>
+                              )}
+                            </span>
+                            <input
+                              type="number"
+                              step="any"
+                              value={
+                                state.pressureOverride ??
+                                pressureStation?.pressure ??
+                                ""
+                              }
+                              aria-describedby="assessment-pressure-note"
+                              onChange={(event) =>
+                                change({
+                                  pressureOverride: event.target.value,
+                                  runId: undefined,
+                                })
+                              }
+                            />
+                            <small
+                              id="assessment-pressure-note"
+                              className="ww-inline-note"
+                            >
+                              {state.pressureOverride !== undefined &&
+                                "手填覆盖 · "}
+                              {pressureNote}
+                            </small>
+                          </label>
+                        </div>
+                        <label>
+                          平均风速倍数
                           <input
-                            type="checkbox"
-                            checked={!state.hidden.includes(title)}
+                            required
+                            type="number"
+                            step="any"
+                            value={state.multiplier}
                             onChange={(event) =>
                               change({
-                                hidden: event.target.checked
-                                  ? state.hidden.filter(
-                                      (item) => item !== title,
-                                    )
-                                  : [...state.hidden, title],
+                                multiplier: event.target.value,
+                                runId: undefined,
                               })
                             }
                           />
-                          {title}
+                          <small className="ww-inline-note">
+                            默认 5，可按项目依据调整。
+                          </small>
                         </label>
-                      ))}
+                        <label>
+                          综合修正系数（%）
+                          <input
+                            required
+                            type="number"
+                            step="any"
+                            min="0.01"
+                            max="100"
+                            value={state.factor}
+                            onChange={(event) =>
+                              change({ factor: event.target.value })
+                            }
+                          />
+                          <small className="ww-inline-note">
+                            用于机组理论发电量折减。
+                          </small>
+                        </label>
+                      </div>
+                      <div className="ww-energy-upload-row">
+                        <label className="ww-button is-compact ww-file-trigger">
+                          <input
+                            type="file"
+                            accept=".xlsx,.csv,.tsv,.txt"
+                            onChange={(event) =>
+                              void upload(event.target.files?.[0], "energy")
+                            }
+                          />
+                          {state.energy
+                            ? "更换机组发电量表"
+                            : "+ 上传机组发电量表（可选）"}
+                        </label>
+                        {state.energy ? (
+                          <div className="ww-energy-file-pill">
+                            <span>{state.energy.name}</span>
+                            <button
+                              type="button"
+                              className="ww-text-button"
+                              onClick={() => change({ energy: undefined })}
+                            >
+                              移除
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="ww-inline-note">
+                            支持 XLSX、CSV 或 TSV，用于自动填充表 2.3-1
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="ww-report-actions">
+
+                    <div className="ww-assessment-group">
+                      <div className="ww-assessment-group-head">
+                        <h3>选点坐标与展示模块</h3>
+                        <span>
+                          已选 {selectedChartCount} / {titles.length} 项图表
+                        </span>
+                      </div>
+                      {source && !automaticLocation && (
+                        <label className="ww-checkbox-line">
+                          <input
+                            type="checkbox"
+                            checked={state.manualLocation}
+                            onChange={(event) =>
+                              change({ manualLocation: event.target.checked })
+                            }
+                          />
+                          手动填写中尺度选点位置
+                        </label>
+                      )}
+                      {(automaticLocation || state.manualLocation) && (
+                        <div className="ww-fields ww-fields-three">
+                          <label>
+                            纬度（°）
+                            <input
+                              type="number"
+                              step="any"
+                              min="-90"
+                              max="90"
+                              readOnly={automaticLocation}
+                              value={
+                                automaticLocation
+                                  ? source!.coordinates.lat
+                                  : state.lat
+                              }
+                              onChange={(event) =>
+                                change({ lat: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label>
+                            经度（°）
+                            <input
+                              type="number"
+                              step="any"
+                              min="-180"
+                              max="180"
+                              readOnly={automaticLocation}
+                              value={
+                                automaticLocation
+                                  ? source!.coordinates.lon
+                                  : state.lon
+                              }
+                              onChange={(event) =>
+                                change({ lon: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label>
+                            海拔（m）
+                            <input
+                              type="number"
+                              step="any"
+                              min="-500"
+                              max="9000"
+                              value={state.alt}
+                              placeholder="输入选点海拔"
+                              onChange={(event) =>
+                                change({ alt: event.target.value })
+                              }
+                            />
+                          </label>
+                        </div>
+                      )}
+                      <div
+                        role="group"
+                        aria-label="结果图表选项"
+                        className="ww-assessment-output-grid"
+                      >
+                        {titles.map((title) => {
+                          const checked = !state.hidden.includes(title);
+                          return (
+                            <label
+                              key={title}
+                              className={checked ? "is-checked" : ""}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  change({
+                                    hidden: event.target.checked
+                                      ? state.hidden.filter(
+                                          (item) => item !== title,
+                                        )
+                                      : [...state.hidden, title],
+                                  })
+                                }
+                              />
+                              <span>{shortTitles[title]}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="ww-assessment-actions">
                       <button
                         className="ww-button primary"
                         disabled={!canRun || busy}
@@ -1133,33 +1253,53 @@ export default function MesoscaleWorkspace({
                           className="ww-button"
                           onClick={() => onNavigate(2)}
                         >
-                          查看已有结果
+                          查看已有结果 →
                         </button>
                       )}
                     </div>
                   </fieldset>
                 </form>
-              </>
+              </div>
             )}
             {tab === 2 && (
-              <>
-                {period}
+              <div className="ww-assessment-stack">
                 {!source?.year ? (
-                  <p>
-                    {source?.coverage_error ||
-                      "上传中尺度资料后自动识别自然年窗口和代表年。"}
-                  </p>
+                  <div className="ww-simple-empty">
+                    <p>
+                      {source?.coverage_error ||
+                        "上传中尺度资料后自动识别自然年窗口和代表年。"}
+                    </p>
+                  </div>
                 ) : (
                   <>
-                    <p>
-                      {source.start_year}–{source.end_year} 年均值（
-                      {windowYears} 年资料） {source.mean_speed?.toFixed(3)}{" "}
-                      m/s。
-                      {shortWindow
-                        ? "按完整资料期计算。"
-                        : `推荐分析年为 ${source.year} 年。`}
-                    </p>
-                    <div className="ww-table-scroll">
+                    <div className="ww-assessment-summary-strip">{period}</div>
+                    <div className="ww-inline-metrics ww-assessment-kpis">
+                      <div>
+                        <span>基准资料期</span>
+                        <strong>
+                          {source.start_year}–{source.end_year} 年
+                        </strong>
+                      </div>
+                      <div>
+                        <span>有效年数</span>
+                        <strong>{windowYears} 年</strong>
+                      </div>
+                      <div>
+                        <span>资料期平均风速</span>
+                        <strong>
+                          {source.mean_speed?.toFixed(3) ?? "—"} m/s
+                        </strong>
+                      </div>
+                      <div>
+                        <span>{shortWindow ? "统计口径" : "当前分析年"}</span>
+                        <strong>
+                          {shortWindow
+                            ? "完整资料期"
+                            : `${analysisYear} 年${deviation !== undefined ? `（${deviation >= 0 ? "+" : ""}${deviation.toFixed(2)}%）` : ""}`}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="ww-table-scroll ww-assessment-table">
                       <table className="ww-result-table">
                         <thead>
                           <tr>
@@ -1171,26 +1311,36 @@ export default function MesoscaleWorkspace({
                         <tbody>
                           {source.annual?.map((value, index) => {
                             const year = (source.start_year ?? 0) + index;
+                            const isCurrent =
+                              !shortWindow && year === analysisYear;
+                            const isRecommended =
+                              !shortWindow &&
+                              year === source.year &&
+                              year !== analysisYear;
+                            const dev =
+                              (value / (source.mean_speed ?? 1) - 1) * 100;
                             return (
-                              <tr key={year}>
+                              <tr
+                                key={year}
+                                className={
+                                  isCurrent ? "ww-assessment-total" : undefined
+                                }
+                              >
                                 <td>
                                   {year}
-                                  {!shortWindow && year === analysisYear
-                                    ? "（当前分析年）"
-                                    : ""}
-                                  {!shortWindow &&
-                                  year === source.year &&
-                                  year !== analysisYear
-                                    ? "（推荐）"
-                                    : ""}
+                                  {isCurrent && (
+                                    <span className="ww-year-badge is-active">
+                                      当前分析年
+                                    </span>
+                                  )}
+                                  {isRecommended && (
+                                    <span className="ww-year-badge">推荐</span>
+                                  )}
                                 </td>
                                 <td>{value.toFixed(3)}</td>
                                 <td>
-                                  {(
-                                    (value / (source.mean_speed ?? 1) - 1) *
-                                    100
-                                  ).toFixed(2)}
-                                  %
+                                  {dev >= 0 ? "+" : ""}
+                                  {dev.toFixed(2)}%
                                 </td>
                               </tr>
                             );
@@ -1200,13 +1350,14 @@ export default function MesoscaleWorkspace({
                     </div>
                   </>
                 )}
-              </>
+              </div>
             )}
             {errorNotice}
           </section>
         </div>
       </div>
     );
+  }
 
   if (page === 2) {
     const shown = titles.filter((title) => !state.hidden.includes(title));
@@ -1223,25 +1374,57 @@ export default function MesoscaleWorkspace({
     return (
       <div className="ww-results ww-assessment">
         <div className="ww-gallery-filter">
-          <strong>结果数据</strong>
-          {result && (
-            <span>
-              {result.analysis_start_year !== undefined &&
-              result.analysis_end_year !== undefined &&
-              result.analysis_start_year !== result.analysis_end_year
-                ? `${result.analysis_start_year}–${result.analysis_end_year}`
-                : result.year}{" "}
-              年 · {result.height} m
-              {result.density_adjustment &&
-                `风速层 · 轮毂 ${result.density_adjustment.hub_height_m} m · 密度 ${result.density_adjustment.hub_density.toFixed(6)} kg/m³`}
-              {result.window_years
-                ? ` · 基准资料 ${result.window_years} 年`
-                : ""}
-              {result.interval_minutes
-                ? ` · ${result.interval_minutes === 10 ? "10 min" : "1 h"}`
-                : ""}
-            </span>
-          )}
+          <div className="ww-assessment-filter-info">
+            <strong>结果数据</strong>
+            {result && (
+              <div className="ww-meta-pills">
+                <span>
+                  {result.analysis_start_year !== undefined &&
+                  result.analysis_end_year !== undefined &&
+                  result.analysis_start_year !== result.analysis_end_year
+                    ? `${result.analysis_start_year}–${result.analysis_end_year}`
+                    : result.year}{" "}
+                  年
+                </span>
+                <span>{result.height} m 风速层</span>
+                {result.density_adjustment && (
+                  <span>
+                    轮毂 {result.density_adjustment.hub_height_m} m ·{" "}
+                    {result.density_adjustment.hub_density.toFixed(4)} kg/m³
+                  </span>
+                )}
+                {result.window_years && (
+                  <span>基准 {result.window_years} 年</span>
+                )}
+                {result.interval_minutes && (
+                  <span>
+                    {result.interval_minutes === 10 ? "10 min" : "1 h"}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="ww-gallery-tools">
+            <button
+              className="ww-button is-compact ww-configure-jump"
+              type="button"
+              onClick={() => {
+                setTab(1);
+                onNavigate(1);
+              }}
+            >
+              调整分析配置 →
+            </button>
+            {state.runId && (
+              <button
+                className="ww-button is-compact primary"
+                type="button"
+                onClick={() => onNavigate(3)}
+              >
+                前往导出报告
+              </button>
+            )}
+          </div>
         </div>
         <div className="ww-gallery-layout">
           <aside
@@ -1265,12 +1448,23 @@ export default function MesoscaleWorkspace({
           <section className="ww-panel ww-chart-stage">
             {active && (
               <div className="ww-assessment-chart-heading">
-                <h2>{active}</h2>
+                <div className="ww-assessment-chart-title">
+                  <h2>{active}</h2>
+                  {active === "风速和风功率密度月变化图" &&
+                    result?.power_density_grade && (
+                      <span className="ww-status ready">
+                        风功率密度等级{" "}
+                        {result.power_density_grade.grade
+                          ? `${result.power_density_grade.grade} 级`
+                          : "待复核"}
+                      </span>
+                    )}
+                </div>
                 {isWeibull &&
                   result?.weibull_charts &&
                   (chart || Object.keys(result.weibull_charts).length > 0) && (
-                    <label>
-                      拟合算法
+                    <label className="ww-method-picker">
+                      <span>拟合算法</span>
                       <select
                         value={method}
                         onChange={(event) =>
@@ -1301,19 +1495,24 @@ export default function MesoscaleWorkspace({
                   )}
               </div>
             )}
-            {active === "风速和风功率密度月变化图" &&
-              result?.power_density_grade && (
-                <p className="ww-inline-note">
-                  风功率密度等级{" "}
-                  {result.power_density_grade.grade
-                    ? `${result.power_density_grade.grade} 级`
-                    : "待复核"}
-                </p>
-              )}
             {resultError ? (
-              <p role="alert">{resultError}</p>
+              <p className="ww-error" role="alert">
+                {resultError}
+              </p>
             ) : !state.runId ? (
-              <p>完成风资源分析后查看结果。</p>
+              <div className="ww-simple-empty">
+                <p>完成风资源分析后即可在此查阅全部图表与统计表。</p>
+                <button
+                  type="button"
+                  className="ww-button primary"
+                  onClick={() => {
+                    setTab(1);
+                    onNavigate(1);
+                  }}
+                >
+                  前往开启分析
+                </button>
+              </div>
             ) : !result ? (
               <p role="status">正在读取计算结果…</p>
             ) : !active ? (
@@ -1355,13 +1554,20 @@ export default function MesoscaleWorkspace({
                 </div>
                 {chart.plot === "weibull" &&
                   typeof chart.fit?.positive_count === "number" && (
-                    <p className="ww-inline-note">
-                      {result.interval_minutes === 10 ? "10 min" : "1 h"} 原序列
-                      · 正风速拟合样本{" "}
-                      {chart.fit.positive_count.toLocaleString("zh-CN")} 条 ·
-                      零风速比例{" "}
-                      {(Number(chart.fit.zero_fraction) * 100).toFixed(2)}%
-                    </p>
+                    <div className="ww-meta-pills ww-weibull-meta">
+                      <span>
+                        {result.interval_minutes === 10 ? "10 min" : "1 h"}{" "}
+                        原序列
+                      </span>
+                      <span>
+                        正风速拟合样本{" "}
+                        {chart.fit.positive_count.toLocaleString("zh-CN")} 条
+                      </span>
+                      <span>
+                        零风速比例{" "}
+                        {(Number(chart.fit.zero_fraction) * 100).toFixed(2)}%
+                      </span>
+                    </div>
                   )}
                 {chart.plot === "rose" && result.monthly_roses && (
                   <section className="ww-assessment-monthly-roses">
@@ -1434,16 +1640,6 @@ export default function MesoscaleWorkspace({
                 )}
               </>
             )}
-            <button
-              className="ww-button"
-              type="button"
-              onClick={() => {
-                setTab(1);
-                onNavigate(1);
-              }}
-            >
-              调整分析配置
-            </button>
           </section>
         </div>
       </div>
@@ -1451,25 +1647,48 @@ export default function MesoscaleWorkspace({
   }
 
   return (
-    <section className="ww-panel ww-assessment">
-      <h2>风资源评估报告</h2>
-      {templateUrl && (
-        <p>
-          {template.title} · {template.version}{" "}
-          <a href={templateUrl + "/source"}>下载模板</a>
+    <section className="ww-panel ww-assessment ww-assessment-export-card">
+      <div className="ww-assessment-head">
+        <div>
+          <h2>风资源评估报告</h2>
+          <p className="ww-inline-note">
+            基于当前计算成果与内置标准模板生成可编辑的 Word 半成品报告。
+          </p>
+        </div>
+        {template && (
+          <span className="ww-status ready">
+            {template.title} · v{template.version}
+          </span>
+        )}
+      </div>
+      <div className="ww-inline-metrics ww-assessment-kpis">
+        <div>
+          <span>数据源文件</span>
+          <strong>{source?.name ?? "尚未上传"}</strong>
+        </div>
+        <div>
+          <span>分析期与高度</span>
+          <strong>
+            {source?.year
+              ? `${analysisStart === analysisEnd ? analysisStart : `${analysisStart}–${analysisEnd}`} 年 · ${source.height} m`
+              : "待识别"}
+          </strong>
+        </div>
+        <div>
+          <span>基准资料</span>
+          <strong>{windowYears ? `${windowYears} 年` : "—"}</strong>
+        </div>
+        <div>
+          <span>导出状态</span>
+          <strong>{state.runId ? "成果已就绪" : "请先运行分析"}</strong>
+        </div>
+      </div>
+      {!state.runId && (
+        <p className="ww-inline-note">
+          请在「分析配置」上传资料、核对空气密度并运行分析后再生成报告。
         </p>
       )}
-      {source?.year && (
-        <p>
-          {source.name} ·{" "}
-          {analysisStart === analysisEnd
-            ? analysisStart
-            : `${analysisStart}–${analysisEnd}`}{" "}
-          年 · {source.height} m · 基准资料 {windowYears} 年
-        </p>
-      )}
-      {!state.runId && <p>请在分析配置上传资料、填写空气密度并运行分析。</p>}
-      <div className="ww-report-actions">
+      <div className="ww-assessment-actions">
         <button
           className="ww-button primary"
           type="button"
@@ -1478,6 +1697,11 @@ export default function MesoscaleWorkspace({
         >
           {busy ? "正在生成报告…" : "生成 Word 半成品"}
         </button>
+        {templateUrl && (
+          <a className="ww-button" href={templateUrl + "/source"}>
+            下载空白模板
+          </a>
+        )}
         <button
           className="ww-button"
           type="button"

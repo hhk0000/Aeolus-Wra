@@ -597,18 +597,22 @@ function WorkspaceApp() {
           工作空间 <span>⌘</span>
         </div>
         <nav aria-label="工作中心">
-          {sections.map((s, i) => (
-            <button
-              key={s}
-              className={`nav-item ${page === i ? "active" : ""}`}
-              onClick={() => go(i)}
-              aria-current={page === i ? "page" : undefined}
-            >
-              <Icon name={icons[i]} />
-              {s}
-              {page === i && <span className="nav-dot" />}
-            </button>
-          ))}
+          {sections.map((s, i) => {
+            if (reportType === "风资源评估" && i === 4 && page !== 4)
+              return null;
+            return (
+              <button
+                key={s}
+                className={`nav-item ${page === i ? "active" : ""}`}
+                onClick={() => go(i)}
+                aria-current={page === i ? "page" : undefined}
+              >
+                <Icon name={icons[i]} />
+                {s}
+                {page === i && <span className="nav-dot" />}
+              </button>
+            );
+          })}
         </nav>
         <div className="sidebar-note">
           <span className="small-icon">
@@ -645,7 +649,7 @@ function WorkspaceApp() {
       <main>
         <header className="topbar">
           <button
-            className="ww-button"
+            className="ww-button is-compact"
             disabled={!pageHistory.length}
             onClick={() => {
               setGalleryJobId(undefined);
@@ -694,22 +698,29 @@ function WorkspaceApp() {
           </div>
         </header>
         <div className="content">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">YOUR WIND, YOUR INSIGHT</div>
-              <h1>{sections[page]}</h1>
-              <p>{subtitles[page]}</p>
-            </div>
-            <div className="heading-actions">
-              <span className="preview-badge">本机分析引擎 · V0.2</span>
-              {page === 0 && (
+          {page === 0 ? (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">YOUR WIND, YOUR INSIGHT</div>
+                <h1>{sections[page]}</h1>
+                <p>{subtitles[page]}</p>
+              </div>
+              <div className="heading-actions">
+                <span className="preview-badge">本机分析引擎</span>
                 <button className="primary" onClick={() => setModal(true)}>
                   <Icon name="plus" size={17} />
                   新建项目
                 </button>
-              )}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="page-heading is-compact">
+              <div>
+                <h1>{sections[page]}</h1>
+                <p>{subtitles[page]}</p>
+              </div>
+            </div>
+          )}
           {page === 0 ? (
             <>
               <section className="hero">
@@ -893,105 +904,118 @@ function WorkspaceApp() {
             <StandardsLibrary />
           ) : (
             <>
-              {current && (
-                <div className="project-context">
-                  <span className="context-icon">
-                    <Icon name="grid" />
-                  </span>
-                  <div>
-                    <small>当前项目</small>
-                    <select
-                      aria-label="当前项目"
-                      value={selected}
-                      onChange={(e) => {
-                        setSelected(Number(e.target.value));
-                      }}
-                    >
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="context-badges">
-                    <span className="context-pill">{current.type}</span>
-                    {current.region && (
-                      <span className="context-pill">{current.region}</span>
-                    )}
-                    <span className="context-pill">
-                      {workspace.towers.length} 塔 · {workspace.files.length}{" "}
-                      份资料
+              <div className="project-context">
+                {current && (
+                  <>
+                    <span className="context-icon">
+                      <Icon name="grid" />
                     </span>
-                  </div>
-                  <span className="context-status">
-                    {current.demo ? "示例工作空间" : "本地项目草稿"}
-                  </span>
-                </div>
-              )}
-              <fieldset className="ww-panel ww-report-type-picker">
-                <legend>报告类型</legend>
-                <div className="ww-report-actions">
-                  {reportTypes.map((choice) => (
-                    <label key={choice}>
-                      <input
-                        type="radio"
-                        name="workspace-report-type"
-                        checked={reportType === choice}
-                        onChange={() => {
-                          if (current) {
-                            setProjects((previous) =>
-                              previous.map((p) =>
-                                p.id === current.id
-                                  ? { ...p, type: choice }
-                                  : p,
-                              ),
-                            );
-                          } else {
-                            setDraftReportType(choice);
-                          }
-                        }}
-                      />
-                      {choice}
-                    </label>
-                  ))}
-                </div>
-                {reportType === engineeringReport &&
-                  hasBothEngineeringHistories && (
-                    <label className="field">
-                      历史资料来源
+                    <div className="context-project-picker">
+                      <small>当前项目</small>
                       <select
-                        value={
-                          workspaceId === initialWorkspaceId
-                            ? "initial"
-                            : "feasibility"
-                        }
-                        onChange={(event) => {
-                          const engineeringSource =
-                            event.target.value === "initial"
-                              ? "initial"
-                              : "feasibility";
-                          if (current) {
-                            setProjects((previous) =>
-                              previous.map((project) =>
-                                project.id === current.id
-                                  ? { ...project, engineeringSource }
-                                  : project,
-                              ),
-                            );
-                          } else {
-                            setDraftEngineeringSource(engineeringSource);
-                          }
-                          setGalleryJobId(undefined);
-                          setGalleryTarget(undefined);
+                        aria-label="当前项目"
+                        value={selected}
+                        onChange={(e) => {
+                          setSelected(Number(e.target.value));
                         }}
                       >
-                        <option value="feasibility">原可研资料</option>
-                        <option value="initial">原初设资料</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
                       </select>
-                    </label>
-                  )}
-              </fieldset>
+                    </div>
+                    <div className="context-badges">
+                      {current.region && (
+                        <span className="context-pill">{current.region}</span>
+                      )}
+                      {reportType !== "风资源评估" && (
+                        <span className="context-pill">
+                          {workspace.towers.length} 塔 ·{" "}
+                          {workspace.files.length} 份资料
+                        </span>
+                      )}
+                      {current.demo && (
+                        <span className="context-pill is-accent">示例</span>
+                      )}
+                    </div>
+                  </>
+                )}
+                <div className="context-controls">
+                  <div
+                    className="context-report-switch"
+                    role="radiogroup"
+                    aria-label="报告类型"
+                  >
+                    <span className="context-switch-label">报告类型</span>
+                    <div className="context-switch-track">
+                      {reportTypes.map((choice) => (
+                        <label
+                          key={choice}
+                          className={reportType === choice ? "is-active" : ""}
+                        >
+                          <input
+                            type="radio"
+                            name="workspace-report-type"
+                            checked={reportType === choice}
+                            onChange={() => {
+                              if (current) {
+                                setProjects((previous) =>
+                                  previous.map((p) =>
+                                    p.id === current.id
+                                      ? { ...p, type: choice }
+                                      : p,
+                                  ),
+                                );
+                              } else {
+                                setDraftReportType(choice);
+                              }
+                            }}
+                          />
+                          <span>{choice}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  {reportType === engineeringReport &&
+                    hasBothEngineeringHistories && (
+                      <label className="context-history-select">
+                        <span>历史资料</span>
+                        <select
+                          aria-label="历史资料来源"
+                          value={
+                            workspaceId === initialWorkspaceId
+                              ? "initial"
+                              : "feasibility"
+                          }
+                          onChange={(event) => {
+                            const engineeringSource =
+                              event.target.value === "initial"
+                                ? "initial"
+                                : "feasibility";
+                            if (current) {
+                              setProjects((previous) =>
+                                previous.map((project) =>
+                                  project.id === current.id
+                                    ? { ...project, engineeringSource }
+                                    : project,
+                                ),
+                              );
+                            } else {
+                              setDraftEngineeringSource(engineeringSource);
+                            }
+                            setGalleryJobId(undefined);
+                            setGalleryTarget(undefined);
+                          }}
+                        >
+                          <option value="feasibility">原可研资料</option>
+                          <option value="initial">原初设资料</option>
+                        </select>
+                      </label>
+                    )}
+                </div>
+              </div>
               {reportType === "风资源评估" && page <= 3 && (
                 <MesoscaleWorkspace
                   key={current?.id ?? "draft"}

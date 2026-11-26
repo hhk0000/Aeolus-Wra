@@ -323,30 +323,30 @@ export function ResultsWorkspace({
         : filtered.length;
   return (
     <div className="ww-results" ref={gallery} style={styles}>
-      <section className="ww-results-hero">
+      <section className="ww-results-hero is-compact">
         <div className="ww-results-hero-copy">
           <h2>风资源计算成果</h2>
-          <p>图、表与运行快照引用同一组数据与参数；修改配置后请重新计算。</p>
+          <span>图、表与运行快照共享同一组参数</span>
         </div>
         <div className="ww-results-hero-stats">
           <div>
-            <strong>{tower.name}</strong>
             <span>当前测风塔</span>
+            <strong>{tower.name}</strong>
           </div>
           <div>
+            <span>成果可用</span>
             <strong>
               {computed}
               <i>/{selected.length}</i>
             </strong>
-            <span>成果可用</span>
           </div>
           <div>
+            <span>统计步长</span>
             <strong>
               {state.analysisRuns[tower.id]?.config.aggregation === "hourly"
                 ? "历史 1 h"
                 : "10 min"}
             </strong>
-            <span>统计步长</span>
           </div>
         </div>
       </section>

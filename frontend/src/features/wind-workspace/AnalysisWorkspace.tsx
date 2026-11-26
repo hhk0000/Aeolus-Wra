@@ -45,25 +45,17 @@ export default function AnalysisWorkspace(props: Props) {
 
   return (
     <div className="ww-workspace">
-      <section className="ww-workflow-banner">
-        <div>
-          <span className="ww-overline">FROM DATA TO INSIGHT</span>
-          <h2>让每一份数据，流向正确的分析</h2>
-          <p>拖入资料后自动识别测风塔、通道与时段，按左侧步骤查看分析。</p>
-        </div>
-        <div className="ww-completion">
-          <strong>
-            {selectedTypes}
-            <span>/ 4</span>
-          </strong>
-          <span>类资料已选择</span>
-          <div className="ww-progress-track">
-            <i style={{ width: `${selectedTypes * 25}%` }} />
-          </div>
-        </div>
-      </section>
       <div className="ww-workspace-board">
         <div className="ww-workspace-toolbar">
+          <div className="ww-sidebar-progress" aria-label="资料就绪进度">
+            <div className="ww-sidebar-progress-head">
+              <span>已选资料</span>
+              <strong>{selectedTypes} / 4</strong>
+            </div>
+            <div className="ww-progress-track">
+              <i style={{ width: `${selectedTypes * 25}%` }} />
+            </div>
+          </div>
           <div
             className="ww-primary-tabs"
             role="tablist"
@@ -87,7 +79,10 @@ export default function AnalysisWorkspace(props: Props) {
               </button>
             ))}
           </div>
-          <button className="ww-button" onClick={downloadConfiguration}>
+          <button
+            className="ww-button is-compact"
+            onClick={downloadConfiguration}
+          >
             ↓ 导出配置
           </button>
         </div>

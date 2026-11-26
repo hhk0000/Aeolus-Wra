@@ -187,7 +187,9 @@ def draw_cartesian(image, box, labels, values, kind):
             previous = (x, height)
 
 
-def formal_figure(labels, series, kind, *, ratio, compass, direction, fit, stats, fit_label):
+def formal_figure(
+    labels, series, kind, *, ratio, compass, direction, fit, stats, fit_label, approved_layout=False
+):
     height = round(WIDTH / ratio)
     image = Image.new("RGB", (WIDTH, height), "white")
     draw = ImageDraw.Draw(image)
@@ -197,16 +199,18 @@ def formal_figure(labels, series, kind, *, ratio, compass, direction, fit, stats
         draw_rose(draw, (14, 70, 710, height - 58), compass, direction, sectors=True)
         draw.line((723, 62, 723, height - 63), fill=GRID, width=2)
         labels = [str(item) if i % 2 == 0 else "" for i, item in enumerate(labels)]
-        draw_cartesian(image, (905, 184, WIDTH - 55, height - 118), labels, series, kind)
+        plot_top = 150 if approved_layout else 184
+        draw_cartesian(image, (905, plot_top, WIDTH - 55, height - 118), labels, series, kind)
         label(draw, (WIDTH - 55, 51), fit_label, anchor="rm")
         label(draw, (WIDTH - 55, 99), f"A = {fit['c']:.2f} m/s    k = {fit['k']:.2f}", anchor="rm")
-        label(
-            draw,
-            (WIDTH - 55, 141),
-            f"U = {stats['mean_speed']:.2f} m/s    P = {stats['power_density']:.2f} W/m²",
-            30,
-            anchor="rm",
-        )
+        if not approved_layout:
+            label(
+                draw,
+                (WIDTH - 55, 141),
+                f"U = {stats['mean_speed']:.2f} m/s    P = {stats['power_density']:.2f} W/m²",
+                30,
+                anchor="rm",
+            )
         rotated_label(image, (753, (height + 66) / 2), "频率（%）")
         label(draw, ((905 + WIDTH - 55) / 2, height - 45), "风速（m/s）")
     else:

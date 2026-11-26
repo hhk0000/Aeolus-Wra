@@ -961,7 +961,10 @@ def build(
                 direction=direction,
                 fit=fit,
                 stats=stats,
-                fit_label=fit_label,
+                fit_label="最大似然法"
+                if approved_layout and kind == "fit" and weibull_method == "mle"
+                else fit_label,
+                approved_layout=approved_layout,
             )
             shape.width = Cm(14)
             border = shape._inline.graphic.graphicData.pic.spPr

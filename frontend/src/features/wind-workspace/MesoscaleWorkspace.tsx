@@ -91,7 +91,10 @@ type Result = {
     mean_temperature_c: number;
     temperature_source: "file" | "manual";
   } | null;
-  power_density_grade?: { description: string };
+  power_density_grade?: {
+    grade: string | null;
+    threshold_heights_m?: number[];
+  };
   interval_minutes?: number;
   monthly_roses?: Record<
     "frequency" | "energy_frequency",
@@ -366,7 +369,7 @@ export default function MesoscaleWorkspace({
             saved.extreme?.mean_speed_used === undefined ||
             !saved.monthly_roses ||
             !saved.weibull_charts ||
-            !saved.power_density_grade) &&
+            saved.power_density_grade?.threshold_heights_m === undefined) &&
           sourceId &&
           density > 0 &&
           density < 3
@@ -1301,7 +1304,10 @@ export default function MesoscaleWorkspace({
             {active === "风速和风功率密度月变化图" &&
               result?.power_density_grade && (
                 <p className="ww-inline-note">
-                  {result.power_density_grade.description}
+                  风功率密度等级{" "}
+                  {result.power_density_grade.grade
+                    ? `${result.power_density_grade.grade} 级`
+                    : "待复核"}
                 </p>
               )}
             {resultError ? (

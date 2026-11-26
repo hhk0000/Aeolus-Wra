@@ -610,7 +610,7 @@ def build(
     mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, source_density, interval_minutes)
-    power_grade = classify_power_density(float(height), stats["power_density"], combined=combined)
+    power_grade = classify_power_density(float(height), stats["power_density"])
     extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
@@ -1002,7 +1002,8 @@ def build(
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
     fields["换图"] = ""
-    fields["风功率密度等级及评价待校审"] = power_grade["description"].removesuffix("。")
+    grade = power_grade["grade"]
+    fields["风功率密度等级及评价待校审"] = f"{grade} 级" if grade else "待复核"
     fields["风压法结果"] = pressure_result_text(
         pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
     )

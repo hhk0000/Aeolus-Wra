@@ -485,7 +485,7 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
     assert report.status_code == 200
     paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
     assert any("轮毂高度 125 m 处的空气密度为 1.210285" in p for p in paragraphs)
-    assert any("120 m 风速层年平均风功率密度" in p and "为 2 级" in p for p in paragraphs)
+    assert any("场址风功率密度等级及风能资源评价：2 级。" == p for p in paragraphs)
     no_temperature = raw.replace(b"288.15", b"")
     source = client.post(
         path + "/files/source", files={"file": ("no-temp.txt", no_temperature)}
@@ -505,7 +505,9 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
         (110, 430, "3"),
         (120, 2750, "7"),
         (120, 2750.1, None),
-        (125, 450, None),
+        (125, 450, "3"),
+        (160, 300, "2"),
+        (9, 100, None),
     ],
 )
 def test_assessment_power_density_grade_boundaries(height, power_density, grade):

@@ -16,39 +16,37 @@ UPPER_BY_HEIGHT = {
 HEIGHTS = tuple(UPPER_BY_HEIGHT)
 
 
-def classify_power_density(height, power_density, *, combined=False):
-    period = "分析期" if combined else "年"
-    prefix = f"{height:g} m 风速层{period}平均风功率密度为 {power_density:.2f} W/m²"
-    result = {"height_m": height, "power_density": power_density, "grade": None}
-    if not HEIGHTS[0] <= height <= HEIGHTS[-1]:
-        return {**result, "description": f"{prefix}。高度超出表列 10～120 m 范围，等级待复核。"}
-    if height in UPPER_BY_HEIGHT:
-        limits = UPPER_BY_HEIGHT[height]
-        method = f"按 NB/T 31147—2018 表 5.3.6-{'1' if height <= 70 else '2'}查表"
+def classify_power_density(height, power_density):
+    result = {
+        "height_m": height,
+        "power_density": power_density,
+        "grade": None,
+        "threshold_heights_m": [],
+    }
+    if height < HEIGHTS[0]:
+        return result
+    reference_height = min(height, HEIGHTS[-1])
+    if reference_height in UPPER_BY_HEIGHT:
+        limits = UPPER_BY_HEIGHT[reference_height]
+        threshold_heights = [reference_height]
     else:
-        above = bisect_right(HEIGHTS, height)
+        above = bisect_right(HEIGHTS, reference_height)
         low, high = HEIGHTS[above - 1], HEIGHTS[above]
-        fraction = (height - low) / (high - low)
+        fraction = (reference_height - low) / (high - low)
         limits = [
             a + fraction * (b - a)
             for a, b in zip(UPPER_BY_HEIGHT[low], UPPER_BY_HEIGHT[high], strict=True)
         ]
-        method = f"参考 NB/T 31147—2018 表列 {low} m、{high} m 阈值线性插值"
+        threshold_heights = [low, high]
+    result["threshold_heights_m"] = threshold_heights
     if power_density > limits[-1]:
-        return {
-            **result,
-            "description": f"{prefix}。超过 7 级上限 {limits[-1]:g} W/m²，等级待复核。",
-        }
+        return result
     index = bisect_right(limits[:-1], power_density)
     low_limit = limits[index - 1] if index else 0
     high_limit = limits[index]
-    grade = LEVELS[index]
-    right_bracket = "]" if index == len(LEVELS) - 1 else ")"
     return {
         **result,
-        "grade": grade,
-        "description": (
-            f"{prefix}，{method}，为 {grade} 级"
-            f"（区间 [{low_limit:g}, {high_limit:g}{right_bracket} W/m²）。"
-        ),
+        "grade": LEVELS[index],
+        "lower_density": low_limit,
+        "upper_density": high_limit,
     }

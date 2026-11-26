@@ -33,6 +33,11 @@ type Assessment = {
   pressureStation?: number;
   place?: string;
   pressureOverride?: string;
+  thunderstorm?: boolean;
+  thunderstormSource?: Source;
+  thunderstormYear?: number;
+  thunderstormC1?: string;
+  thunderstormC2?: string;
   multiplier: string;
   density: string;
   hubHeight?: string;
@@ -114,6 +119,14 @@ type Result = {
     pressure_standard: number | null;
     pressure_site?: number | null;
     adopted: number | null;
+    adopted_method?: string | null;
+    thunderstorm?: {
+      year: number;
+      height: number;
+      sample_size: number;
+      site_speed: number;
+      standard_speed: number;
+    } | null;
   };
   tables?: Record<
     string,
@@ -247,6 +260,26 @@ export default function MesoscaleWorkspace({
   const shortWindow = windowYears > 0 && windowYears < 20;
   const selectedAnalysisYear = shortWindow ? undefined : state.analysisYear;
   const analysisYear = selectedAnalysisYear ?? source?.year;
+  const combinedWindow = shortWindow && windowYears > 1;
+  const stormSource =
+    source?.interval_minutes === 10 ? source : state.thunderstormSource;
+  const stormYears = stormSource?.start_year
+    ? (stormSource.annual ?? []).map(
+        (_, index) => stormSource.start_year! + index,
+      )
+    : [];
+  const stormYear = combinedWindow ? state.thunderstormYear : analysisYear;
+  const c1 = Number(state.thunderstormC1);
+  const c2 = Number(state.thunderstormC2);
+  const stormReady =
+    !!stormSource &&
+    stormSource.height === source?.height &&
+    stormYear !== undefined &&
+    stormYears.includes(stormYear) &&
+    Number.isFinite(c1) &&
+    c1 > 0 &&
+    !!state.thunderstormC2?.trim() &&
+    Number.isFinite(c2);
   const analysisStart = shortWindow ? source?.start_year : analysisYear;
   const analysisEnd = shortWindow ? source?.end_year : analysisYear;
   const sourceDensity = identifiedDensity(source, analysisYear);
@@ -469,8 +502,11 @@ export default function MesoscaleWorkspace({
         analysisTemperature <= 100)) &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
+    (!state.thunderstorm || stormReady) &&
     (pressureOverride === undefined ||
       (Number.isFinite(pressureOverride) && pressureOverride > 0));
+  const exportPressure = pressureOverride ?? pressureStation?.pressure;
+  const canExport = exportPressure !== undefined && exportPressure > 0;
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -496,7 +532,10 @@ export default function MesoscaleWorkspace({
     });
   }
 
-  async function upload(file: File | undefined, kind: "source" | "energy") {
+  async function upload(
+    file: File | undefined,
+    kind: "source" | "energy" | "thunderstorm",
+  ) {
     if (!file || busy) return;
     setBusy(true);
     setError("");
@@ -505,6 +544,16 @@ export default function MesoscaleWorkspace({
       form.set("file", file);
       if (kind === "energy") {
         change({ energy: await api("/reports/assessment/files/energy", form) });
+      } else if (kind === "thunderstorm") {
+        const next = await api<Source>(
+          "/reports/assessment/files/thunderstorm",
+          form,
+        );
+        change({
+          thunderstormSource: next,
+          thunderstormYear: undefined,
+          runId: undefined,
+        });
       } else {
         const next = await api<Source>(
           "/reports/assessment/files/source",
@@ -536,6 +585,15 @@ export default function MesoscaleWorkspace({
     pressure_station_index: state.pressureStation,
     place,
     pressure_override: pressureOverride,
+    thunderstorm: state.thunderstorm
+      ? {
+          source_id:
+            source?.interval_minutes === 10 ? undefined : stormSource?.id,
+          year: stormYear,
+          c1,
+          c2,
+        }
+      : undefined,
   };
 
   async function analyze() {
@@ -565,7 +623,7 @@ export default function MesoscaleWorkspace({
   }
 
   async function download() {
-    if (!templateUrl || !source || !state.runId || busy) return;
+    if (!templateUrl || !source || !state.runId || busy || !canExport) return;
     setBusy(true);
     setError("");
     try {
@@ -1018,6 +1076,110 @@ export default function MesoscaleWorkspace({
                         />
                       </label>
                     </div>
+                    <fieldset className="ww-report-controls">
+                      <legend>50 年一遇最大风速</legend>
+                      <p className="ww-inline-note">
+                        采用风压法和平均风速倍数法。
+                      </p>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={state.thunderstorm ?? false}
+                          onChange={(event) =>
+                            change({
+                              thunderstorm: event.target.checked,
+                              runId: undefined,
+                            })
+                          }
+                        />
+                        使用五日雷暴法
+                      </label>
+                      {state.thunderstorm && (
+                        <div className="ww-fields ww-fields-two">
+                          {source?.interval_minutes !== 10 && (
+                            <label className="ww-wide">
+                              10 分钟实测风速 TXT
+                              <input
+                                type="file"
+                                accept=".txt"
+                                onChange={(event) =>
+                                  void upload(
+                                    event.target.files?.[0],
+                                    "thunderstorm",
+                                  )
+                                }
+                              />
+                              <small className="ww-inline-note">
+                                {stormSource?.name ??
+                                  "请上传分析高度一致的完整自然年资料。"}
+                                {stormSource &&
+                                  stormSource.height !== source?.height &&
+                                  " · 风速层高度与分析高度不一致"}
+                              </small>
+                            </label>
+                          )}
+                          {combinedWindow ? (
+                            <label className="ww-wide">
+                              五日雷暴法分析年
+                              <select
+                                value={state.thunderstormYear ?? ""}
+                                onChange={(event) =>
+                                  change({
+                                    thunderstormYear: event.target.value
+                                      ? Number(event.target.value)
+                                      : undefined,
+                                    runId: undefined,
+                                  })
+                                }
+                              >
+                                <option value="">请选择完整自然年</option>
+                                {stormYears.map((year) => (
+                                  <option key={year} value={year}>
+                                    {year} 年
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : (
+                            <p className="ww-wide ww-inline-note">
+                              随分析年取 {analysisYear ?? "—"} 年。
+                              {stormSource &&
+                                stormYear !== undefined &&
+                                !stormYears.includes(stormYear) &&
+                                " 已选资料未覆盖该自然年。"}
+                            </p>
+                          )}
+                          <label>
+                            系数 C₁
+                            <input
+                              type="number"
+                              step="any"
+                              value={state.thunderstormC1 ?? ""}
+                              onChange={(event) =>
+                                change({
+                                  thunderstormC1: event.target.value,
+                                  runId: undefined,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            系数 C₂
+                            <input
+                              type="number"
+                              step="any"
+                              value={state.thunderstormC2 ?? ""}
+                              onChange={(event) =>
+                                change({
+                                  thunderstormC2: event.target.value,
+                                  runId: undefined,
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                      )}
+                    </fieldset>
                     {state.energy && (
                       <p>
                         {state.energy.name}{" "}
@@ -1469,11 +1631,14 @@ export default function MesoscaleWorkspace({
         </p>
       )}
       {!state.runId && <p>请在分析配置上传资料、填写空气密度并运行分析。</p>}
+      {state.runId && !canExport && (
+        <p>请在分析配置中填写 50 年基本风压后再导出。</p>
+      )}
       <div className="ww-report-actions">
         <button
           className="ww-button primary"
           type="button"
-          disabled={!templateUrl || !state.runId || busy}
+          disabled={!templateUrl || !state.runId || busy || !canExport}
           onClick={() => void download()}
         >
           {busy ? "正在生成报告…" : "生成 Word 半成品"}
@@ -1524,10 +1689,7 @@ function ExtremeWindResult({
         <span>场址空气密度 {result.density} kg/m³</span>
       </div>
       <div className="ww-table-scroll ww-assessment-table ww-extreme-table">
-        <table
-          className="ww-result-table"
-          aria-label="两种极大风速估算方法对比"
-        >
+        <table className="ww-result-table" aria-label="极大风速估算方法对比">
           <thead>
             <tr>
               <th scope="col">方法</th>
@@ -1572,11 +1734,25 @@ function ExtremeWindResult({
               <td>{result.site_speed.toFixed(2)}</td>
               <td>{result.multiplier_standard.toFixed(2)}</td>
             </tr>
+            {result.thunderstorm && (
+              <tr>
+                <th scope="row">五日雷暴法</th>
+                <td>
+                  {result.thunderstorm.year} 年 · {result.thunderstorm.height} m
+                  · {result.thunderstorm.sample_size} 组五日最大风速
+                </td>
+                <td>{result.thunderstorm.site_speed.toFixed(2)}</td>
+                <td>{result.thunderstorm.standard_speed.toFixed(2)}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
       <p className="ww-inline-note">
-        {result.adopted === null && "待补齐风压法结果后取两种方法的较大值。"}
+        {result.adopted === null
+          ? "待补齐风压法结果后进行比选。"
+          : result.adopted_method &&
+            `场址风速最大值来自${result.adopted_method}，折算后作为前期采用值。`}
         风压法的场址值由参考风速按场址密度反算，沿用站点基准高度。标准空气密度取
         1.225 kg/m³。
       </p>

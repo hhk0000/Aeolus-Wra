@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
 from io import BytesIO
 from json import dumps
+from math import log, log1p, sqrt
+from statistics import mean, stdev
 from zipfile import ZipFile
 
 import pytest
@@ -78,12 +81,23 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
         data={"density": "1.2", "project": "测试场址", "factor": "75"},
     )
+    assert result.status_code == 422 and "手填后再导出" in result.json()["detail"]
+    result = client.post(
+        path + "/export",
+        files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
+        data={
+            "density": "1.2",
+            "project": "测试场址",
+            "factor": "75",
+            "extreme": dumps({"pressure_override": 0.45}),
+        },
+    )
     assert result.status_code == 200, result.text[:500] if result.status_code != 200 else ""
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
     assert entry["version"] == "1.2.0"
-    assert "五日雷暴法" not in text and "待补齐风压法结果" in text
+    assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
     assert doc.tables[1].rows[-1].cells[2].text == "84.00"
@@ -91,7 +105,11 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     formal = client.post(
         f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/export",
         files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
-        data={"density": "1.2", "project": "测试场址"},
+        data={
+            "density": "1.2",
+            "project": "测试场址",
+            "extreme": dumps({"pressure_override": 0.45}),
+        },
     )
     assert formal.status_code == 200
     formal_doc = Document(BytesIO(formal.content))
@@ -219,7 +237,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert selected_result["pressure_site"] == pytest.approx(26.83281573 * (1.225 / 1.2) ** 0.5)
     assert selected_result["site_speed"] == 25.5
     assert selected_result["multiplier_standard"] == pytest.approx(25.5 * (1.2 / 1.225) ** 0.5)
-    assert selected_result["adopted"] == selected_result["pressure_standard"]
+    assert selected_result["adopted"] == pytest.approx(selected_result["pressure_standard"])
     options["extreme"] = {**extreme, "multiplier": 6}
     selected_run = client.post("/api/v1/reports/assessment/runs", json=options)
     selected_result = client.get(
@@ -236,7 +254,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert any(shape._inline.docPr.get("descr") == "矩估计" for shape in archive_doc.inline_shapes)
     assert "繁峙县" in extracted and "0.45 kN/m²" in extracted and "26.83 m/s" in extracted
     assert "等效参考风速为 27.11 m/s" in extracted
-    assert "较大值 29.69 m/s" in extracted and "五日雷暴法" not in extracted
+    assert "折算至标准空气密度后为 29.69 m/s" in extracted and "五日雷暴法" not in extracted
     registry = client.get("/api/v1/standards").json()
     transfer = next(m for m in registry["methods"] if m["id"] == "assessment-density-transfer")
     assert transfer["source"] == "GB51096" and "1.225" in transfer["formula"]
@@ -245,7 +263,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         client.post(
             path + "/export",
             files={"data": ("short.txt", rows[0] + "\n" + rows[-1])},
-            data={"density": "1.2"},
+            data={"density": "1.2", "extreme": dumps({"pressure_override": 0.45})},
         ).status_code
         == 422
     )
@@ -298,7 +316,10 @@ def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
     assert month["rows"][-1][1] == f"{expected_mean:.2f}"
     if year_count == 2:
         assert month["rows"][-1][0] == "分析期平均"
-    report = client.post("/api/v1/reports/templates/mesoscale/1.1.0/export", data=options)
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.1.0/export",
+        data={**options, "extreme": dumps({"pressure_override": 0.45})},
+    )
     assert report.status_code == 200
     doc = Document(BytesIO(report.content))
     body = "\n".join(p.text for p in doc.paragraphs)
@@ -366,14 +387,81 @@ def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
     assert result["year"] == 2004
     assert result["tables"]["风速和风功率密度月变化图"]["rows"][0][1] == "8.00"
     export_url = "/api/v1/reports/templates/mesoscale/1.0.0/export"
-    word = client.post(export_url, data=options)
+    word = client.post(export_url, data={**options, "extreme": dumps({"pressure_override": 0.45})})
     assert word.status_code == 200
     report = Document(BytesIO(word.content))
     assert report.tables[1].rows[1].cells[1].text == "8.00"
     assert "手动选择分析年，系统推荐年份为2003年" in "".join(p.text for p in report.paragraphs)
     options["analysis_year"] = 2023
     assert client.post(run_url, json=options).status_code == 422
-    assert client.post(export_url, data=options).status_code == 422
+    assert (
+        client.post(
+            export_url, data={**options, "extreme": dumps({"pressure_override": 0.45})}
+        ).status_code
+        == 422
+    )
+
+
+def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    path = "/api/v1/reports/assessment"
+    hourly = (
+        "Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\n"
+        "2023-01-01 00:00\t4\t0\n2023-01-01 01:00\t6\t90\n2023-12-31 23:00\t5\t90\n"
+    )
+    source = client.post(path + "/files/source", files={"file": ("hourly.txt", hourly)}).json()
+    options = {
+        "source_id": source["id"],
+        "density": 1.2,
+        "extreme": {"pressure_override": 0.45, "thunderstorm": {"c1": 1.2, "c2": 0.55}},
+    }
+    rejected = client.post(path + "/runs", json=options)
+    assert rejected.status_code == 422 and "另传" in rejected.json()["detail"]
+
+    beginning = datetime(2023, 1, 1)
+    step = timedelta(minutes=10)
+    block_sizes = [17 + index % 12 for index in range(73)]
+    measured = "\n".join(
+        ["Date/Time\tSpeed_100m [m/s]"]
+        + [
+            f"{beginning + index * step:%Y-%m-%d %H:%M}\t{value}"
+            for block, value in enumerate(block_sizes)
+            for index in range(block * 720, (block + 1) * 720)
+        ]
+    )
+    upload = client.post(path + "/files/thunderstorm", files={"file": ("10min.txt", measured)})
+    assert upload.status_code == 200, upload.text
+    options["extreme"]["thunderstorm"]["source_id"] = upload.json()["id"]
+    response = client.post(path + "/runs", json=options)
+    assert response.status_code == 200, response.text
+    extreme = client.get(f"{path}/runs/{response.json()['id']}").json()["extreme"]
+    alpha = 1.2 / stdev(block_sizes)
+    site_speed = mean(block_sizes) - 0.55 / alpha - log(-log1p(-1 / (50 * 73))) / alpha
+    assert extreme["thunderstorm"]["site_speed"] == pytest.approx(site_speed)
+    assert extreme["thunderstorm"]["sample_size"] == 73
+    assert extreme["adopted_method"] == "五日雷暴法"
+    assert extreme["adopted"] == pytest.approx(site_speed * sqrt(1.2 / 1.225))
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.2.0/export",
+        data={**options, "extreme": dumps(options["extreme"])},
+    )
+    assert report.status_code == 200
+    paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
+    assert "（3）五日雷暴法" in paragraphs
+    assert any("取五日雷暴法" in paragraph for paragraph in paragraphs)
+
+    two_years = hourly + hourly[hourly.index("\n") + 1 :].replace("2023", "2022")
+    source = client.post(path + "/files/source", files={"file": ("two-years.txt", two_years)})
+    assert source.status_code == 200 and source.json()["window_years"] == 2
+    options["source_id"] = source.json()["id"]
+    missing_year = client.post(path + "/runs", json=options)
+    assert missing_year.status_code == 422 and "完整自然年" in missing_year.json()["detail"]
+    options["extreme"]["thunderstorm"]["year"] = 2023
+    response = client.post(path + "/runs", json=options)
+    assert response.status_code == 200, response.text
+    combined = client.get(f"{path}/runs/{response.json()['id']}").json()
+    assert combined["analysis_start_year"] == 2022
+    assert combined["analysis_end_year"] == combined["extreme"]["thunderstorm"]["year"] == 2023
 
 
 @pytest.mark.parametrize(
@@ -481,7 +569,10 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
     assert output["power_density_grade"]["height_m"] == 120
     assert output["power_density_grade"]["grade"] == "2"
     assert output["power_density_grade"]["power_density"] == pytest.approx(319.704)
-    report = client.post("/api/v1/reports/templates/mesoscale/1.2.0/export", data=options)
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.2.0/export",
+        data={**options, "extreme": dumps({"pressure_override": 0.45})},
+    )
     assert report.status_code == 200
     paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
     assert any("轮毂高度 125 m 处的空气密度为 1.210285" in p for p in paragraphs)

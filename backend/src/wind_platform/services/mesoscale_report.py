@@ -24,7 +24,11 @@ from wind_platform.core.calculations import (
 )
 from wind_platform.core.chart_methods import fit_weibull
 from wind_platform.core.ingestion import decode_text, preview, split_line
-from wind_platform.services.assessment_extreme import DEFAULT_MULTIPLIER, extreme_wind
+from wind_platform.services.assessment_extreme import (
+    DEFAULT_MULTIPLIER,
+    extreme_wind,
+    five_day_thunderstorm,
+)
 from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_word_charts import formal_figure
 
@@ -54,7 +58,7 @@ def hourly_records(raw):
     return height, records
 
 
-def _read_hourly(raw, source_details=False):
+def _read_hourly(raw, source_details=False, speed_only=False):
     detected = preview(raw)
     ti = detected["detected"]["timestamp_column"]
     if detected["detected"]["time_column"] is not None:
@@ -65,7 +69,7 @@ def _read_hourly(raw, source_details=False):
     lines = text.splitlines()
     data_lines = lines[header_line:]
     columns = {}
-    for quantity in ("speed", "direction"):
+    for quantity in ("speed",) if speed_only else ("speed", "direction"):
         candidates = [
             channel
             for channel in detected["suggestions"]
@@ -107,12 +111,12 @@ def _read_hourly(raw, source_details=False):
                 "支持 Speed_100m / Direction_100m 或 Anem125m / Vane125m 等表头。"
             )
         columns[quantity] = candidates[0]
-    speed, direction = columns["speed"], columns["direction"]
+    speed = columns["speed"]
     height = speed["height"]
-    vi, di = speed["index"], direction["index"]
-    speed_header, direction_header = detected["headers"][vi], detected["headers"][di]
-    if not re.search(r"\bm\s*/\s*s\b", speed_header, re.I) or not re.search(
-        r"°|\bdeg\b", direction_header, re.I
+    vi = speed["index"]
+    di = None if speed_only else columns["direction"]["index"]
+    if not re.search(r"\bm\s*/\s*s\b", detected["headers"][vi], re.I) or (
+        di is not None and not re.search(r"°|\bdeg\b", detected["headers"][di], re.I)
     ):
         raise CalculationError("平均风速须为 m/s，风向须为度（° 或 Deg）。")
     preamble = "\n".join(lines[: header_line - 1]) if source_details else ""
@@ -165,7 +169,7 @@ def _read_hourly(raw, source_details=False):
             if dt in records or dt.minute % 10 or dt.second or dt.microsecond or dt.tzinfo:
                 raise ValueError()
             v = float(row[vi]) if row[vi].strip() else np.nan
-            d = float(row[di]) if row[di].strip() else np.nan
+            d = float(row[di]) if di is not None and row[di].strip() else np.nan
             if np.isinf(v) or np.isinf(d) or v < 0 or d < 0 or d > 360:
                 raise ValueError()
             records[dt] = (v, d)
@@ -268,8 +272,10 @@ def period_mean(buckets, start, end):
     return sum(total for total, _ in totals) / count if count else None
 
 
-def assessment_source(raw):
-    height, records, preamble, densities, temperatures = _read_hourly(raw, source_details=True)
+def assessment_source(raw, speed_only=False):
+    height, records, preamble, densities, temperatures = _read_hourly(
+        raw, source_details=not speed_only, speed_only=speed_only
+    )
     coordinates = {}
     for label, key, positive, negative in (
         ("Latitude", "lat", "N", "S"),
@@ -568,6 +574,8 @@ def build(
     formal_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
+    thunderstorm_options=None,
+    thunderstorm_raw=None,
 ):
     if weibull_method not in WEIBULL_METHOD_LABELS:
         raise CalculationError("请选择有效的威布尔拟合算法。")
@@ -611,7 +619,32 @@ def build(
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, source_density, interval_minutes)
     power_grade = classify_power_density(float(height), stats["power_density"])
-    extreme = extreme_wind(stats["mean_speed"], rho, extreme_multiplier, pressure_station)
+    thunderstorm = None
+    if thunderstorm_options is not None:
+        storm_year = thunderstorm_options.year if combined else year
+        if storm_year is None:
+            raise CalculationError("合并多年分析时，请选择五日雷暴法使用的完整自然年。")
+        storm_height, storm_records = height, records
+        storm_interval = interval_minutes
+        if thunderstorm_raw is not None:
+            storm_height, storm_records, _, _, _ = _read_hourly(thunderstorm_raw, speed_only=True)
+            storm_interval = record_interval(storm_records)
+        if storm_interval != 10:
+            raise CalculationError("五日雷暴法需要 10 分钟风速资料，请另传 10 分钟 TXT。")
+        if storm_height != height:
+            raise CalculationError(
+                f"五日雷暴法资料的最高有效风速层须与分析高度 {height:g} m 一致。"
+            )
+        thunderstorm = five_day_thunderstorm(
+            storm_records,
+            storm_year,
+            storm_height,
+            thunderstorm_options.c1,
+            thunderstorm_options.c2,
+        )
+    extreme = extreme_wind(
+        stats["mean_speed"], rho, extreme_multiplier, pressure_station, thunderstorm
+    )
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
     def groups(keys, choices):
@@ -1015,11 +1048,43 @@ def build(
         f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
     )
+    methods = "风压法和平均风速倍数法"
+    if thunderstorm:
+        methods = "风压法、平均风速倍数法和五日雷暴法"
     fields["前期风速判断"] = (
-        f"两种方法均有结果，取标准空气密度口径下的较大值 {extreme['adopted']:.2f} m/s。"
+        f"比较{methods}在场址空气密度下的估算结果，"
+        f"取{extreme['adopted_method']}的 {extreme['adopted_site']:.2f} m/s，"
+        f"折算至标准空气密度后为 {extreme['adopted']:.2f} m/s，作为前期判断依据。"
         if extreme["adopted"] is not None
-        else "待补齐风压法结果后，再按两种方法的较大值形成前期判断。"
+        else "待补齐风压法结果后，再取各方法的较大值形成前期判断。"
     )
+
+    paragraphs = doc.paragraphs
+    for para in paragraphs:
+        if para.text == "本节按标准空气密度口径比较两种方法的估算结果。":
+            para.clear().add_run(
+                "本节比较各启用方法在场址空气密度下的估算结果，再将最大值折算至标准空气密度。"
+            )
+        if thunderstorm and para.text.startswith("【前期风速判断】"):
+            para.insert_paragraph_before("（3）五日雷暴法", style=para.style)
+            para.insert_paragraph_before(
+                f"采用 {thunderstorm['year']} 年 {thunderstorm['height']:g} m 高度的"
+                " 10 分钟风速资料，"
+                f"取各五日时段的最大风速，得到 {thunderstorm['sample_size']} 个样本。"
+                "极值Ⅰ型分布参数按 α＝C₁/σ、u＝μ−C₂/α 计算，"
+                "50 年一遇最大风速按 V₅₀＝u−ln[ln(50×73/(50×73−1))]/α 计算。",
+                style=para.style,
+            )
+            para.insert_paragraph_before(
+                f"样本均值 μ＝{thunderstorm['mean']:.2f} m/s，"
+                f"样本标准差 σ＝{thunderstorm['stdev']:.2f} m/s，"
+                f"C₁＝{thunderstorm['c1']:g}，C₂＝{thunderstorm['c2']:g}，"
+                f"α＝{thunderstorm['alpha']:.4f}，u＝{thunderstorm['u']:.2f} m/s。"
+                f"场址空气密度下的估算风速为 {thunderstorm['site_speed']:.2f} m/s，"
+                f"折算至标准空气密度后为 {extreme['thunderstorm']['standard_speed']:.2f} m/s。",
+                style=para.style,
+            )
+            break
 
     def replace(para):
         runs = para.runs

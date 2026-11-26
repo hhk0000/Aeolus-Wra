@@ -1,8 +1,11 @@
 """Single-grid-point preliminary extreme wind methods."""
 
 import re
+from calendar import isleap
+from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
-from math import isfinite, sqrt
+from math import isfinite, log, log1p, sqrt
+from statistics import mean, stdev
 
 from wind_platform.core.calculations import CalculationError
 from wind_platform.core.ingestion import decode_text, split_line
@@ -54,14 +57,77 @@ def pressure_site_speed(standard_speed, density):
     return standard_speed * sqrt(STANDARD_DENSITY / density) if standard_speed is not None else None
 
 
-def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None):
+def five_day_thunderstorm(records, year, height, c1, c2):
+    """Apply the report's equations (1-7) and (1-8) to 73 five-day maxima."""
+    start = datetime(year, 1, 1)
+    sample_size = 73
+    steps_per_block = 5 * 24 * 6
+    step = timedelta(minutes=10)
+    maxima = []
+    for block in range(sample_size):
+        speeds = []
+        for index in range(steps_per_block):
+            timestamp = start + (block * steps_per_block + index) * step
+            sample = records.get(timestamp)
+            if sample is None or not isfinite(sample[0]):
+                raise CalculationError(
+                    f"五日雷暴法需要连续有效的 10 分钟风速，{timestamp:%Y-%m-%d %H:%M} 缺测。"
+                )
+            speeds.append(sample[0])
+        maxima.append(max(speeds))
+    if isleap(year):
+        # Equation (1-7) uses 73 groups. Require the full leap year's coverage.
+        for index in range(steps_per_block // 5):
+            timestamp = start + timedelta(days=365) + index * step
+            sample = records.get(timestamp)
+            if sample is None or not isfinite(sample[0]):
+                raise CalculationError(
+                    f"五日雷暴法需要完整自然年资料，{timestamp:%Y-%m-%d %H:%M} 缺测。"
+                )
+    mu, sigma = mean(maxima), stdev(maxima)
+    if sigma <= 0:
+        raise CalculationError("五日雷暴法的五日最大风速样本标准差为零，无法拟合。")
+    alpha = c1 / sigma
+    if not isfinite(alpha) or alpha <= 0:
+        raise CalculationError("五日雷暴法的 C₁ 过大或过小，请核对系数。")
+    u = mu - c2 / alpha
+    site_speed = u - log(-log1p(-1 / (50 * sample_size))) / alpha
+    if not isfinite(site_speed) or site_speed <= 0:
+        raise CalculationError("五日雷暴法未得到有效风速，请核对样本与系数。")
+    return {
+        "year": year,
+        "height": float(height),
+        "sample_size": sample_size,
+        "c1": c1,
+        "c2": c2,
+        "mean": mu,
+        "stdev": sigma,
+        "alpha": alpha,
+        "u": u,
+        "site_speed": site_speed,
+    }
+
+
+def extreme_wind(
+    mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None, thunderstorm=None
+):
     mean_speed_used = float(Decimal(str(mean_speed)).quantize(Decimal("0.01"), ROUND_HALF_UP))
     site_speed = mean_speed_used * multiplier
     multiplier_standard = site_speed * sqrt(density / STANDARD_DENSITY)
     if not isfinite(site_speed) or not isfinite(multiplier_standard):
         raise CalculationError("风速倍数过大，无法计算有效的风速。")
     pressure_standard = sqrt(1600 * station["pressure"]) if station else None
-    adopted = max(pressure_standard, multiplier_standard) if station else None
+    pressure_site = pressure_site_speed(pressure_standard, density)
+    candidates = {"风压法": pressure_site, "平均风速倍数法": site_speed}
+    if thunderstorm is not None:
+        candidates["五日雷暴法"] = thunderstorm["site_speed"]
+        standard_speed = thunderstorm["site_speed"] * sqrt(density / STANDARD_DENSITY)
+        if not isfinite(standard_speed):
+            raise CalculationError("五日雷暴法折算后的风速超出有效范围。")
+        thunderstorm = {**thunderstorm, "standard_speed": standard_speed}
+    adopted_method = max(candidates, key=candidates.get) if station else None
+    adopted_site = candidates[adopted_method] if adopted_method else None
+    adopted = adopted_site * sqrt(density / STANDARD_DENSITY) if adopted_site is not None else None
     return {
         "station": station,
         "mean_speed": mean_speed,
@@ -71,6 +137,9 @@ def extreme_wind(mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=Non
         "site_speed": site_speed,
         "multiplier_standard": multiplier_standard,
         "pressure_standard": pressure_standard,
-        "pressure_site": pressure_site_speed(pressure_standard, density),
+        "pressure_site": pressure_site,
+        "thunderstorm": thunderstorm,
+        "adopted_method": adopted_method,
+        "adopted_site": adopted_site,
         "adopted": adopted,
     }

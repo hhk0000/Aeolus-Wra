@@ -86,19 +86,25 @@ def assessment_file(local, file_id, kind):
 
 @router.post("/reports/assessment/files/{kind}")
 async def upload_assessment_file(kind: str, request: Request):
-    limits = {"source": 64 * MIB, "energy": 4 * MIB, "pressure": 4 * MIB}
+    limits = {"source": 64 * MIB, "thunderstorm": 64 * MIB, "energy": 4 * MIB, "pressure": 4 * MIB}
     if kind not in limits:
         raise CalculationError("资料类型无效。")
     async with request.form(max_files=1, max_fields=0) as form:
         file = form.get("file")
         if not isinstance(file, UploadFile) or not file.size or file.size > limits[kind]:
             raise CalculationError(
-                "请选择有效的资料，中尺度 TXT 不超过64 MB，机组表和风压库不超过4 MB。"
+                "请选择有效的资料，风速 TXT 不超过64 MB，机组表和风压库不超过4 MB。"
             )
         raw = await file.read()
         detail = {}
         if kind == "source":
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw)
+        elif kind == "thunderstorm":
+            detail = await run_in_threadpool(mesoscale_report.assessment_source, raw, True)
+            if detail["interval_minutes"] != 10:
+                raise CalculationError("五日雷暴法资料须为 10 分钟步长。")
+            if detail["coverage_error"]:
+                raise CalculationError(detail["coverage_error"])
         elif kind == "pressure":
             detail = {
                 "stations": await run_in_threadpool(assessment_extreme.pressure_stations, raw)
@@ -147,6 +153,13 @@ def get_pressure_match(place: str = ""):
     return {"station": pressure_location.match_pressure(place[:120])}
 
 
+class ThunderstormOptions(BaseModel):
+    source_id: str | None = None
+    year: int | None = Field(default=None, ge=1, le=9998)
+    c1: float = Field(gt=0, allow_inf_nan=False)
+    c2: float = Field(allow_inf_nan=False)
+
+
 class ExtremeOptions(BaseModel):
     multiplier: float = Field(
         default=assessment_extreme.DEFAULT_MULTIPLIER, gt=0, allow_inf_nan=False
@@ -155,6 +168,21 @@ class ExtremeOptions(BaseModel):
     pressure_station_index: int | None = Field(default=None, ge=0)
     place: str = Field(default="", max_length=120)
     pressure_override: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    thunderstorm: ThunderstormOptions | None = None
+
+    def calculation_options(self, local, *, for_export=False):
+        station = self.station(local)
+        if for_export and station is None:
+            raise CalculationError("风压库未匹配到基本风压，请在分析配置中手填后再导出。")
+        thunderstorm_raw = None
+        if self.thunderstorm and self.thunderstorm.source_id:
+            thunderstorm_raw = assessment_file(local, self.thunderstorm.source_id, "thunderstorm")
+        return {
+            "extreme_multiplier": self.multiplier,
+            "pressure_station": station,
+            "thunderstorm_options": self.thunderstorm,
+            "thunderstorm_raw": thunderstorm_raw,
+        }
 
     def station(self, local):
         station = (
@@ -214,10 +242,9 @@ def run_assessment(options: AssessmentOptions, request: Request):
         options.density,
         "",
         analysis_year=options.analysis_year,
-        extreme_multiplier=options.extreme.multiplier,
-        pressure_station=options.extreme.station(local),
         hub_height_m=options.hub_height_m,
         mean_temperature_c=options.mean_temperature_c,
+        **options.extreme.calculation_options(local),
     )
     saved = local.put("assessment-runs", results)
     return {"id": saved["id"]}
@@ -292,7 +319,7 @@ async def export_registered(key: str, version: str, request: Request):
         try:
             extreme = ExtremeOptions.model_validate_json(str(form.get("extreme", "{}")))
         except ValidationError as exc:
-            raise CalculationError("请填写正数风速倍数并检查风压站点选项。") from exc
+            raise CalculationError("请检查风速倍数、风压和五日雷暴法选项。") from exc
         result = await run_in_threadpool(
             render,
             data,
@@ -303,11 +330,10 @@ async def export_registered(key: str, version: str, request: Request):
             energy_bytes,
             location,
             analysis_year=analysis_year,
-            extreme_multiplier=extreme.multiplier,
-            pressure_station=extreme.station(local),
             weibull_method=str(form.get("weibull_method", "mle")),
             hub_height_m=heights.hub_height_m,
             mean_temperature_c=heights.mean_temperature_c,
+            **extreme.calculation_options(local, for_export=True),
         )
     return Response(
         result,

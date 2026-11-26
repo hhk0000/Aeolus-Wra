@@ -122,6 +122,12 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     net_value = turbine_table.rows[1].cells[9].paragraphs[0].runs[0]
     assert net_value.text == "7500.00"
     assert str(net_value.font.color.rgb) == "008000" and net_value.font.highlight_color is None
+    direction_text = next(p for p in formal_doc.paragraphs if "主要风向为" in p.text)
+    assert all(
+        str(run.font.color.rgb) != "008000"
+        for run in direction_text.runs
+        if "主要风向为" in run.text
+    )
     assert "尾流后理论年发电量合计为 10000.00 MWh" in "\n".join(
         p.text for p in formal_doc.paragraphs
     )

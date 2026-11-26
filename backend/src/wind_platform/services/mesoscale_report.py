@@ -14,6 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, RGBColor
+from docx.text.run import Run
 from PIL import Image, ImageDraw, ImageFont
 
 from wind_platform.core.calculations import (
@@ -1222,6 +1223,7 @@ def build(
                 if m[0] in labels and m[0] != labels[m[0]]
             )
         for m, value in sorted(hits, key=lambda pair: pair[0].start(), reverse=True):
+            runs = para.runs
             offsets = np.cumsum([0] + [len(r.text) for r in runs])
             left = next(i for i in range(len(runs)) if offsets[i] <= m.start() < offsets[i + 1])
             right = next(
@@ -1229,12 +1231,26 @@ def build(
             )
             prefix = runs[left].text[: m.start() - offsets[left]]
             suffix = runs[right].text[m.end() - offsets[right] :]
+            if approved_layout and suffix:
+                trailing = Run(deepcopy(runs[right]._r), para)
+                trailing.text = suffix
+                runs[right]._r.addnext(trailing._r)
             for i in range(left + 1, right + 1):
                 runs[i].text = ""
-            runs[left].text = prefix + value + suffix
-            runs[left].font.color.rgb = RGBColor.from_string("008000")
-            runs[left].font.highlight_color = None
-            for shade in runs[left]._r.xpath("./w:rPr/w:shd"):
+            bound = runs[left]
+            if approved_layout:
+                if prefix:
+                    bound = Run(deepcopy(runs[left]._r), para)
+                    runs[left]._r.addnext(bound._r)
+                    runs[left].text = prefix
+                bound.text = value
+                if not m[0].startswith("【"):
+                    continue
+            else:
+                bound.text = prefix + value + suffix
+            bound.font.color.rgb = RGBColor.from_string("008000")
+            bound.font.highlight_color = None
+            for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
 
     for para in doc.paragraphs:

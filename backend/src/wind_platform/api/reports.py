@@ -101,8 +101,8 @@ async def upload_assessment_file(kind: str, request: Request):
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw)
         elif kind == "thunderstorm":
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw, True)
-            if detail["interval_minutes"] not in (10, 60):
-                raise CalculationError("五日雷暴法资料须为 10 分钟或逐小时步长。")
+            if detail["interval_minutes"] != 10:
+                raise CalculationError("五日雷暴法资料须为 10 分钟步长。")
             if detail["coverage_error"]:
                 raise CalculationError(detail["coverage_error"])
         elif kind == "pressure":
@@ -330,6 +330,8 @@ async def export_registered(key: str, version: str, request: Request):
         run_id = form.get("run_id")
         if isinstance(run_id, str) and run_id and key == "mesoscale":
             saved = local.get("assessment-runs", run_id)
+            if saved.get("calculation_version") != mesoscale_report.ASSESSMENT_CALCULATION_VERSION:
+                raise CalculationError("该成果由旧版计算生成，请重新分析后导出。")
             if not isinstance(source_id, str) or not source_id:
                 raise CalculationError("请使用本次分析保存的中尺度资料导出。")
             current = AssessmentOptions(

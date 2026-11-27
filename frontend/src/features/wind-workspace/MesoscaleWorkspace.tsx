@@ -15,6 +15,11 @@ type Source = {
   start_year?: number;
   end_year?: number;
   window_years?: number;
+  year_coverage?: {
+    year: number;
+    valid_count: number;
+    expected_count: number;
+  }[];
   interval_minutes?: number;
   density_period?: number | null;
   year?: number;
@@ -54,6 +59,7 @@ type Assessment = {
   place?: string;
   pressureOverride?: string;
   thunderstorm?: boolean;
+  thunderstormSource?: Source;
   thunderstormYear?: number;
   thunderstormC1?: string;
   thunderstormC2?: string;
@@ -122,7 +128,9 @@ function isothermalHubDensity(
   return sourceDensity * Math.exp((-9.80665 * deltaH) / (287.05 * tK));
 }
 
-function computeCombinedReduction(reductions: Record<string, string> | undefined) {
+function computeCombinedReduction(
+  reductions: Record<string, string> | undefined,
+) {
   let product = 1;
   for (const item of DEFAULT_REDUCTIONS) {
     const raw = reductions?.[item.key] ?? item.value;
@@ -134,6 +142,7 @@ function computeCombinedReduction(reductions: Record<string, string> | undefined
 }
 
 type Result = {
+  calculation_version?: number;
   year: number;
   height: number;
   hub_height_m?: number;
@@ -147,6 +156,7 @@ type Result = {
   } | null;
   power_density_grade?: {
     grade: string | null;
+    manual_review?: boolean;
     threshold_heights_m?: number[];
   };
   interval_minutes?: number;
@@ -230,8 +240,6 @@ const initial: Assessment = {
   multiplier: "5",
   factor: "75.00",
   thunderstorm: false,
-  thunderstormC1: "1.189",
-  thunderstormC2: "0.556",
   lat: "",
   lon: "",
   alt: "",
@@ -318,15 +326,19 @@ export default function MesoscaleWorkspace({
   const analysisYears = source?.start_year
     ? (source.annual ?? []).map((_, index) => source.start_year! + index)
     : [];
-  const stormYear = combinedWindow
-    ? (state.thunderstormYear ?? analysisYears[analysisYears.length - 1])
-    : analysisYear;
+  const stormSource =
+    source?.interval_minutes === 10 ? source : state.thunderstormSource;
+  const stormYears = (stormSource?.year_coverage ?? [])
+    .filter(({ valid_count, expected_count }) => valid_count === expected_count)
+    .map(({ year }) => year);
+  const stormYear = combinedWindow ? state.thunderstormYear : analysisYear;
   const c1 = Number(state.thunderstormC1);
   const c2 = Number(state.thunderstormC2);
   const stormReady =
-    !!source &&
+    !!stormSource &&
+    stormSource.height === source?.height &&
     stormYear !== undefined &&
-    analysisYears.includes(stormYear) &&
+    stormYears.includes(stormYear) &&
     Number.isFinite(c1) &&
     c1 > 0 &&
     !!state.thunderstormC2?.trim() &&
@@ -483,6 +495,11 @@ export default function MesoscaleWorkspace({
     )
       .then((saved) => {
         if (controller.signal.aborted) return;
+        if (saved.calculation_version === undefined) {
+          setResult(undefined);
+          setResultError("该成果由旧版计算生成，请回到分析配置重新分析。");
+          return;
+        }
         setResultError("");
         setResult(saved);
       })
@@ -561,7 +578,10 @@ export default function MesoscaleWorkspace({
     });
   }
 
-  async function upload(file: File | undefined, kind: "source" | "energy") {
+  async function upload(
+    file: File | undefined,
+    kind: "source" | "energy" | "thunderstorm",
+  ) {
     if (!file || busy) return;
     setBusy(true);
     setError("");
@@ -570,6 +590,16 @@ export default function MesoscaleWorkspace({
       form.set("file", file);
       if (kind === "energy") {
         change({ energy: await api("/reports/assessment/files/energy", form) });
+      } else if (kind === "thunderstorm") {
+        const next = await api<Source>(
+          "/reports/assessment/files/thunderstorm",
+          form,
+        );
+        change({
+          thunderstormSource: next,
+          thunderstormYear: undefined,
+          runId: undefined,
+        });
       } else {
         const next = await api<Source>(
           "/reports/assessment/files/source",
@@ -578,6 +608,8 @@ export default function MesoscaleWorkspace({
         setResult(undefined);
         change({
           source: next,
+          thunderstormSource: undefined,
+          thunderstormYear: undefined,
           density: "",
           hubHeight: String(next.height),
           runId: undefined,
@@ -609,6 +641,8 @@ export default function MesoscaleWorkspace({
     thunderstorm: state.thunderstorm
       ? {
           year: stormYear,
+          source_id:
+            source?.interval_minutes === 10 ? undefined : stormSource?.id,
           c1,
           c2,
         }
@@ -658,7 +692,8 @@ export default function MesoscaleWorkspace({
       if (needsExtrapolation) {
         form.set("mean_temperature_c", String(effectiveTemperature));
       }
-      if (windShear !== undefined) form.set("wind_shear_exponent", String(windShear));
+      if (windShear !== undefined)
+        form.set("wind_shear_exponent", String(windShear));
       if (selectedAnalysisYear !== undefined) {
         form.set("analysis_year", String(selectedAnalysisYear));
       }
@@ -1163,10 +1198,32 @@ export default function MesoscaleWorkspace({
                             })
                           }
                         />
-                        <span>启用五日雷暴法（1 h / 10 min 均可计算）</span>
+                        <span>启用五日雷暴法（10 分钟资料）</span>
                       </label>
                       {state.thunderstorm && (
                         <div className="ww-thunderstorm-params">
+                          {source?.interval_minutes !== 10 && (
+                            <label>
+                              上传同高的 10 分钟风速 TXT
+                              <input
+                                type="file"
+                                accept=".txt"
+                                onChange={(event) =>
+                                  void upload(
+                                    event.target.files?.[0],
+                                    "thunderstorm",
+                                  )
+                                }
+                              />
+                              {stormSource && <small>{stormSource.name}</small>}
+                            </label>
+                          )}
+                          {stormSource &&
+                            stormSource.height !== source?.height && (
+                              <p className="ww-error">
+                                10 分钟资料的风速层须与中尺度源风速层同高。
+                              </p>
+                            )}
                           {combinedWindow && (
                             <label>
                               计算年
@@ -1181,7 +1238,8 @@ export default function MesoscaleWorkspace({
                                   })
                                 }
                               >
-                                {analysisYears.map((year) => (
+                                <option value="">选择完整自然年</option>
+                                {stormYears.map((year) => (
                                   <option key={year} value={year}>
                                     {year} 年
                                   </option>
@@ -1194,7 +1252,7 @@ export default function MesoscaleWorkspace({
                             <input
                               type="number"
                               step="any"
-                              value={state.thunderstormC1 ?? "1.189"}
+                              value={state.thunderstormC1 ?? ""}
                               onChange={(event) =>
                                 change({
                                   thunderstormC1: event.target.value,
@@ -1208,7 +1266,7 @@ export default function MesoscaleWorkspace({
                             <input
                               type="number"
                               step="any"
-                              value={state.thunderstormC2 ?? "0.556"}
+                              value={state.thunderstormC2 ?? ""}
                               onChange={(event) =>
                                 change({
                                   thunderstormC2: event.target.value,
@@ -1532,7 +1590,9 @@ export default function MesoscaleWorkspace({
                   <strong>
                     {result.power_density_grade.grade
                       ? `${result.power_density_grade.grade} 级`
-                      : "待复核"}
+                      : result.power_density_grade.manual_review
+                        ? "报告留空，待人工填写"
+                        : "待复核"}
                   </strong>
                 </p>
               )}

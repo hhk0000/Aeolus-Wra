@@ -72,31 +72,23 @@ def pressure_site_speed(standard_speed, density):
     return standard_speed * sqrt(STANDARD_DENSITY / density) if standard_speed is not None else None
 
 
-def five_day_thunderstorm(records, year, height, c1, c2, *, speed_factor=1.0, interval_minutes=10):
+def five_day_thunderstorm(records, year, height, c1, c2, *, speed_factor=1.0):
     """Apply the report's equations (1-7) and (1-8) to 73 five-day maxima."""
-    if interval_minutes not in (10, 60):
-        raise CalculationError("五日雷暴法仅支持 10 分钟或逐小时风速资料。")
     start = datetime(year, 1, 1)
     sample_size = 73
-    steps_per_day = 24 * (60 // interval_minutes)
-    steps_per_block = 5 * steps_per_day
-    step = timedelta(minutes=interval_minutes)
+    steps_per_block = 5 * 24 * 6
+    step = timedelta(minutes=10)
     maxima = []
     for block in range(sample_size):
-        block_steps = steps_per_block + (
-            steps_per_day if isleap(year) and block == sample_size - 1 else 0
-        )
         speeds = []
-        for index in range(block_steps):
+        for index in range(steps_per_block):
             timestamp = start + (block * steps_per_block + index) * step
             sample = records.get(timestamp)
-            if sample is not None and isfinite(sample[0]):
-                speeds.append(sample[0])
-        if len(speeds) < 0.90 * block_steps:
-            step_label = "10 分钟" if interval_minutes == 10 else "逐小时"
-            raise CalculationError(
-                f"五日雷暴法第 {block + 1} 组有效{step_label}风速完整率不足 90%，无法计算。"
-            )
+            if sample is None or not isfinite(sample[0]):
+                raise CalculationError(
+                    f"五日雷暴法需要连续有效的 10 分钟风速，{timestamp:%Y-%m-%d %H:%M} 缺测。"
+                )
+            speeds.append(sample[0])
         maximum = max(speeds) * speed_factor
         if not isfinite(maximum):
             raise CalculationError("五日最大风速外推结果无效，请检查风切变指数。")

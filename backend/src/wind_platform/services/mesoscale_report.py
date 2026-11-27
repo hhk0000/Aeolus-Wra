@@ -34,8 +34,10 @@ from wind_platform.services.assessment_extreme import (
     extreme_wind,
     five_day_thunderstorm,
 )
-from wind_platform.services.assessment_power_grade import classify_power_density
+from wind_platform.services.assessment_power_grade import HEIGHTS, classify_power_density
 from wind_platform.services.mesoscale_word_charts import formal_figure
+
+ASSESSMENT_CALCULATION_VERSION = 2
 
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
@@ -70,7 +72,7 @@ def parse_wind_observation(text):
     return np.nan if value in {-9999, -999.9, -999, 999, 999.9, 9999} else value
 
 
-def _read_hourly(raw, source_details=False, speed_only=False):
+def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=None):
     detected = preview(raw)
     ti = detected["detected"]["timestamp_column"]
     if detected["detected"]["time_column"] is not None:
@@ -88,6 +90,7 @@ def _read_hourly(raw, source_details=False, speed_only=False):
             if channel["quantity"] == quantity
             and channel["statistic"] == "mean"
             and channel["height"] is not None
+            and (below_height is None or channel["height"] < below_height)
             and not channel["ambiguous"]
             and channel["index"] != ti
         ]
@@ -148,7 +151,7 @@ def _read_hourly(raw, source_details=False, speed_only=False):
             at_layer.append(index)
         elif not layer:
             untagged.append(index)
-    density_columns = at_layer or untagged
+    density_columns = at_layer or (untagged if below_height is None else [])
     density_index = density_columns[0] if len(density_columns) == 1 else None
     temperatures = {}
     temperature_column = None
@@ -284,6 +287,57 @@ def period_mean(buckets, start, end):
     totals = [value for year, value in buckets.items() if start <= year <= end]
     count = sum(n for _, n in totals)
     return sum(total for total, _ in totals) / count if count else None
+
+
+def assessment_power_grade(
+    raw, hub_height, hub_power, source_height, source_density, temperature, start, end, interval
+):
+    maximum_height = HEIGHTS[-1]
+    if hub_height <= maximum_height:
+        return classify_power_density(hub_height, hub_power)
+    below = math.nextafter(maximum_height, math.inf)
+    while below > HEIGHTS[0]:
+        try:
+            height, records, _, densities, temperatures = _read_hourly(
+                raw, source_details=True, speed_only=True, below_height=below
+            )
+        except CalculationError:
+            break
+        height = float(height)
+        if height >= below:
+            break
+        coverage = natural_year_coverage(records, interval)
+        eligible_years = {
+            row["year"]
+            for row in coverage
+            if 100 * row["valid_count"] >= 95 * row["expected_count"]
+        }
+        if all(year in eligible_years for year in range(start, end + 1)):
+            density = (
+                source_density if height == source_height else period_mean(densities, start, end)
+            )
+            if density is None:
+                reference_temperature = temperature
+                if reference_temperature is None:
+                    reference_temperature = period_mean(temperatures, start, end)
+                if reference_temperature is not None:
+                    density = density_at_height(
+                        source_density, height - source_height, reference_temperature
+                    )
+            if density is not None and 0 < density < 3:
+                speed = [
+                    values[0] for stamp, values in records.items() if start <= stamp.year <= end
+                ]
+                power = wind_statistics(speed, density, interval)["power_density"]
+                return classify_power_density(height, power)
+        below = height
+    return {
+        "height_m": None,
+        "power_density": None,
+        "grade": None,
+        "threshold_heights_m": [],
+        "manual_review": True,
+    }
 
 
 def source_coordinates(preamble):
@@ -639,6 +693,7 @@ def build(
     source_height_str = height
     source_density = rho
     density_adjustment = None
+    temperature = mean_temperature_c
     speed_factor = 1.0
     if hub_height != float(height):
         if wind_shear_exponent is None or not math.isfinite(wind_shear_exponent):
@@ -649,7 +704,6 @@ def build(
             raise CalculationError("风速外推系数无效，请检查高度和风切变指数。") from exc
         if not math.isfinite(speed_factor) or speed_factor <= 0:
             raise CalculationError("风速外推系数无效，请检查高度和风切变指数。")
-        temperature = mean_temperature_c
         if temperature is None:
             temperature = period_mean(temperatures, analysis_start, analysis_end)
         if temperature is None:
@@ -672,7 +726,20 @@ def build(
     mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
     stats = wind_statistics(a, rho, interval_minutes)
-    power_grade = classify_power_density(hub_height, stats["power_density"])
+    if template is None or figure_review_layout:
+        power_grade = assessment_power_grade(
+            raw,
+            hub_height,
+            stats["power_density"],
+            float(source_height_str),
+            source_density,
+            temperature,
+            analysis_start,
+            analysis_end,
+            interval_minutes,
+        )
+    else:
+        power_grade = classify_power_density(hub_height, stats["power_density"])
     thunderstorm = None
     if thunderstorm_options is not None:
         storm_year = thunderstorm_options.year if combined else year
@@ -683,8 +750,8 @@ def build(
         if thunderstorm_raw is not None:
             storm_height, storm_records, _, _, _ = _read_hourly(thunderstorm_raw, speed_only=True)
             storm_interval = record_interval(storm_records)
-        if storm_interval not in (10, 60):
-            raise CalculationError("五日雷暴法仅支持 10 分钟或逐小时风速资料。")
+        if storm_interval != 10:
+            raise CalculationError("五日雷暴法需要 10 分钟风速资料，请另传 10 分钟 TXT。")
         if storm_height != source_height_str:
             raise CalculationError(
                 f"五日雷暴法资料的最高有效风速层须与源风速层 {float(source_height_str):g} m 一致。"
@@ -696,7 +763,6 @@ def build(
             thunderstorm_options.c1,
             thunderstorm_options.c2,
             speed_factor=speed_factor,
-            interval_minutes=storm_interval,
         )
     hub_mean_speed = stats["mean_speed"]
     if not math.isfinite(hub_mean_speed) or hub_mean_speed <= 0:
@@ -716,9 +782,7 @@ def build(
         for x in choices:
             sub = a[(np.array(keys) == x) & np.isfinite(a)]
             result.append(
-                (sub.mean(), (0.5 * rho * sub**3).mean())
-                if len(sub)
-                else (np.nan, np.nan)
+                (sub.mean(), (0.5 * rho * sub**3).mean()) if len(sub) else (np.nan, np.nan)
             )
         return np.array(result)
 
@@ -784,6 +848,7 @@ def build(
         effective_hours /= window_years
     fields = {
         "分析高度": height,
+        "源风速层高度": source_height_str,
         "时间步长": "1 h" if interval_minutes == 60 else "10 min",
         "代表年份": str(year),
         "20年起止年月": f"{start}年1月—{end}年12月" if not short_window else "资料不足",
@@ -919,6 +984,7 @@ def build(
                 assessment_charts([weibull_series(alternative)], alternative)
             )
         return {
+            "calculation_version": ASSESSMENT_CALCULATION_VERSION,
             "year": year,
             "height": float(height),
             "hub_height_m": hub_height,
@@ -1167,9 +1233,16 @@ def build(
         reviewed_marks["轮毂高度"] = hub_height_m is not None
         if not short_window:
             reviewed_marks["代表年份"] = analysis_year is not None or review_required
+    if figure_review_layout:
+        reviewed_marks["风切变指数"] = False
+        if wind_shear_exponent is not None:
+            fields["风切变指数"] = f"{wind_shear_exponent:g}"
     fields["换图"] = ""
     grade = power_grade["grade"]
-    fields["风功率密度等级及评价待校审"] = f"{grade} 级" if grade else "待复核"
+    grade_needs_input = not grade and power_grade.get("manual_review", False)
+    fields["风功率密度等级及评价待校审"] = (
+        f"{grade} 级" if grade else "\u00a0" * 6 if grade_needs_input else "待复核"
+    )
     fields["风压法结果"] = pressure_result_text(
         pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
     )
@@ -1283,20 +1356,33 @@ def build(
                 abs(deviation) <= 0.02 + 1e-12,
             )
             txt = para.text
-        if combined and "区间累计时数为" in txt:
+        if (combined or figure_review_layout) and "区间累计时数为" in txt:
             approved_assessment_template.replace_wording(
                 para._p, "区间累计时数为", "区间年均有效时数为"
             )
             txt = para.text
-        if approved_layout and short_window and "选取代表年份为" in txt:
+        if (
+            approved_layout
+            and "选取代表年份为" in txt
+            and (short_window or (figure_review_layout and density_adjustment is not None))
+        ):
             para.clear()
             if window_years == 10:
                 para.add_run("以最近 10 个达标自然年的平均风速为基准。")
-            for label, field in (
+            parts = [
                 ("分析期为", "分析期"),
-                ("。采用", "分析高度"),
-                (" m 高度风速、风向资料，时间步长为 ", "时间步长"),
-            ):
+                ("。采用", "源风速层高度" if figure_review_layout else "分析高度"),
+            ]
+            if figure_review_layout and density_adjustment is not None:
+                parts.extend(
+                    [
+                        (" m 高度资料，风速外推至轮毂高度 ", "分析高度"),
+                        (" m，时间步长为 ", "时间步长"),
+                    ]
+                )
+            else:
+                parts.append((" m 高度风速、风向资料，时间步长为 ", "时间步长"))
+            for label, field in parts:
                 para.add_run(label)
                 value = para.add_run(fields[field])
                 value.font.color.rgb = RGBColor.from_string("008000")
@@ -1320,22 +1406,26 @@ def build(
                     )
                     txt = para.text
             else:
-                # 1.5.2 source air density line keeps source_height_str before hub_height
                 approved_assessment_template.replace_wording(
-                    para._p, "中尺度数据【分析高度】", f"中尺度数据{source_height_str}"
+                    para._p, "【分析高度】", "【源风速层高度】"
+                )
+                approved_assessment_template.replace_wording(
+                    para._p, "按等温近似折算至轮毂高度", "推算至轮毂高度"
                 )
                 txt = para.text
-        if wind_shear_exponent is not None and "风切变指数为【" in txt:
-            if "本阶段轮毂高度暂定为" in txt:
+        if figure_review_layout and "风切变指数为【0.26】" in txt:
+            if wind_shear_exponent is None:
+                prefix = "（1）" if txt.startswith("（1）") else ""
                 approved_assessment_template.replace_wording(
-                    para._p, "【0.26】", f"{wind_shear_exponent:g}"
+                    para._p, txt, f"{prefix}本次采用与轮毂同高的风速资料。"
                 )
-                txt = para.text
-            elif txt.startswith("（1）风切变指数为"):
+                return
+            approved_assessment_template.replace_wording(para._p, "【0.26】", "【风切变指数】")
+            if txt.startswith("根据中尺度数据软件显示，"):
                 approved_assessment_template.replace_wording(
-                    para._p, "【0.26】", f"{wind_shear_exponent:g}"
+                    para._p, "根据中尺度数据软件显示，本项目", "本次分析采用的"
                 )
-                txt = para.text
+            txt = para.text
         if approved_layout and txt.endswith(approved_assessment_template.PRESSURE_HEIGHT_NOTE):
             approved_assessment_template.remove_pressure_height_note(para)
             txt = para.text
@@ -1452,6 +1542,8 @@ def build(
                 bound.font.highlight_color = WD_COLOR_INDEX.YELLOW
             if approved_layout and m[0] == "【风功率密度等级】":
                 bound.font.bold = False
+            if grade_needs_input and m[1] in {"风功率密度等级", "风功率密度等级及评价待校审"}:
+                bound.font.highlight_color = WD_COLOR_INDEX.RED
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
             if approved_layout and not reviewed_marks.get(m[1]):

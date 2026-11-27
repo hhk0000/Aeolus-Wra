@@ -462,6 +462,43 @@ def test_figure_review_template_binds_location_density_and_extreme_conclusion(tm
         part = doc.part.related_parts[pic.blipFill.blip.embed]
         with Image.open(BytesIO(part.blob)) as image:
             assert shape.height == round(shape.width * image.height / image.width)
+    assert "【0.26】" not in "\n".join(p.text for p in doc.paragraphs)
+
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.2/export",
+        files={"data": ("wind.txt", raw)},
+        data={
+            "density": "1.2",
+            "hub_height_m": "138",
+            "wind_shear_exponent": "0.32",
+            "mean_temperature_c": "15",
+            "extreme": dumps({"pressure_override": 0.45}),
+        },
+    )
+    assert report.status_code == 200, report.text[:500]
+    doc = Document(BytesIO(report.content))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "采用125 m 高度资料，风速外推至轮毂高度 138 m" in text
+    assert "中尺度数据125 m高度处空气密度为1.200" in text
+    assert "内138m 高度的平均风速" in text
+    assert "中尺度数据138m 高度代表年年平均风速为9.29" in text
+    assert "【0.26】" not in text
+    assert (
+        sum(
+            run.text == "0.32" and str(run.font.color.rgb) == "008000"
+            for para in doc.paragraphs
+            for run in para.runs
+        )
+        == 2
+    )
+    assert (
+        sum(
+            run.text == "\u00a0" * 6 and str(run.font.highlight_color) == "RED (6)"
+            for para in doc.paragraphs
+            for run in para.runs
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize("year_count", [1, 2])
@@ -695,7 +732,7 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     options["source_id"] = mismatch.json()["id"]
     response = client.post(path + "/runs", json=options)
     assert response.status_code == 422
-    assert "分析高度 125 m 一致" in response.json()["detail"]
+    assert "源风速层 125 m 一致" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(

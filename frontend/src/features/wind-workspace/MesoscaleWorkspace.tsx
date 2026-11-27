@@ -373,12 +373,9 @@ export default function MesoscaleWorkspace({
   const density = Number(densityText);
 
   const hubHeightText =
-    state.hubHeight !== undefined && state.hubHeight !== ""
-      ? state.hubHeight
-      : source
-        ? String(source.height)
-        : "";
-  const hubHeight = hubHeightText ? Number(hubHeightText) : undefined;
+    state.hubHeight ?? (source ? String(source.height) : "");
+  const hubHeight =
+    hubHeightText === "" ? source?.height : Number(hubHeightText);
   const needsExtrapolation =
     !!source &&
     hubHeight !== undefined &&
@@ -1182,8 +1179,9 @@ export default function MesoscaleWorkspace({
                         type="number"
                         min="1"
                         step="any"
-                        required
-                        placeholder={source ? `${source.height}` : "如 125"}
+                        placeholder={
+                          source ? `默认 ${source.height} m` : "如 125"
+                        }
                         value={hubHeightText}
                         onChange={(event) => {
                           setResult(undefined);
@@ -1194,9 +1192,11 @@ export default function MesoscaleWorkspace({
                         }}
                       />
                       <small className="ww-inline-note">
-                        {needsExtrapolation
-                          ? `导入高度 ${source?.height} m ≠ 轮毂高度，将按风切变推算风速`
-                          : "与导入高度一致，直接使用导入风速"}
+                        {hubHeightText === "" && source
+                          ? `留空时采用导入高度 ${source.height} m`
+                          : needsExtrapolation
+                            ? `导入高度 ${source?.height} m ≠ 轮毂高度，将按风切变推算风速`
+                            : "与导入高度一致，直接使用导入风速"}
                       </small>
                     </label>
                     <label>

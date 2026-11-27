@@ -8,6 +8,10 @@
 
 Gemini、Codex、DSH 接手风资源评估前先读 [开发前置条件与交接](docs/WIND_ASSESSMENT_HANDOFF.md)，核对规则、原因与例外。每轮交付一份独立接续文档，格式见 [协作交接文档模板](docs/COLLABORATION.md#交接文档模板)。以下按时间保留历史记录。
 
+## 2026-11-27 轮毂高度输入
+
+- 删除轮毂高度最后一位后保留空输入，分析时仍按导入高度作为默认值。见 [轮毂高度输入交接](docs/HUB_HEIGHT_INPUT_HANDOFF_20261127.md)。
+
 ## 2026-11-27 中尺度经纬度自动识别
 
 - 优先读取 TXT 说明区的完整经纬度，缺少有效坐标对时从带方向字母的文件名提取。网页回填和 Word 采用同一规则。见 [经纬度识别交接](docs/ASSESSMENT_COORDINATES_HANDOFF_20261127.md)。

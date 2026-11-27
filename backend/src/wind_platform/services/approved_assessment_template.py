@@ -4,8 +4,9 @@ import re
 from copy import deepcopy
 from io import BytesIO
 
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Cm, Emu, Pt
 from docx.text.run import Run
 from PIL import Image, ImageOps
 
@@ -24,6 +25,22 @@ SAMPLE_FIELDS = {
     179: "年上网电量",
     180: "不确定因素影响范围",
 }
+
+
+def format_report_picture(shape):
+    shape.height = Emu(round(Cm(14) * shape.height / shape.width))
+    shape.width = Cm(14)
+    properties = shape._inline.graphic.graphicData.pic.spPr
+    for existing in properties.xpath("./a:ln"):
+        properties.remove(existing)
+    line = OxmlElement("a:ln")
+    line.set("w", "6350")
+    fill = OxmlElement("a:solidFill")
+    color = OxmlElement("a:srgbClr")
+    color.set("val", "000000")
+    fill.append(color)
+    line.append(fill)
+    properties.append(line)
 
 
 def is_green(run):
@@ -267,7 +284,7 @@ def remove_pressure_height_note(paragraph):
             remaining -= count
 
 
-def revise_extreme_conclusion(paragraph, speed, wind_class):
+def revise_extreme_conclusion(paragraph, speed, wind_class, *, bind_class=False):
     runs = [run for run in paragraph.runs if run.text]
     green = next((run._r for run in runs if run.text == speed and is_green(run._r)), None)
     if green is None:
@@ -279,20 +296,28 @@ def revise_extreme_conclusion(paragraph, speed, wind_class):
         else "场址风速超过 I 类参考风速，应由设计者按 S 类确定参数。"
     )
     anchor = next(iter(paragraph._p.findall(qn("w:commentRangeEnd"))), None)
-    for template, text in (
+    runs_to_add = [
         (
             black,
             "综合以上方法计算结果，出于安全保守考虑，"
             "推荐风电场区范围内标准空气密度下的 50 年一遇最大风速取 ",
         ),
         (green, speed),
-        (
-            black,
-            EXTREME_CONCLUSION
-            + screening
-            + "最终机型应结合轮毂高度处年平均风速和湍流强度，由厂家复核。",
-        ),
-    ):
+    ]
+    if bind_class:
+        runs_to_add.extend(
+            [
+                (black, EXTREME_CONCLUSION + "对应 "),
+                (green, "【机组参考风速类别】"),
+                (black, "。"),
+            ]
+        )
+        if not wind_class:
+            runs_to_add.append((black, "应由设计者确定 S 类参数。"))
+    else:
+        runs_to_add.append((black, EXTREME_CONCLUSION + screening))
+    runs_to_add.append((black, "最终机型应结合轮毂高度处年平均风速和湍流强度，由厂家复核。"))
+    for template, text in runs_to_add:
         new = Run(deepcopy(template), paragraph)
         new.text = text
         if anchor is None:

@@ -14,7 +14,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Emu, RGBColor
+from docx.shared import Emu, RGBColor
 from docx.text.run import Run
 from PIL import Image, ImageDraw, ImageFont
 
@@ -608,6 +608,7 @@ def build(
     formal_layout=False,
     approved_layout=False,
     reviewed_layout=False,
+    figure_review_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
     wind_shear_exponent=None,
@@ -1036,18 +1037,7 @@ def build(
                 else fit_label,
                 approved_layout=approved_layout,
             )
-            shape.width = Cm(14)
-            border = shape._inline.graphic.graphicData.pic.spPr
-            for existing in border.xpath("./a:ln"):
-                border.remove(existing)
-            line = OxmlElement("a:ln")
-            line.set("w", "6350")
-            fill = OxmlElement("a:solidFill")
-            color = OxmlElement("a:srgbClr")
-            color.set("val", "000000")
-            fill.append(color)
-            line.append(fill)
-            border.append(line)
+            approved_assessment_template.format_report_picture(shape)
         else:
             png = figure(caption, labels, ss, kind, fit_label=fit_label)
         bind_image(
@@ -1064,6 +1054,8 @@ def build(
         shape = shapes["威布尔分布图"]._inline
         replaced_rids.add(shape.graphic.graphicData.pic.blipFill.blip.embed)
         shape.getparent().remove(shape)
+    if figure_review_layout and not fit:
+        approved_assessment_template.format_report_picture(shapes["威布尔分布图"])
     for para in doc.paragraphs:
         if "在此插入" in para.text and "20" in para.text and "玫瑰图" in para.text:
             para.clear()
@@ -1145,10 +1137,12 @@ def build(
             value = str(metadata[key]) if automatic_location else (location or {}).get(label)
             name = f"中尺度{label}"
             fields[name] = value if value is not None else f"【{name}】"
-            reviewed_marks[name] = not automatic_location
+            reviewed_marks[name] = not automatic_location and (
+                not figure_review_layout or value is None
+            )
         if "海拔高度" in fields:
             fields["中尺度点位海拔"] = fields["海拔高度"]
-            reviewed_marks["中尺度点位海拔"] = True
+            reviewed_marks["中尺度点位海拔"] = not figure_review_layout
         metadata_density = period_mean(densities, analysis_start, analysis_end) or density_metadata(
             preamble
         )
@@ -1209,6 +1203,14 @@ def build(
                 "勾选并完成计算时输出本小节": "",
             }
         )
+        if figure_review_layout:
+            wind_class = extreme["wind_speed_class"]
+            fields.update(
+                {
+                    "场址最大风速": f"{extreme['adopted_site']:.2f}",
+                    "机组参考风速类别": f"IEC {wind_class} 类及以上" if wind_class else "S 类",
+                }
+            )
         if short_window:
             for field in ("20年起止年月", "20年平均风速", "代表年份", "相对偏差", "代表年选取说明"):
                 fields.pop(field, None)
@@ -1297,9 +1299,19 @@ def build(
             return
         if approved_layout and "【实际参与比选的方法】" in txt:
             approved_assessment_template.revise_extreme_conclusion(
-                para, "【标准空气密度下最大风速】", extreme["wind_speed_class"]
+                para,
+                "【标准空气密度下最大风速】",
+                extreme["wind_speed_class"],
+                bind_class=figure_review_layout,
             )
             txt = para.text
+        if figure_review_layout and density_adjustment is None and "【分析高度空气密度】" in txt:
+            suffix = "，按等温近似折算至轮毂高度"
+            if suffix in txt:
+                approved_assessment_template.replace_wording(
+                    para._p, txt[txt.index(suffix) :].removesuffix("。"), ""
+                )
+                txt = para.text
         if approved_layout and txt.endswith(approved_assessment_template.PRESSURE_HEIGHT_NOTE):
             approved_assessment_template.remove_pressure_height_note(para)
             txt = para.text

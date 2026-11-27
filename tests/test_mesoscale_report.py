@@ -192,7 +192,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.3.1"
+    assert entry["version"] == "1.3.2"
     assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
@@ -420,6 +420,48 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         ).status_code
         == 422
     )
+
+
+@pytest.mark.usefixtures("sparse_report_fixture")
+def test_figure_review_template_binds_location_density_and_extreme_conclusion(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    raw = (
+        b"Date/Time\tSpeed_125m [m/s]\tDirection_125m [Deg]\n"
+        b"2025-01-01 00:00\t8\t90\n2025-01-01 01:00\t9\t90\n"
+        b"2025-12-31 23:00\t10\t90\n"
+    )
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.2/export",
+        files={"data": ("wind.txt", raw)},
+        data={
+            "density": "1.2",
+            "lat": "22",
+            "lon": "111",
+            "alt": "1111",
+            "extreme": dumps({"pressure_override": 0.45}),
+        },
+    )
+    assert report.status_code == 200, report.text[:500]
+    doc = Document(BytesIO(report.content))
+    site = next(p for p in doc.paragraphs if p.text.startswith("中尺度数据点位坐标为"))
+    assert {r.text for r in site.runs if str(r.font.color.rgb) == "008000"} == {"22", "111", "1111"}
+    density = next(p for p in doc.paragraphs if p.text.startswith("根据中尺度数据相关气象要素"))
+    assert density.text.endswith("125 m高度处空气密度为1.200 kg/m³。")
+    summary = next(p for p in doc.paragraphs if p.text.startswith("（4）场址空气密度下"))
+    assert "45.00 m/s" in summary.text and "44.54 m/s" in summary.text
+    assert "IEC I 类及以上" in summary.text
+    assert "IEC I 类及以上" in next(
+        p.text for p in doc.paragraphs if p.text.startswith("综合以上方法计算结果")
+    )
+    assert any(s._inline.docPr.name == "数据选点和场区范围图" for s in doc.inline_shapes)
+    for shape in doc.inline_shapes:
+        assert shape.width == 5040000
+        pic = shape._inline.graphic.graphicData.pic
+        assert pic.spPr.xpath("./a:ln/@w") == ["6350"]
+        assert pic.spPr.xpath("./a:ln/a:solidFill/a:srgbClr/@val") == ["000000"]
+        part = doc.part.related_parts[pic.blipFill.blip.embed]
+        with Image.open(BytesIO(part.blob)) as image:
+            assert shape.height == round(shape.width * image.height / image.width)
 
 
 @pytest.mark.parametrize("year_count", [1, 2])

@@ -234,8 +234,11 @@ def formal_figure(
         labels = [str(item) if i % 2 == 0 else "" for i, item in enumerate(labels)]
         plot_top = 150 if approved_layout else 184
         draw_cartesian(image, (905, plot_top, WIDTH - 55, height - 118), labels, series, kind)
-        label(draw, (WIDTH - 55, 51), fit_label, anchor="rm")
-        label(draw, (WIDTH - 55, 99), f"A = {fit['c']:.2f} m/s    k = {fit['k']:.2f}", anchor="rm")
+        if fit_label:
+            label(draw, (WIDTH - 55, 51), fit_label, anchor="rm")
+            label(draw, (WIDTH - 55, 99), f"A = {fit['c']:.2f} m/s    k = {fit['k']:.2f}", anchor="rm")
+        else:
+            label(draw, (WIDTH - 55, 86), f"A = {fit['c']:.2f} m/s    k = {fit['k']:.2f}", anchor="rm")
         if not approved_layout:
             label(
                 draw,

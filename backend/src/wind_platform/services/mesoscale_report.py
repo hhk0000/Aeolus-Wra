@@ -1051,14 +1051,16 @@ def build(
         approved_assessment_template.replace_wording(
             summary[0]._tc, "20年平均", f"{window_years}年平均"
         )
+        if window_years <= 10:
+            approved_assessment_template.replace_wording(summary[2]._tc, "10年平均", "/")
     row(
         0,
         12,
         [
             f"{window_years}年平均",
             fmt(avg),
-            "近10年平均" if short_window else "10年平均",
-            fields["10年平均风速"] if window_years >= 10 else "资料不足",
+            "/" if window_years <= 10 else ("近10年平均" if short_window else "10年平均"),
+            fields["10年平均风速"] if window_years > 10 else "/",
         ],
     )
     for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
@@ -1104,7 +1106,9 @@ def build(
                 direction=direction,
                 fit=fit,
                 stats=stats,
-                fit_label="最大似然法"
+                fit_label=None
+                if figure_review_layout and kind == "fit"
+                else "最大似然法"
                 if approved_layout and kind == "fit" and weibull_method == "mle"
                 else fit_label,
                 approved_layout=approved_layout,
@@ -1367,8 +1371,6 @@ def build(
             and (short_window or (figure_review_layout and density_adjustment is not None))
         ):
             para.clear()
-            if window_years == 10:
-                para.add_run("以最近 10 个达标自然年的平均风速为基准。")
             parts = [
                 ("分析期为", "分析期"),
                 ("。采用", "源风速层高度" if figure_review_layout else "分析高度"),
@@ -1376,7 +1378,7 @@ def build(
             if figure_review_layout and density_adjustment is not None:
                 parts.extend(
                     [
-                        (" m 高度资料，风速外推至轮毂高度 ", "分析高度"),
+                        (" m 高度资料，外推至轮毂高度 ", "分析高度"),
                         (" m，时间步长为 ", "时间步长"),
                     ]
                 )
@@ -1387,7 +1389,26 @@ def build(
                 value = para.add_run(fields[field])
                 value.font.color.rgb = RGBColor.from_string("008000")
                 approved_assessment_template.style_inserted_numbers(value)
-            para.add_run(f"。{selection_note}。" if window_years == 10 else "。")
+            para.add_run("。")
+            return
+        if figure_review_layout and "平均风速保留两位小数后乘以设定倍数" in txt:
+            approved_assessment_template.replace_wording(
+                para._p,
+                "平均风速。平均风速保留两位小数后乘以设定倍数，",
+                "平均风速进行计算。",
+            )
+            txt = para.text
+        if figure_review_layout and "分析期平均风速保留两位小数后为" in txt:
+            para.clear()
+            for label, field in (
+                ("根据上述式子计算得出，场址空气密度下的估算风速为", "倍数法场址风速"),
+                ("m/s，折算至标准空气密度后为", "倍数法标准风速"),
+            ):
+                para.add_run(label)
+                value = para.add_run(fields[field])
+                value.font.color.rgb = RGBColor.from_string("008000")
+                approved_assessment_template.style_inserted_numbers(value)
+            para.add_run("m/s。")
             return
         if approved_layout and "【实际参与比选的方法】" in txt:
             approved_assessment_template.revise_extreme_conclusion(
@@ -1398,21 +1419,26 @@ def build(
             )
             txt = para.text
         if figure_review_layout and "【分析高度空气密度】" in txt:
+            para.clear()
             if density_adjustment is None:
-                suffix = "，按等温近似折算至轮毂高度"
-                if suffix in txt:
-                    approved_assessment_template.replace_wording(
-                        para._p, txt[txt.index(suffix) :].removesuffix("。"), ""
-                    )
-                    txt = para.text
+                parts = [
+                    ("中尺度数据", "源风速层高度"),
+                    ("m高度空气密度为", "分析高度空气密度"),
+                ]
             else:
-                approved_assessment_template.replace_wording(
-                    para._p, "【分析高度】", "【源风速层高度】"
-                )
-                approved_assessment_template.replace_wording(
-                    para._p, "按等温近似折算至轮毂高度", "推算至轮毂高度"
-                )
-                txt = para.text
+                parts = [
+                    ("中尺度", "源风速层高度"),
+                    ("m空气密度为", "分析高度空气密度"),
+                    ("kg/m³，推算至", "轮毂高度"),
+                    ("m轮毂高度处的空气密度为", "轮毂高度空气密度"),
+                ]
+            for label, field in parts:
+                para.add_run(label)
+                value = para.add_run(fields[field])
+                value.font.color.rgb = RGBColor.from_string("008000")
+                approved_assessment_template.style_inserted_numbers(value)
+            para.add_run("kg/m³。")
+            return
         if figure_review_layout and "风切变指数为【0.26】" in txt:
             if wind_shear_exponent is None:
                 prefix = "（1）" if txt.startswith("（1）") else ""

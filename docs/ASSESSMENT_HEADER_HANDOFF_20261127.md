@@ -1,5 +1,7 @@
 # 2026-11-27 · Codex · 中尺度 TXT 表头识别
 
+历史记录。全文件搜索已撤回，现行规则见 [前 13 行表头识别交接](ASSESSMENT_HEADER_LIMIT_HANDOFF_20261127.md)。
+
 以 `codex/assessment-updated-template-20261127@2f61048` 为基线，在 `codex/assessment-header-detection-20261127` 修改。交付提交以该分支上包含本文档的提交为准。本轮在本机验证，未推送。远端 SSH 代理拒绝连接，远端状态未核实。内置 Word 仍为 `mesoscale/1.3.4`。可回到基线复现旧行为。
 
 | 事项 | 确认规则 | 原因 | 边界和例子 |

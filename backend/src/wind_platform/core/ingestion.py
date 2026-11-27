@@ -283,63 +283,51 @@ def _detect_position(preamble: str) -> str:
     return "start"
 
 
-def detect_delimiter(line: str) -> str:
-    delimiters = {"tab": "\t", "comma": ",", "semicolon": ";"}
-    delimiter = max(delimiters, key=lambda name: line.count(delimiters[name]))
-    return delimiter if delimiters[delimiter] in line else "space"
+def _detect_delimiter(line: str) -> str:
+    separators = {"tab": "\t", "comma": ",", "semicolon": ";"}
+    delimiter = max(separators, key=lambda name: line.count(separators[name]))
+    return delimiter if separators[delimiter] in line else "space"
 
 
-def find_wind_table(lines: list[str]) -> tuple[int, str, list[str], int, int | None]:
-    """Locate a wind table by its channel header and subsequent timestamp."""
-    first_candidate = None
-    for index, line in enumerate(lines):
-        if not line.strip():
+def _find_wind_header(lines: list[str], limit: int) -> tuple[int, str]:
+    for number, line in enumerate(lines[:limit], start=1):
+        if not re.search(r"date|time|日期|时间|时刻", line, re.I):
             continue
-        delimiter = detect_delimiter(line)
-        try:
-            headers, _ = split_headers(line, delimiter)
-        except CalculationError:
+        delimiter = _detect_delimiter(line)
+        headers, _ = split_headers(line, delimiter)
+        timestamp_column, _ = _timestamp_columns(headers)
+        if not re.search(r"date|time|日期|时间|时刻", headers[timestamp_column], re.I):
             continue
-        if len(headers) < 2:
-            continue
-        if not any(
-            channel["quantity"] == "speed" and channel["statistic"] == "mean"
-            for channel in map(suggest_channel, headers)
-        ):
-            continue
-        timestamp_column, time_column = _timestamp_columns(headers)
-        candidate = (index + 1, delimiter, headers, timestamp_column, time_column)
-        if first_candidate is None:
-            first_candidate = candidate
-        for next_index in range(index + 1, len(lines)):
-            row = lines[next_index]
-            if row.strip():
-                break
-        else:
-            continue
-        cells = split_line(row, delimiter)
-        if len(cells) < len(headers):
-            continue
-        try:
-            token = cells[timestamp_column].strip()
-            if time_column is not None:
-                token += " " + cells[time_column].strip()
-            _read_stamp(token)
-        except (IndexError, ValueError):
-            continue
-        return candidate
-    if first_candidate is not None:
-        return first_candidate  # Let the caller report invalid or missing data at its actual line.
+        for index, header in enumerate(headers):
+            if index == timestamp_column:
+                continue
+            channel = suggest_channel(header)
+            if (
+                channel["quantity"] == "speed"
+                and channel["statistic"] == "mean"
+                and channel["height"] is not None
+                and not channel["ambiguous"]
+            ):
+                return number, delimiter
     raise CalculationError(
-        "未找到测风数据表头。请核对日期时间列及平均风速列名，例如 Date/Time 和 Speed_100m [m/s]。"
+        f"前 {limit} 行未找到测风表头。请核对日期时间列和带高度的平均风速列是否在同一行。"
     )
 
 
-def preview(content: bytes, header_line: int | None = None, delimiter: str | None = None) -> dict:
+def preview(
+    content: bytes,
+    header_line: int | None = None,
+    delimiter: str | None = None,
+    *,
+    wind_header_limit: int | None = None,
+) -> dict:
     text, encoding = decode_text(content)
     lines = text.splitlines()
     if not lines:
         raise CalculationError("空文件。")
+    if header_line is None and wind_header_limit is not None:
+        header_line, detected_delimiter = _find_wind_header(lines, wind_header_limit)
+        delimiter = delimiter or detected_delimiter
     if header_line is None:
         header_line = next(
             (
@@ -354,7 +342,7 @@ def preview(content: bytes, header_line: int | None = None, delimiter: str | Non
         raise CalculationError("表头行超出文件范围。")
     line = lines[header_line - 1]
     if delimiter is None:
-        delimiter = detect_delimiter(line)
+        delimiter = _detect_delimiter(line)
     headers, trailing_blanks = split_headers(line, delimiter)
     timestamp_column, time_column = _timestamp_columns(headers)
     stamps = []

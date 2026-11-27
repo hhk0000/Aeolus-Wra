@@ -27,7 +27,7 @@ from wind_platform.core.calculations import (
     wind_statistics,
 )
 from wind_platform.core.chart_methods import fit_weibull
-from wind_platform.core.ingestion import decode_text, find_wind_table, split_line, suggest_channel
+from wind_platform.core.ingestion import decode_text, preview, split_line
 from wind_platform.services import approved_assessment_template
 from wind_platform.services.assessment_extreme import (
     DEFAULT_MULTIPLIER,
@@ -73,18 +73,20 @@ def parse_wind_observation(text):
 
 
 def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=None):
-    text, _ = decode_text(raw)
-    lines = text.splitlines()
-    header_line, delimiter, headers, ti, time_column = find_wind_table(lines)
-    if time_column is not None:
+    detected = preview(raw, wind_header_limit=13)
+    ti = detected["detected"]["timestamp_column"]
+    if detected["detected"]["time_column"] is not None:
         raise CalculationError("中尺度 TXT 须使用单列日期时间。")
-    suggestions = [dict(index=i, **suggest_channel(label)) for i, label in enumerate(headers)]
+    text, _ = decode_text(raw)
+    header_line = detected["header_line"]
+    delimiter = detected["delimiter"]
+    lines = text.splitlines()
     data_lines = lines[header_line:]
     columns = {}
     for quantity in ("speed",) if speed_only else ("speed", "direction"):
         candidates = [
             channel
-            for channel in suggestions
+            for channel in detected["suggestions"]
             if channel["quantity"] == quantity
             and channel["statistic"] == "mean"
             and channel["height"] is not None
@@ -128,15 +130,15 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
     height = speed["height"]
     vi = speed["index"]
     di = None if speed_only else columns["direction"]["index"]
-    if not re.search(r"\bm\s*/\s*s\b", headers[vi], re.I) or (
-        di is not None and not re.search(r"°|\bdeg\b", headers[di], re.I)
+    if not re.search(r"\bm\s*/\s*s\b", detected["headers"][vi], re.I) or (
+        di is not None and not re.search(r"°|\bdeg\b", detected["headers"][di], re.I)
     ):
         raise CalculationError("平均风速须为 m/s，风向须为度（° 或 Deg）。")
     preamble = "\n".join(lines[: header_line - 1]) if source_details else ""
     density_columns = (
         [
             i
-            for i, label in enumerate(headers)
+            for i, label in enumerate(detected["headers"])
             if re.match(DENSITY_NAME, label.strip(), re.I) and re.search(DENSITY_UNIT, label, re.I)
         ]
         if source_details
@@ -144,7 +146,7 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
     )
     at_layer, untagged = [], []
     for index in density_columns:
-        layer = MEASUREMENT_HEIGHT.search(headers[index])
+        layer = MEASUREMENT_HEIGHT.search(detected["headers"][index])
         if layer and float(layer[1]) == height:
             at_layer.append(index)
         elif not layer:
@@ -157,13 +159,13 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
     if source_details:
         candidates = [
             c
-            for c in suggestions
+            for c in detected["suggestions"]
             if c["quantity"] == "temperature"
             and c["statistic"] == "mean"
             and not c["ambiguous"]
             and re.search(
                 r"(?:°|º|�)\s*[CK]\b|℃|(?:\[|\()\s*[CK]\s*(?:\]|\))|(?<=[_\s])[CK]$",
-                headers[c["index"]],
+                detected["headers"][c["index"]],
                 re.I,
             )
         ]

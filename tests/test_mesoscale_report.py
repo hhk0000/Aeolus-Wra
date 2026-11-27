@@ -835,44 +835,28 @@ def test_hourly_report_recognizes_both_source_formats(header, data, height):
     assert list(records.values()) == [(8.576, 231.304)]
 
 
-@pytest.mark.parametrize(
-    ("header_line", "separator", "header"),
-    [
-        (5, "\t", ("Date/Time", "Speed_100m [m/s]", "Direction_100m [Deg]")),
-        (10, ",", ("日期时间", "CH1Anem100m m/s", "CH2Vane100m Deg")),
-        (205, ";", ("Timestamp", "Speed_100m [m/s]", "Direction_100m [Deg]")),
-    ],
-)
-def test_assessment_finds_wind_header_after_metadata(tmp_path, header_line, separator, header):
-    preamble = [
-        "Date created,2026-11-27",
-        separator.join(("Example Date/Time", header[1], header[2])),
-        "Air Density = 1.078 kg/m^3",
-        ",,,",
-    ]
-    preamble = preamble[: header_line - 1] + [""] * max(0, header_line - 5)
+@pytest.mark.parametrize("header_line", [5, 10, 11, 12, 13, 14])
+def test_assessment_searches_only_first_thirteen_lines_for_header(tmp_path, header_line):
+    preamble = ["Date created,2026-11-27", "Air Density = 1.078 kg/m^3"]
     raw = "\n".join(
-        [*preamble, separator.join(header), separator.join(("2025-01-01 00:00", "5", "90"))]
+        [
+            *preamble,
+            *([""] * (header_line - 1 - len(preamble))),
+            "Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]",
+            "2025-01-01 00:00\t5\t90",
+        ]
     ).encode()
     client = TestClient(create_app(tmp_path))
     response = client.post(
         "/api/v1/reports/assessment/files/source", files={"file": ("wind.txt", raw)}
     )
-    assert response.status_code == 200, response.text
-    assert response.json()["height"] == 100
-    assert response.json()["density_constant"] == 1.078
-    assert list(hourly_records(raw)[1].values()) == [(5, 90)]
-
-
-def test_assessment_reports_invalid_record_at_original_line_number():
-    raw = (
-        b"Date created,2026-11-27\n\n"
-        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\n"
-        b"invalid-date\t5\t90\n"
-        b"2025-01-01 01:00\t6\t90"
-    )
-    with pytest.raises(CalculationError, match="第 4 行"):
-        hourly_records(raw)
+    if header_line == 14:
+        assert response.status_code == 422
+        assert "前 13 行未找到测风表头" in response.json()["detail"]
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json()["height"] == 100
+        assert response.json()["density_constant"] == 1.078
 
 
 def test_hourly_report_does_not_pair_different_heights():

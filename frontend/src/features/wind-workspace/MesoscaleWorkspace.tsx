@@ -326,6 +326,25 @@ export default function MesoscaleWorkspace({
     ? Number(state.meanTemperature)
     : undefined;
   const analysisTemperature = manualTemperature ?? sourceTemperature;
+  // Display the same B.3 conversion as the analysis service; requests still carry source density.
+  const hubDensityPreview =
+    needsDensityAdjustment &&
+    analysisTemperature !== undefined &&
+    analysisTemperature >= -100 &&
+    analysisTemperature <= 100 &&
+    density > 0 &&
+    density < 3
+      ? density *
+        Math.exp(
+          (-0.034 * (hubHeight - source.height)) / (analysisTemperature + 273),
+        )
+      : undefined;
+  const annualDeviations = source?.mean_speed
+    ? (source.annual ?? []).map(
+        (speed) => (speed / source.mean_speed! - 1) * 100,
+      )
+    : [];
+  const maxDeviation = Math.max(0.01, ...annualDeviations.map(Math.abs));
   const needsSourceRefresh =
     !!sourceId &&
     (source?.density_by_year === undefined ||
@@ -699,7 +718,7 @@ export default function MesoscaleWorkspace({
       if (selectedAnalysisYear !== undefined) {
         form.set("analysis_year", String(selectedAnalysisYear));
       }
-      form.set("factor", state.factor);
+      form.set("factor", state.factor || "75");
       form.set("project", project);
       if (state.weibullMethod && state.weibullMethod !== "mle") {
         form.set("weibull_method", state.weibullMethod);
@@ -754,39 +773,93 @@ export default function MesoscaleWorkspace({
     analysisStart !== undefined &&
     analysisEnd !== undefined && (
       <div className="ww-assessment-period">
-        {canSelectYear && (
-          <label className="field">
-            分析年
-            <select
-              aria-label="分析年"
-              disabled={busy}
-              value={state.analysisYear ?? ""}
-              onChange={(event) => {
-                const value = event.target.value;
-                setError("");
-                setResult(undefined);
-                setResultError("");
-                change({
-                  analysisYear: value ? Number(value) : undefined,
-                  meanTemperature: undefined,
-                  runId: undefined,
-                });
-              }}
-            >
-              <option value="">自动推荐（{source.year} 年）</option>
-              {analysisYears.map((year) => (
-                <option key={year} value={year}>
-                  {year} 年
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+        <div className="ww-assessment-period-controls">
+          {canSelectYear && (
+            <label className="field">
+              分析年
+              <select
+                aria-label="分析年"
+                disabled={busy}
+                value={state.analysisYear ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setError("");
+                  setResult(undefined);
+                  setResultError("");
+                  change({
+                    analysisYear: value ? Number(value) : undefined,
+                    meanTemperature: undefined,
+                    runId: undefined,
+                  });
+                }}
+              >
+                <option value="">自动推荐（{source.year} 年）</option>
+                {analysisYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year} 年
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {tab === 1 && source && !automaticLocation && (
+            <label>
+              <input
+                type="checkbox"
+                checked={state.manualLocation}
+                onChange={(event) =>
+                  change({ manualLocation: event.target.checked })
+                }
+              />{" "}
+              手动填写中尺度选点位置
+            </label>
+          )}
+        </div>
         <p className="ww-inline-note" role="status">
           分析时段 {analysisStart}-01-01 00:00 至 {analysisEnd + 1}-01-01
           00:00（不含终点） · {source.height} m ·{" "}
           {source.interval_minutes === 10 ? "10 min" : "1 h"}
         </p>
+        {tab === 1 && (automaticLocation || state.manualLocation) && (
+          <div className="ww-fields ww-fields-three">
+            <label>
+              纬度（°）
+              <input
+                type="number"
+                step="any"
+                min="-90"
+                max="90"
+                readOnly={automaticLocation}
+                value={automaticLocation ? source!.coordinates.lat : state.lat}
+                onChange={(event) => change({ lat: event.target.value })}
+              />
+            </label>
+            <label>
+              经度（°）
+              <input
+                type="number"
+                step="any"
+                min="-180"
+                max="180"
+                readOnly={automaticLocation}
+                value={automaticLocation ? source!.coordinates.lon : state.lon}
+                onChange={(event) => change({ lon: event.target.value })}
+              />
+            </label>
+            <label>
+              海拔（m）
+              <input
+                type="number"
+                step="any"
+                min="-500"
+                max="9000"
+                value={state.alt}
+                placeholder="输入选点海拔"
+                onChange={(event) => change({ alt: event.target.value })}
+              />
+            </label>
+          </div>
+        )}
       </div>
     );
 
@@ -1023,9 +1096,10 @@ export default function MesoscaleWorkspace({
                   <fieldset disabled={busy} className="ww-report-controls">
                     <div className="ww-fields ww-fields-two">
                       <label>
-                        源层空气密度
+                        {needsDensityAdjustment
+                          ? "源风速层空气密度（kg/m³）"
+                          : "轮毂高度处空气密度（kg/m³）"}
                         <input
-                          aria-label="空气密度"
                           aria-describedby="assessment-density-note"
                           required
                           readOnly={sourceDensity !== undefined}
@@ -1051,10 +1125,11 @@ export default function MesoscaleWorkspace({
                           id="assessment-density-note"
                           className="ww-inline-note"
                         >
-                          kg/m³ ·{" "}
                           {sourceDensity !== undefined
                             ? "从源文件自动识别"
-                            : "请填写最高风速层空气密度"}
+                            : needsDensityAdjustment
+                              ? "用于源层统计和轮毂密度换算"
+                              : "请填写轮毂高度处空气密度"}
                         </small>
                       </label>
                       <label>
@@ -1063,10 +1138,7 @@ export default function MesoscaleWorkspace({
                           type="number"
                           min="0.01"
                           step="any"
-                          placeholder={
-                            source ? `默认 ${source.height} m` : undefined
-                          }
-                          value={state.hubHeight ?? ""}
+                          value={state.hubHeight || source?.height || ""}
                           onChange={(event) => {
                             setResult(undefined);
                             change({
@@ -1078,9 +1150,21 @@ export default function MesoscaleWorkspace({
                         <small className="ww-inline-note">
                           {needsDensityAdjustment
                             ? `源风速层为 ${source?.height} m，按式（B3）折算密度。`
-                            : "留空时采用导入数据的最高风速层。"}
+                            : source
+                              ? "默认填入导入数据识别的最高风速层，可手动修改。"
+                              : "导入数据后自动填入识别高度。"}
                         </small>
                       </label>
+                      {needsDensityAdjustment && (
+                        <label>
+                          轮毂高度处空气密度（kg/m³）
+                          <input
+                            readOnly
+                            value={hubDensityPreview?.toFixed(3) ?? ""}
+                            placeholder="填写源层密度和同期气温后自动折算"
+                          />
+                        </label>
+                      )}
                       {needsDensityAdjustment && (
                         <label>
                           风切变指数
@@ -1133,9 +1217,9 @@ export default function MesoscaleWorkspace({
                         </label>
                       )}
                       <label>
-                        综合修正系数（%）
+                        综合折减系数（%）
                         <input
-                          required
+                          placeholder="75"
                           type="number"
                           step="any"
                           min="0.01"
@@ -1145,6 +1229,9 @@ export default function MesoscaleWorkspace({
                             change({ factor: event.target.value })
                           }
                         />
+                        <small className="ww-inline-note">
+                          手动填写，留空按 75% 计算。
+                        </small>
                       </label>
                       <label>
                         平均风速倍数
@@ -1334,72 +1421,6 @@ export default function MesoscaleWorkspace({
                         </button>
                       </p>
                     )}
-                    {source && !automaticLocation && (
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={state.manualLocation}
-                          onChange={(event) =>
-                            change({ manualLocation: event.target.checked })
-                          }
-                        />{" "}
-                        手动填写中尺度选点位置
-                      </label>
-                    )}
-                    {(automaticLocation || state.manualLocation) && (
-                      <div className="ww-fields ww-fields-three">
-                        <label>
-                          纬度（°）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-90"
-                            max="90"
-                            readOnly={automaticLocation}
-                            value={
-                              automaticLocation
-                                ? source!.coordinates.lat
-                                : state.lat
-                            }
-                            onChange={(event) =>
-                              change({ lat: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          经度（°）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-180"
-                            max="180"
-                            readOnly={automaticLocation}
-                            value={
-                              automaticLocation
-                                ? source!.coordinates.lon
-                                : state.lon
-                            }
-                            onChange={(event) =>
-                              change({ lon: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          海拔（m）
-                          <input
-                            type="number"
-                            step="any"
-                            min="-500"
-                            max="9000"
-                            value={state.alt}
-                            placeholder="输入选点海拔"
-                            onChange={(event) =>
-                              change({ alt: event.target.value })
-                            }
-                          />
-                        </label>
-                      </div>
-                    )}
                     <div
                       role="group"
                       aria-label="结果图表选项"
@@ -1464,7 +1485,7 @@ export default function MesoscaleWorkspace({
                         : `推荐分析年为 ${source.year} 年。`}
                     </p>
                     <div className="ww-table-scroll">
-                      <table className="ww-result-table">
+                      <table className="ww-result-table ww-assessment-year-table">
                         <thead>
                           <tr>
                             <th>自然年</th>
@@ -1475,26 +1496,47 @@ export default function MesoscaleWorkspace({
                         <tbody>
                           {source.annual?.map((value, index) => {
                             const year = (source.start_year ?? 0) + index;
+                            const current =
+                              !combinedWindow && year === analysisYear;
+                            const offset = annualDeviations[index] ?? 0;
                             return (
-                              <tr key={year}>
-                                <td>
+                              <tr
+                                key={year}
+                                className={
+                                  current ? "is-analysis-year" : undefined
+                                }
+                              >
+                                <th scope="row">
                                   {year}
-                                  {canSelectYear && year === analysisYear
-                                    ? "（当前分析年）"
-                                    : ""}
+                                  {current ? "（当前分析年）" : ""}
                                   {canSelectYear &&
                                   year === source.year &&
                                   year !== analysisYear
                                     ? "（推荐）"
                                     : ""}
-                                </td>
+                                </th>
                                 <td>{value.toFixed(3)}</td>
                                 <td>
-                                  {(
-                                    (value / (source.mean_speed ?? 1) - 1) *
-                                    100
-                                  ).toFixed(2)}
-                                  %
+                                  <span className="ww-assessment-deviation">
+                                    <span>
+                                      {offset > 0 ? "+" : ""}
+                                      {offset.toFixed(2)}%
+                                    </span>
+                                    <span
+                                      className="ww-year-track"
+                                      aria-hidden="true"
+                                    >
+                                      <span
+                                        className={`ww-year-bar ${offset < 0 ? "lower" : "higher"}${offset !== 0 && Math.abs(offset) <= 2 ? " typical" : ""}`}
+                                      >
+                                        <i
+                                          style={{
+                                            width: `${(100 * Math.abs(offset)) / maxDeviation}%`,
+                                          }}
+                                        />
+                                      </span>
+                                    </span>
+                                  </span>
                                 </td>
                               </tr>
                             );
@@ -1783,7 +1825,7 @@ export default function MesoscaleWorkspace({
           disabled={!templateUrl || !state.runId || busy || !canExport}
           onClick={() => void download()}
         >
-          {busy ? "正在生成报告…" : "生成 Word 半成品"}
+          {busy ? "正在生成报告…" : "导出报告"}
         </button>
         <button
           className="ww-button"

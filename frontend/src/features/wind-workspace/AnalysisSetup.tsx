@@ -116,7 +116,7 @@ export default function AnalysisSetup({
       <div className="ww-section-heading">
         <div>
           <h2>选择需要查阅的图表与表格</h2>
-          <p>在图表中心查看所选成果，也可以在报告预览中导出 Word。</p>
+          <p>在图表中心查看所选成果，也可以在报告导出中导出 Word。</p>
         </div>
         <span className="ww-quiet-tag">
           已选 {state.selectedOutputs.length} / {OUTPUTS.length} 组

@@ -2987,12 +2987,61 @@
   line-height: 1.4;
 }
 
-.ww-assessment-period > .field {
+.ww-assessment-period-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  column-gap: 1rem;
+  row-gap: 0.5rem;
+}
+.ww-assessment-period-controls > .field {
+  flex: 1 1 14rem;
   max-width: 22rem;
+}
+.ww-assessment-period-controls > label:not(.field) {
+  padding-block: 0.55rem;
 }
 .ww-assessment-period > .ww-inline-note {
   margin: 8px 0 0;
   line-height: 1.5;
+}
+.ww-assessment-period > .ww-fields {
+  margin-top: 0.75rem;
+}
+.ww-assessment-year-table {
+  font-family: inherit;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+.ww-assessment-year-table :is(th, td) {
+  padding: 0.65rem 0.8rem;
+}
+.ww-assessment-year-table tbody th {
+  background: transparent;
+  color: inherit;
+  font-weight: 400;
+}
+.ww-assessment-year-table .is-analysis-year > * {
+  background: var(--ww-accent-soft, #e4f0e9);
+  color: inherit;
+  font-weight: 700;
+}
+.ww-assessment-deviation {
+  display: inline-grid;
+  grid-template-columns: 5ch 88px;
+  gap: 0.75rem;
+  align-items: center;
+  white-space: nowrap;
+}
+.ww-assessment-deviation > span:first-child {
+  text-align: right;
+}
+.ww-assessment-deviation .ww-year-track::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  inset-block: -2px;
+  border-left: 1px solid #9aafa3;
 }
 .ww-assessment-plot .ww-rose-figure {
   max-width: 720px;

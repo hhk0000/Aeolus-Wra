@@ -4,6 +4,8 @@
 
 ## 快速查找
 
+**报告验收硬性规定**　导出的每张正文图片必须加外框，包括自动生成图和保留的样例图。每次修改模板或导出逻辑后，都要在实际导出的 Word 中核对。风资源评估报告执行 A07 的图片规格。
+
 | 编号 | 查什么 | 去哪里改 |
 | --- | --- | --- |
 | A01 | TXT 表头、时间列、风速和风向高度 | [通用资料识别](../backend/src/wind_platform/core/ingestion.py) · [评估数据读取](../backend/src/wind_platform/services/mesoscale_report.py) |

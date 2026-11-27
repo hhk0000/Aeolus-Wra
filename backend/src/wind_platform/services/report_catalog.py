@@ -23,6 +23,14 @@ RENDERERS = {
         reviewed_layout=True,
         figure_review_layout=True,
     ),
+    "mesoscale-conclusion-review": partial(
+        mesoscale_report.build,
+        formal_layout=True,
+        approved_layout=True,
+        reviewed_layout=True,
+        figure_review_layout=True,
+        conclusion_layout=True,
+    ),
 }
 
 

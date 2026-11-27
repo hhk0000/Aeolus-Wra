@@ -192,7 +192,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.3.2"
+    assert entry["version"] == "1.3.3"
     assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
@@ -445,8 +445,7 @@ def test_figure_review_template_binds_location_density_and_extreme_conclusion(tm
     doc = Document(BytesIO(report.content))
     site = next(p for p in doc.paragraphs if p.text.startswith("中尺度数据点位坐标为"))
     assert {r.text for r in site.runs if str(r.font.color.rgb) == "008000"} == {"22", "111", "1111"}
-    density = next(p for p in doc.paragraphs if p.text.startswith("根据中尺度数据相关气象要素"))
-    assert density.text.endswith("125 m高度处空气密度为1.200 kg/m³。")
+    assert any(p.text == "中尺度数据125m高度空气密度为1.200kg/m³。" for p in doc.paragraphs)
     summary = next(p for p in doc.paragraphs if p.text.startswith("（4）场址空气密度下"))
     assert "45.00 m/s" in summary.text and "44.54 m/s" in summary.text
     assert "IEC I 类及以上" in summary.text
@@ -478,8 +477,8 @@ def test_figure_review_template_binds_location_density_and_extreme_conclusion(tm
     assert report.status_code == 200, report.text[:500]
     doc = Document(BytesIO(report.content))
     text = "\n".join(p.text for p in doc.paragraphs)
-    assert "采用125 m 高度资料，风速外推至轮毂高度 138 m" in text
-    assert "中尺度数据125 m高度处空气密度为1.200" in text
+    assert "采用125 m 高度资料，外推至轮毂高度 138 m" in text
+    assert "中尺度125m空气密度为1.200" in text
     assert "内138m 高度的平均风速" in text
     assert "中尺度数据138m 高度代表年年平均风速为9.29" in text
     assert "【0.26】" not in text
@@ -491,13 +490,36 @@ def test_figure_review_template_binds_location_density_and_extreme_conclusion(tm
         )
         == 2
     )
+
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.3/export",
+        files={"data": ("wind.txt", raw.replace(b"9\t90", b"9\t0").replace(b"10\t90", b"10\t180"))},
+        data={
+            "density": "1.2",
+            "hub_height_m": "138",
+            "wind_shear_exponent": "0.32",
+            "mean_temperature_c": "15",
+            "extreme": dumps({"pressure_override": 0.45}),
+        },
+    )
+    assert report.status_code == 200, report.text[:500]
+    doc = Document(BytesIO(report.content))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "整层风切变指数为0.32" in text
+    assert "（2）138m高度处空气密度为1.198kg/m³" in text
+    assert "主风向为N、E，所列风向频率合计为66.67%" in text
+    energy_share = 100 * (10**3 + 9**3) / (8**3 + 9**3 + 10**3)
+    assert f"主风能方向为S、N，所列方向的风能频率合计为{energy_share:.2f}%" in text
+    assert "（5）风电场138m高度处按当地空气密度估算" in text
+    assert "IEC I 类及以上" in text
+    assert "【结论主风" not in text
     assert (
         sum(
             run.text == "\u00a0" * 6 and str(run.font.highlight_color) == "RED (6)"
             for para in doc.paragraphs
             for run in para.runs
         )
-        == 2
+        == 1
     )
 
 
@@ -563,8 +585,8 @@ def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
     assert [c.text for c in doc.tables[0].rows[-1].cells] == [
         f"{year_count}年平均",
         f"{expected_mean:.2f}",
-        "近10年平均",
-        "资料不足",
+        "/",
+        "/",
     ]
 
 
@@ -705,7 +727,7 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     )
     assert [[c.text for c in row.cells] for row in short_doc.tables[0].rows[1:]] == [
         ["2023", "5.00", "/", "/"],
-        ["1年平均", "5.00", "10年平均", "资料不足"],
+        ["1年平均", "5.00", "/", "/"],
     ]
     assert any(
         f"50 年一遇最大风速取 {extreme['adopted']:.2f} m/s" in paragraph for paragraph in paragraphs

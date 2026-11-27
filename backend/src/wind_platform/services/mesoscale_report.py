@@ -663,6 +663,7 @@ def build(
     approved_layout=False,
     reviewed_layout=False,
     figure_review_layout=False,
+    conclusion_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
     wind_shear_exponent=None,
@@ -1241,6 +1242,15 @@ def build(
         reviewed_marks["风切变指数"] = False
         if wind_shear_exponent is not None:
             fields["风切变指数"] = f"{wind_shear_exponent:g}"
+    if conclusion_layout:
+        for name, values in (("主风向", direction), ("主风能方向", energy)):
+            ranked = sorted(
+                (i for i, value in enumerate(values) if value > 0),
+                key=lambda i: -values[i],
+            )[:2]
+            fields[f"结论{name}"] = "、".join(COMPASS[i] for i in ranked)
+            frequency_field = "结论主风向频率" if name == "主风向" else "结论主风能频率"
+            fields[frequency_field] = fmt(sum(values[i] for i in ranked))
     fields["换图"] = ""
     grade = power_grade["grade"]
     grade_needs_input = not grade and power_grade.get("manual_review", False)
@@ -1351,6 +1361,23 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if conclusion_layout and "结论主风" in txt:
+            direction_field = "结论主风向" if "【结论主风向】" in txt else "结论主风能方向"
+            if not fields[direction_field]:
+                label = "有效风向频率" if direction_field == "结论主风向" else "有效风能方向频率"
+                approved_assessment_template.replace_wording(
+                    para._p, txt, f"{txt[0]} {label}资料不足。"
+                )
+                return
+        if (
+            conclusion_layout
+            and txt.startswith("（1）中尺度数据的整层风切变指数为")
+            and wind_shear_exponent is None
+        ):
+            approved_assessment_template.replace_wording(
+                para._p, txt, "（1）本次采用与轮毂同高的风速资料。"
+            )
+            return
         if reviewed_layout and "【20年统计起止年份】" in txt:
             approved_assessment_template.adjust_reviewed_year_wording(
                 para,

@@ -636,6 +636,7 @@ def build(
     analysis_start = start if combined else year
     analysis_end = end if combined else year
     hub_height = float(height) if hub_height_m is None else hub_height_m
+    source_height_str = height
     source_density = rho
     density_adjustment = None
     speed_factor = 1.0
@@ -657,32 +658,36 @@ def build(
         if not 0 < rho < 3:
             raise CalculationError("折算后的空气密度超出有效范围，请检查高度、温度和源密度。")
         density_adjustment = {
-            "source_height_m": float(height),
+            "source_height_m": float(source_height_str),
             "hub_height_m": hub_height,
             "source_density": source_density,
             "hub_density": rho,
             "mean_temperature_c": temperature,
             "temperature_source": "file" if mean_temperature_c is None else "manual",
         }
+        v = v * speed_factor
+        annual = [val * speed_factor for val in annual]
+        avg = avg * speed_factor
+        height = f"{hub_height:g}"
     mask = (years >= analysis_start) & (years <= analysis_end)
     a, b = v[mask], d[mask]
-    stats = wind_statistics(a, source_density, interval_minutes)
-    power_grade = classify_power_density(float(height), stats["power_density"])
+    stats = wind_statistics(a, rho, interval_minutes)
+    power_grade = classify_power_density(hub_height, stats["power_density"])
     thunderstorm = None
     if thunderstorm_options is not None:
         storm_year = thunderstorm_options.year if combined else year
         if storm_year is None:
             raise CalculationError("合并多年分析时，请选择五日雷暴法使用的完整自然年。")
-        storm_height, storm_records = height, records
+        storm_height, storm_records = source_height_str, records
         storm_interval = interval_minutes
         if thunderstorm_raw is not None:
             storm_height, storm_records, _, _, _ = _read_hourly(thunderstorm_raw, speed_only=True)
             storm_interval = record_interval(storm_records)
         if storm_interval not in (10, 60):
             raise CalculationError("五日雷暴法仅支持 10 分钟或逐小时风速资料。")
-        if storm_height != height:
+        if storm_height != source_height_str:
             raise CalculationError(
-                f"五日雷暴法资料的最高有效风速层须与分析高度 {float(height):g} m 一致。"
+                f"五日雷暴法资料的最高有效风速层须与源风速层 {float(source_height_str):g} m 一致。"
             )
         thunderstorm = five_day_thunderstorm(
             storm_records,
@@ -693,15 +698,15 @@ def build(
             speed_factor=speed_factor,
             interval_minutes=storm_interval,
         )
-    hub_mean_speed = stats["mean_speed"] * speed_factor
+    hub_mean_speed = stats["mean_speed"]
     if not math.isfinite(hub_mean_speed) or hub_mean_speed <= 0:
         raise CalculationError("轮毂平均风速无效，请检查高度和风切变指数。")
     extreme = extreme_wind(hub_mean_speed, rho, extreme_multiplier, pressure_station, thunderstorm)
     if density_adjustment is not None:
         extreme["wind_shear"] = {
-            "source_height_m": float(height),
+            "source_height_m": float(source_height_str),
             "hub_height_m": hub_height,
-            "source_mean_speed": stats["mean_speed"],
+            "source_mean_speed": stats["mean_speed"] / speed_factor,
             "exponent": wind_shear_exponent,
         }
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
@@ -711,7 +716,7 @@ def build(
         for x in choices:
             sub = a[(np.array(keys) == x) & np.isfinite(a)]
             result.append(
-                (sub.mean(), (0.5 * source_density * sub**3).mean())
+                (sub.mean(), (0.5 * rho * sub**3).mean())
                 if len(sub)
                 else (np.nan, np.nan)
             )
@@ -1306,11 +1311,29 @@ def build(
                 bind_class=figure_review_layout,
             )
             txt = para.text
-        if figure_review_layout and density_adjustment is None and "【分析高度空气密度】" in txt:
-            suffix = "，按等温近似折算至轮毂高度"
-            if suffix in txt:
+        if figure_review_layout and "【分析高度空气密度】" in txt:
+            if density_adjustment is None:
+                suffix = "，按等温近似折算至轮毂高度"
+                if suffix in txt:
+                    approved_assessment_template.replace_wording(
+                        para._p, txt[txt.index(suffix) :].removesuffix("。"), ""
+                    )
+                    txt = para.text
+            else:
+                # 1.5.2 source air density line keeps source_height_str before hub_height
                 approved_assessment_template.replace_wording(
-                    para._p, txt[txt.index(suffix) :].removesuffix("。"), ""
+                    para._p, "中尺度数据【分析高度】", f"中尺度数据{source_height_str}"
+                )
+                txt = para.text
+        if wind_shear_exponent is not None and "风切变指数为【" in txt:
+            if "本阶段轮毂高度暂定为" in txt:
+                approved_assessment_template.replace_wording(
+                    para._p, "【0.26】", f"{wind_shear_exponent:g}"
+                )
+                txt = para.text
+            elif txt.startswith("（1）风切变指数为"):
+                approved_assessment_template.replace_wording(
+                    para._p, "【0.26】", f"{wind_shear_exponent:g}"
                 )
                 txt = para.text
         if approved_layout and txt.endswith(approved_assessment_template.PRESSURE_HEIGHT_NOTE):

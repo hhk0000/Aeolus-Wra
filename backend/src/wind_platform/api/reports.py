@@ -88,11 +88,15 @@ def report_template_source(key: str, version: str):
     )
 
 
-def assessment_file(local, file_id, kind):
+def assessment_file_record(local, file_id, kind):
     record = local.get("assessment-files", file_id)
     if record["kind"] != kind:
         raise CalculationError("上传文件用途不匹配。")
-    return local.read_original(record["sha256"])
+    return record
+
+
+def assessment_file(local, file_id, kind):
+    return local.read_original(assessment_file_record(local, file_id, kind)["sha256"])
 
 
 @router.post("/reports/assessment/files/{kind}")
@@ -109,7 +113,9 @@ async def upload_assessment_file(kind: str, request: Request):
         raw = await file.read()
         detail = {}
         if kind == "source":
-            detail = await run_in_threadpool(mesoscale_report.assessment_source, raw)
+            detail = await run_in_threadpool(
+                mesoscale_report.assessment_source, raw, source_name=file.filename or ""
+            )
         elif kind == "thunderstorm":
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw, True)
             if detail["interval_minutes"] != 10:
@@ -145,11 +151,14 @@ def get_assessment_source(file_id: str, request: Request):
         "interval_minutes",
         "missing_speed_count",
         "year_coverage",
+        "coordinates_source",
     } <= record.keys():
         return record
     return {
         **record,
-        **mesoscale_report.assessment_source(local.read_original(record["sha256"])),
+        **mesoscale_report.assessment_source(
+            local.read_original(record["sha256"]), source_name=record.get("name", "")
+        ),
     }
 
 
@@ -302,9 +311,12 @@ async def export_registered(key: str, version: str, request: Request):
         source_id = form.get("source_id")
         local = request.app.state.wind_store
         if isinstance(source_id, str) and source_id and key == "mesoscale":
-            raw = assessment_file(local, source_id, "source")
+            source = assessment_file_record(local, source_id, "source")
+            raw = local.read_original(source["sha256"])
+            source_name = source.get("name", "")
         elif isinstance(upload, UploadFile) and upload.size is not None and upload.size <= 64 * MIB:
             raw = await upload.read()
+            source_name = upload.filename or ""
         else:
             raise CalculationError("请选择不超过64 MB的中尺度TXT。")
         try:
@@ -378,6 +390,7 @@ async def export_registered(key: str, version: str, request: Request):
             factor,
             energy_bytes,
             location,
+            source_name=source_name,
             analysis_year=analysis_year,
             weibull_method=str(form.get("weibull_method", "mle")),
             hub_height_m=heights.hub_height_m,

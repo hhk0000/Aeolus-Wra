@@ -16,7 +16,11 @@ from wind_platform.main import create_app
 from wind_platform.services import mesoscale_report, mesoscale_word_charts
 from wind_platform.services.assessment_extreme import reference_wind_class
 from wind_platform.services.assessment_power_grade import classify_power_density
-from wind_platform.services.mesoscale_report import assessment_source, hourly_records
+from wind_platform.services.mesoscale_report import (
+    assessment_source,
+    hourly_records,
+    source_coordinates,
+)
 from wind_platform.services.pressure_location import match_pressure
 from wind_platform.services.report_catalog import RENDERERS, release
 
@@ -973,6 +977,61 @@ def test_assessment_uses_explicit_density_metadata_but_not_pressure_and_temperat
     assert source["density_constant"] is None
     assert assessment_source(b"Air Density = 1.078 kg/m^3\n" + raw)["density_constant"] == 1.078
     assert assessment_source("空气密度（kg/m³）：1.08\n".encode() + raw)["density_constant"] == 1.08
+
+
+@pytest.mark.parametrize(
+    ("preamble", "filename", "coordinates", "origin"),
+    [
+        (
+            "Latitude: 31.75\nLongitude：93.00",
+            "3_E106.50_N27.75_T20261019105602.txt",
+            {"lat": 31.75, "lon": 93.0},
+            "metadata",
+        ),
+        (
+            "Latitude = N 27.75\nLongitude = 106.50° W",
+            "",
+            {"lat": 27.75, "lon": -106.5},
+            "metadata",
+        ),
+        ("Latitude: 90.1", "3_S27.75_W106.50.txt", {"lat": -27.75, "lon": -106.5}, "filename"),
+        ("Latitude: 31", "ERA5_T20261019105602_100m.txt", {}, None),
+        ("", "E181_N27.75.txt", {}, None),
+        ("", "E106.50_E27.75.txt", {}, None),
+    ],
+)
+def test_assessment_coordinate_source_priority_and_bounds(preamble, filename, coordinates, origin):
+    assert source_coordinates(preamble, filename) == (coordinates, origin)
+
+
+@pytest.mark.usefixtures("sparse_report_fixture")
+def test_assessment_coordinates_flow_through_upload_existing_source_and_word(tmp_path):
+    app = create_app(tmp_path)
+    client = TestClient(app)
+    path = "/api/v1/reports/assessment/files/source"
+    filename = "3_E106.50_N27.75_T20261019105602.txt"
+    raw = (
+        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\n"
+        b"2025-01-01 00:00\t4\t90\n2025-01-01 01:00\t6\t150\n2025-12-31 23:00\t5\t90"
+    )
+    upload = client.post(path, files={"file": (filename, raw)})
+    assert upload.status_code == 200, upload.text
+    store = app.state.wind_store
+    older = store.put(
+        "assessment-files", {"name": filename, "kind": "source", "sha256": store.original(raw)}
+    )
+    for source in (upload.json(), client.get(path + "/" + older["id"]).json()):
+        assert source["coordinates"] == {"lat": 27.75, "lon": 106.5}
+        assert source["coordinates_source"] == "filename"
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.4/export",
+        data={"source_id": older["id"], "density": "1.2", "lon": "106.55"},
+    )
+    assert report.status_code == 200, report.text[:400]
+    assert any(
+        "中尺度数据点位坐标为27.75、106.55" in paragraph.text
+        for paragraph in Document(BytesIO(report.content)).paragraphs
+    )
 
 
 def test_assessment_source_lookup_recognizes_density_in_older_upload(tmp_path):

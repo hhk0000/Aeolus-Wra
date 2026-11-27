@@ -379,14 +379,15 @@ def assessment_power_grade(
     }
 
 
-def source_coordinates(preamble):
+def source_coordinates(preamble, filename=""):
     coordinates = {}
     for label, key, positive, negative in (
         ("Latitude", "lat", "N", "S"),
         ("Longitude", "lon", "E", "W"),
     ):
         match = re.search(
-            rf"^\s*{label}\s*=\s*([{positive}{negative}])?\s*([-+]?\d+(?:\.\d+)?)\s*$",
+            rf"^[ \t]*{label}[ \t]*[:=：][ \t]*([{positive}{negative}])?[ \t]*"
+            rf"([-+]?\d+(?:\.\d+)?)[ \t]*°?[ \t]*([{positive}{negative}])?[ \t]*$",
             preamble,
             re.I | re.M,
         )
@@ -394,22 +395,44 @@ def source_coordinates(preamble):
             value = float(match[2])
             limit = 90 if key == "lat" else 180
             if abs(value) <= limit:
-                hemisphere = (match[1] or "").upper()
+                hemisphere = (match[1] or match[3] or "").upper()
                 coordinates[key] = (
                     (-abs(value) if hemisphere == negative else abs(value)) if hemisphere else value
                 )
-    return coordinates
+    if len(coordinates) == 2:
+        return coordinates, "metadata"
+
+    basename = re.split(r"[/\\]", filename)[-1]
+    matches = re.findall(
+        r"(?<![A-Za-z0-9])([NSEW])(\d+(?:\.\d+)?)[_ -]+"
+        r"([NSEW])(\d+(?:\.\d+)?)(?![A-Za-z0-9]|\.\d)",
+        basename,
+        re.I,
+    )
+    if len(matches) == 1:
+        first, a, second, b = matches[0]
+        coordinates = {}
+        for hemisphere, token in ((first.upper(), a), (second.upper(), b)):
+            key, limit = ("lat", 90) if hemisphere in "NS" else ("lon", 180)
+            value = float(token)
+            if value <= limit:
+                coordinates[key] = -value if hemisphere in "SW" else value
+        if len(coordinates) == 2:
+            return coordinates, "filename"
+    return {}, None
 
 
-def assessment_source(raw, speed_only=False):
+def assessment_source(raw, speed_only=False, *, source_name=""):
     height, records, preamble, densities, temperatures = _read_hourly(
         raw, source_details=not speed_only, speed_only=speed_only
     )
+    coordinates, coordinates_source = source_coordinates(preamble, source_name)
     source = {
         "height": float(height),
         "first": min(records).isoformat(),
         "last": max(records).isoformat(),
-        "coordinates": source_coordinates(preamble),
+        "coordinates": coordinates,
+        "coordinates_source": coordinates_source,
         "density_by_year": {str(y): total / count for y, (total, count) in densities.items()},
         "density_constant": density_metadata(preamble),
         "temperature_by_year": {
@@ -690,6 +713,7 @@ def build(
     location=None,
     analysis_year=None,
     *,
+    source_name="",
     extreme_multiplier=DEFAULT_MULTIPLIER,
     pressure_station=None,
     weibull_method="mle",
@@ -1243,10 +1267,12 @@ def build(
     reviewed_marks = {}
     review_required = not short_window and datetime.now().year - recommended_year >= 5
     if reviewed_layout:
-        metadata = source_coordinates(preamble)
+        metadata, _ = source_coordinates(preamble, source_name)
         automatic_location = {"lat", "lon"} <= metadata.keys()
         for key, label in (("lat", "纬度"), ("lon", "经度")):
-            value = str(metadata[key]) if automatic_location else (location or {}).get(label)
+            value = (location or {}).get(label)
+            if value is None and automatic_location:
+                value = str(metadata[key])
             name = f"中尺度{label}"
             fields[name] = value if value is not None else f"【{name}】"
             reviewed_marks[name] = not automatic_location and (

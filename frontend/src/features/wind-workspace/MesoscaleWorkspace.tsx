@@ -11,6 +11,7 @@ type Source = {
   first: string;
   last: string;
   coordinates: { lat?: number; lon?: number };
+  coordinates_source?: "metadata" | "filename" | null;
   coverage_error?: string | null;
   start_year?: number;
   end_year?: number;
@@ -422,12 +423,13 @@ export default function MesoscaleWorkspace({
         ? String(source.coordinates.lon)
         : "";
 
+  const needsAnalysisMetadata =
+    source?.density_by_year === undefined ||
+    source.temperature_by_year === undefined ||
+    source.window_years === undefined ||
+    source.interval_minutes === undefined;
   const needsSourceRefresh =
-    !!sourceId &&
-    (source?.density_by_year === undefined ||
-      source.temperature_by_year === undefined ||
-      source.window_years === undefined ||
-      source.interval_minutes === undefined);
+    needsAnalysisMetadata || source?.coordinates_source === undefined;
 
   useEffect(() => {
     try {
@@ -490,7 +492,11 @@ export default function MesoscaleWorkspace({
         if (controller.signal.aborted) return;
         setState((current) =>
           current.source?.id === sourceId
-            ? { ...current, source: fresh, runId: undefined }
+            ? {
+                ...current,
+                source: fresh,
+                runId: needsAnalysisMetadata ? undefined : current.runId,
+              }
             : current,
         );
       })
@@ -498,7 +504,7 @@ export default function MesoscaleWorkspace({
         if (!controller.signal.aborted) setError(cause.message);
       });
     return () => controller.abort();
-  }, [sourceId, needsSourceRefresh]);
+  }, [sourceId, needsSourceRefresh, needsAnalysisMetadata]);
 
   useEffect(() => {
     if (page !== 2 || !state.runId) return;

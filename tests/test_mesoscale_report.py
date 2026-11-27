@@ -11,9 +11,18 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
+from wind_platform.services.assessment_extreme import reference_wind_class
 from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 from wind_platform.services.pressure_location import match_pressure
+
+
+@pytest.mark.parametrize(
+    ("speed", "expected"),
+    [(37.5, "III"), (37.50001, "II"), (42.5, "II"), (42.50001, "I"), (50, "I"), (50.00001, None)],
+)
+def test_reference_wind_class_boundaries(speed, expected):
+    assert reference_wind_class(speed) == expected
 
 
 @pytest.mark.parametrize(
@@ -96,14 +105,14 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.3.0"
+    assert entry["version"] == "1.3.1"
     assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
     assert doc.tables[1].rows[-1].cells[2].text == "84.00"
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     formal = client.post(
-        f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/export",
+        f"/api/v1/reports/templates/{entry['id']}/1.3.0/export",
         files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
         data={
             "density": "1.2",
@@ -120,9 +129,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         table for table in formal_doc.tables if table.rows[0].cells[0].text == "序号"
     )
     original = Document(
-        BytesIO(
-            client.get(f"/api/v1/reports/templates/{entry['id']}/{entry['version']}/source").content
-        )
+        BytesIO(client.get(f"/api/v1/reports/templates/{entry['id']}/1.3.0/source").content)
     )
     assert [[cell.text for cell in row.cells] for row in turbine_table.rows] == [
         [cell.text for cell in row.cells] for row in original.tables[14].rows
@@ -159,7 +166,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert "采用空气密度 1.200 kg/m³" in approved_text
     assert "风压法沿用风压参考值的原高度基准" not in approved_text
     assert "50 年一遇最大风速取 26.83 m/s" in approved_text
-    assert "IEC III 类及以上的风电机组，最终结果以厂家复核为准" in approved_text
+    assert "场址风速对应 IEC III 类及以上的机组" in approved_text
     for shape in formal_doc.inline_shapes:
         assert shape.width == 5040000
         picture = shape._inline.graphic.graphicData.pic

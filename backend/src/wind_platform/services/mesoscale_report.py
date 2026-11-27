@@ -9,7 +9,7 @@ from itertools import pairwise
 
 import numpy as np
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Emu, RGBColor
@@ -275,10 +275,7 @@ def period_mean(buckets, start, end):
     return sum(total for total, _ in totals) / count if count else None
 
 
-def assessment_source(raw, speed_only=False):
-    height, records, preamble, densities, temperatures = _read_hourly(
-        raw, source_details=not speed_only, speed_only=speed_only
-    )
+def source_coordinates(preamble):
     coordinates = {}
     for label, key, positive, negative in (
         ("Latitude", "lat", "N", "S"),
@@ -291,12 +288,24 @@ def assessment_source(raw, speed_only=False):
         )
         if match:
             value = float(match[2])
-            coordinates[key] = -abs(value) if (match[1] or "").upper() == negative else value
+            limit = 90 if key == "lat" else 180
+            if abs(value) <= limit:
+                hemisphere = (match[1] or "").upper()
+                coordinates[key] = (
+                    (-abs(value) if hemisphere == negative else abs(value)) if hemisphere else value
+                )
+    return coordinates
+
+
+def assessment_source(raw, speed_only=False):
+    height, records, preamble, densities, temperatures = _read_hourly(
+        raw, source_details=not speed_only, speed_only=speed_only
+    )
     source = {
         "height": float(height),
         "first": min(records).isoformat(),
         "last": max(records).isoformat(),
-        "coordinates": coordinates,
+        "coordinates": source_coordinates(preamble),
         "density_by_year": {str(y): total / count for y, (total, count) in densities.items()},
         "density_constant": density_metadata(preamble),
         "temperature_by_year": {
@@ -581,6 +590,7 @@ def build(
     weibull_method="mle",
     formal_layout=False,
     approved_layout=False,
+    reviewed_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
     thunderstorm_options=None,
@@ -589,7 +599,9 @@ def build(
     if weibull_method not in WEIBULL_METHOD_LABELS:
         raise CalculationError("请选择有效的威布尔拟合算法。")
     needs_temperature = hub_height_m is not None and mean_temperature_c is None
-    source_height, records, _, _, temperatures = _read_hourly(raw, source_details=needs_temperature)
+    source_height, records, preamble, densities, temperatures = _read_hourly(
+        raw, source_details=needs_temperature or reviewed_layout
+    )
     height, times, v, d, years, start, annual, avg, recommended_year, interval_minutes = (
         select_year(source_height, records)
     )
@@ -1088,6 +1100,37 @@ def build(
                         approved_assessment_template.style_inserted_numbers(run)
     fields["上传表，现有数据为版式示例"] = ""
     fields.update(location or {})
+    reviewed_marks = {}
+    review_required = not short_window and datetime.now().year - recommended_year >= 5
+    if reviewed_layout:
+        metadata = source_coordinates(preamble)
+        automatic_location = {"lat", "lon"} <= metadata.keys()
+        for key, label in (("lat", "纬度"), ("lon", "经度")):
+            value = str(metadata[key]) if automatic_location else (location or {}).get(label)
+            name = f"中尺度{label}"
+            fields[name] = value if value is not None else f"【{name}】"
+            reviewed_marks[name] = not automatic_location
+        if "海拔高度" in fields:
+            fields["中尺度点位海拔"] = fields["海拔高度"]
+            reviewed_marks["中尺度点位海拔"] = True
+        metadata_density = period_mean(densities, analysis_start, analysis_end) or density_metadata(
+            preamble
+        )
+        fields.update(
+            {
+                "20年统计起止年份": f"{start}—{end}年",
+                "10年统计起止年份": f"{end - 9}—{end}年",
+                "偏差最小年份": str(recommended_year),
+                "分析高度空气密度": f"{source_density:.3f}",
+                "轮毂高度": f"{hub_height:g}",
+            }
+        )
+        reviewed_marks["分析高度空气密度"] = metadata_density is None or not math.isclose(
+            metadata_density, source_density
+        )
+        reviewed_marks["轮毂高度"] = hub_height_m is not None
+        if not short_window:
+            reviewed_marks["代表年份"] = analysis_year is not None or review_required
     fields["换图"] = ""
     grade = power_grade["grade"]
     fields["风功率密度等级及评价待校审"] = f"{grade} 级" if grade else "待复核"
@@ -1149,9 +1192,13 @@ def build(
                     "五日雷暴法标准风速": f"{extreme['thunderstorm']['standard_speed']:.2f}",
                 }
             )
-        approved_assessment_template.restore_sample_fields(doc.paragraphs, fields)
+        approved_assessment_template.restore_sample_fields(
+            doc.paragraphs, fields, reviewed_layout=reviewed_layout
+        )
         for section in doc.sections:
-            approved_assessment_template.restore_sample_fields(section.header.paragraphs, fields)
+            approved_assessment_template.restore_sample_fields(
+                section.header.paragraphs, fields, reviewed_layout=reviewed_layout
+            )
 
     paragraphs = doc.paragraphs
     for para in paragraphs:
@@ -1183,6 +1230,15 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if reviewed_layout and "【20年统计起止年份】" in txt:
+            approved_assessment_template.adjust_reviewed_year_wording(
+                para,
+                year == recommended_year,
+                review_required,
+                analysis_year is None and review_required,
+                deviation <= 0.02 + 1e-12,
+            )
+            txt = para.text
         if combined and "区间累计时数为" in txt:
             approved_assessment_template.replace_wording(
                 para._p, "区间累计时数为", "区间年均有效时数为"
@@ -1203,7 +1259,7 @@ def build(
             return
         if approved_layout and "【实际参与比选的方法】" in txt:
             approved_assessment_template.revise_extreme_conclusion(
-                para, "【标准空气密度下最大风速】"
+                para, "【标准空气密度下最大风速】", extreme["wind_speed_class"]
             )
             txt = para.text
         if approved_layout and txt.endswith(approved_assessment_template.PRESSURE_HEIGHT_NOTE):
@@ -1286,9 +1342,13 @@ def build(
             right = next(
                 i for i in range(left, len(runs)) if offsets[i] < m.end() <= offsets[i + 1]
             )
-            if approved_layout and any(
-                run.text and not approved_assessment_template.is_green(run._r)
-                for run in runs[left : right + 1]
+            if (
+                approved_layout
+                and m[1] not in reviewed_marks
+                and any(
+                    run.text and not approved_assessment_template.is_green(run._r)
+                    for run in runs[left : right + 1]
+                )
             ):
                 continue
             prefix = runs[left].text[: m.start() - offsets[left]]
@@ -1312,11 +1372,14 @@ def build(
                 bound.text = prefix + value + suffix
             bound.font.color.rgb = RGBColor.from_string("008000")
             bound.font.highlight_color = None
+            if reviewed_layout and reviewed_marks.get(m[1]):
+                bound.font.color.rgb = RGBColor.from_string("000000")
+                bound.font.highlight_color = WD_COLOR_INDEX.YELLOW
             if approved_layout and m[0] == "【风功率密度等级】":
                 bound.font.bold = False
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
-            if approved_layout:
+            if approved_layout and not reviewed_marks.get(m[1]):
                 approved_assessment_template.style_inserted_numbers(
                     bound, density_units=m[0] == "【空气密度说明】"
                 )

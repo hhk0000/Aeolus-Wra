@@ -12,6 +12,21 @@ from wind_platform.core.ingestion import decode_text, split_line
 
 STANDARD_DENSITY = 1.225
 DEFAULT_MULTIPLIER = 5.0
+WIND_CLASS_REFERENCE_SPEEDS = (("III", 37.5), ("II", 42.5), ("I", 50.0))
+
+
+def reference_wind_class(standard_speed):
+    """Preliminary wind-speed screening against GB 51096–2015 Table 3.2.12."""
+    if standard_speed is None:
+        return None
+    return next(
+        (
+            wind_class
+            for wind_class, limit in WIND_CLASS_REFERENCE_SPEEDS
+            if standard_speed <= limit
+        ),
+        None,
+    )
 
 
 def valid_pressure(value):
@@ -119,15 +134,17 @@ def extreme_wind(
     pressure_standard = sqrt(1600 * station["pressure"]) if station else None
     pressure_site = pressure_site_speed(pressure_standard, density)
     candidates = {"风压法": pressure_site, "平均风速倍数法": site_speed}
+    standard_candidates = {"风压法": pressure_standard, "平均风速倍数法": multiplier_standard}
     if thunderstorm is not None:
         candidates["五日雷暴法"] = thunderstorm["site_speed"]
         standard_speed = thunderstorm["site_speed"] * sqrt(density / STANDARD_DENSITY)
         if not isfinite(standard_speed):
             raise CalculationError("五日雷暴法折算后的风速超出有效范围。")
         thunderstorm = {**thunderstorm, "standard_speed": standard_speed}
+        standard_candidates["五日雷暴法"] = standard_speed
     adopted_method = max(candidates, key=candidates.get) if station else None
     adopted_site = candidates[adopted_method] if adopted_method else None
-    adopted = adopted_site * sqrt(density / STANDARD_DENSITY) if adopted_site is not None else None
+    adopted = standard_candidates[adopted_method] if adopted_method else None
     return {
         "station": station,
         "mean_speed": mean_speed,
@@ -142,4 +159,5 @@ def extreme_wind(
         "adopted_method": adopted_method,
         "adopted_site": adopted_site,
         "adopted": adopted,
+        "wind_speed_class": reference_wind_class(adopted),
     }

@@ -61,7 +61,11 @@ def replace_wording(paragraph, old, new):
 def remove_long_term_word_content(doc):
     for paragraph in doc.paragraphs:
         content = paragraph.text
-        if "按年平均风速相对20年平均风速" in content or content.startswith("图1.3-2"):
+        if (
+            "按年平均风速相对20年平均风速" in content
+            or "【20年统计起止年份】" in content
+            or content.startswith("图1.3-2")
+        ):
             paragraph._p.getparent().remove(paragraph._p)
         elif "近20年各年风速表" in content:
             replace_wording(paragraph._p, "近20年各年风速表", "资料期各年风速表")
@@ -74,6 +78,30 @@ def remove_long_term_word_content(doc):
                 doc.part.drop_rel(rid)
             return
     raise CalculationError("评估模板缺少图位：近20年平均风速图")
+
+
+def adjust_reviewed_year_wording(paragraph, direct, review_required, pending, is_flat):
+    text = paragraph.text
+    if direct:
+        start = text.find("考虑到")
+        end = text.find("选取【代表年份】年1—12月", start)
+        if start < 0 or end < 0:
+            raise CalculationError("评估模板缺少代表年选取段落锚点")
+        wording = (
+            "该年份距报告编制年份已满 5 年，代表年待人工复核。当前暂"
+            if pending
+            else "经人工确认，仍"
+            if review_required
+            else "因此"
+        )
+        replace_wording(paragraph._p, text[start:end], wording)
+        return
+    if not review_required:
+        replace_wording(
+            paragraph._p, "考虑到【偏差最小年份】年距本阶段较远，经比选，", "经人工比选，"
+        )
+    if not is_flat:
+        replace_wording(paragraph._p, "，符合本项目平风年判定条件", "")
 
 
 def restore_chart_anchors(doc, titles, *, sample_title=None):
@@ -110,7 +138,7 @@ def restore_chart_anchors(doc, titles, *, sample_title=None):
             old.getparent().remove(old)
 
 
-def restore_sample_fields(paragraphs, fields):
+def restore_sample_fields(paragraphs, fields, *, reviewed_layout=False):
     prefix = "AeolusReviewField_"
     for paragraph in paragraphs:
         for bookmark in paragraph._p.xpath("./w:bookmarkStart"):
@@ -120,7 +148,10 @@ def restore_sample_fields(paragraphs, fields):
             number = name.removeprefix(prefix)
             if not re.fullmatch(r"[0-9]+", number):
                 raise CalculationError(f"评估模板书签编号无效：{name}")
-            field = SAMPLE_FIELDS.get(int(number))
+            number = int(number)
+            if reviewed_layout and number in (155, 156, 157):
+                continue
+            field = SAMPLE_FIELDS.get(number)
             if field not in fields:
                 continue
             start = paragraph._p.index(bookmark)
@@ -220,10 +251,7 @@ def apply_formula_typefaces(body):
 
 
 PRESSURE_HEIGHT_NOTE = "风压法沿用风压参考值的原高度基准。"
-EXTREME_CONCLUSION = (
-    " m/s。对照《风力发电机组设计要求》（GB/T 18451.1—2022）及 IEC 相关标准，"
-    "拟定采用安全等级为 IEC III 类及以上的风电机组，最终结果以厂家复核为准。"
-)
+EXTREME_CONCLUSION = " m/s。按《风力发电场设计规范》（GB 51096—2015）表 3.2.12 的参考风速初判，"
 
 
 def remove_pressure_height_note(paragraph):
@@ -239,12 +267,17 @@ def remove_pressure_height_note(paragraph):
             remaining -= count
 
 
-def revise_extreme_conclusion(paragraph, speed):
+def revise_extreme_conclusion(paragraph, speed, wind_class):
     runs = [run for run in paragraph.runs if run.text]
     green = next((run._r for run in runs if run.text == speed and is_green(run._r)), None)
     if green is None:
         raise CalculationError("评估模板缺少绿色字段：标准空气密度下最大风速")
     black = runs[0]._r
+    screening = (
+        f"场址风速对应 IEC {wind_class} 类及以上的机组。"
+        if wind_class
+        else "场址风速超过 I 类参考风速，应由设计者按 S 类确定参数。"
+    )
     anchor = next(iter(paragraph._p.findall(qn("w:commentRangeEnd"))), None)
     for template, text in (
         (
@@ -253,7 +286,12 @@ def revise_extreme_conclusion(paragraph, speed):
             "推荐风电场区范围内标准空气密度下的 50 年一遇最大风速取 ",
         ),
         (green, speed),
-        (black, EXTREME_CONCLUSION),
+        (
+            black,
+            EXTREME_CONCLUSION
+            + screening
+            + "最终机型应结合轮毂高度处年平均风速和湍流强度，由厂家复核。",
+        ),
     ):
         new = Run(deepcopy(template), paragraph)
         new.text = text
@@ -265,7 +303,7 @@ def revise_extreme_conclusion(paragraph, speed):
         paragraph._p.remove(run._r)
 
 
-def validate_release(doc):
+def validate_release(doc, *, reviewed_layout=False):
     titles = {
         "近20年平均风速图",
         "风速和风功率密度月变化图",
@@ -280,12 +318,26 @@ def validate_release(doc):
     if missing:
         raise CalculationError(f"评估模板缺少图位：{'、'.join(sorted(missing))}")
     fields = set(SAMPLE_FIELDS.values())
-    restore_sample_fields(doc.paragraphs, fields)
+    restore_sample_fields(doc.paragraphs, fields, reviewed_layout=reviewed_layout)
     for section in doc.sections:
-        restore_sample_fields(section.header.paragraphs, fields)
+        restore_sample_fields(section.header.paragraphs, fields, reviewed_layout=reviewed_layout)
     select_thunderstorm_section(doc, enabled=True)
     summary = next((p for p in doc.paragraphs if "【实际参与比选的方法】" in p.text), None)
     if summary is None:
         raise CalculationError("评估模板缺少极大风速结论段落")
-    revise_extreme_conclusion(summary, "【标准空气密度下最大风速】")
+    revise_extreme_conclusion(summary, "【标准空气密度下最大风速】", None)
+    if reviewed_layout:
+        body = "\n".join(p.text for p in doc.paragraphs)
+        for field in (
+            "20年统计起止年份",
+            "10年统计起止年份",
+            "偏差最小年份",
+            "分析高度空气密度",
+            "轮毂高度",
+            "中尺度纬度",
+            "中尺度经度",
+            "中尺度点位海拔",
+        ):
+            if f"【{field}】" not in body:
+                raise CalculationError(f"评估模板缺少字段：{field}")
     remove_long_term_word_content(doc)

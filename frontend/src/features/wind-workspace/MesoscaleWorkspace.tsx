@@ -120,6 +120,7 @@ type Result = {
     pressure_site?: number | null;
     adopted: number | null;
     adopted_method?: string | null;
+    wind_speed_class?: string | null;
     thunderstorm?: {
       year: number;
       height: number;
@@ -1753,6 +1754,10 @@ function ExtremeWindResult({
           ? "待补齐风压法结果后进行比选。"
           : result.adopted_method &&
             `场址风速最大值来自${result.adopted_method}，折算后作为前期采用值。`}
+        {result.adopted !== null &&
+          (result.wind_speed_class
+            ? `按参考风速初判为 IEC ${result.wind_speed_class} 类及以上。`
+            : "超过 I 类参考风速，须由设计者按 S 类确定参数。")}
         风压法的场址值由参考风速按场址密度反算，沿用站点基准高度。标准空气密度取
         1.225 kg/m³。
       </p>

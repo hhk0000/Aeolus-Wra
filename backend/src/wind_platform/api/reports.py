@@ -258,6 +258,8 @@ def get_assessment(run_id: str, request: Request):
         extreme["pressure_site"] = assessment_extreme.pressure_site_speed(
             extreme["pressure_standard"], extreme["density"]
         )
+    if extreme and "wind_speed_class" not in extreme:
+        extreme["wind_speed_class"] = assessment_extreme.reference_wind_class(extreme["adopted"])
     return run
 
 

@@ -13,6 +13,9 @@ RENDERERS = {
     "mesoscale-v1": mesoscale_report.build,
     "mesoscale-formal": partial(mesoscale_report.build, formal_layout=True),
     "mesoscale-approved": partial(mesoscale_report.build, formal_layout=True, approved_layout=True),
+    "mesoscale-reviewed": partial(
+        mesoscale_report.build, formal_layout=True, approved_layout=True, reviewed_layout=True
+    ),
 }
 
 

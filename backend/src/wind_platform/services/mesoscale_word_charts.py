@@ -287,6 +287,7 @@ def formal_figure(
             "年份" if annual else ("月份" if len(labels) == 12 else "时段") if dual else "风速区间"
         )
         label(draw, ((left + right) / 2, height - 32), x_axis)
+    draw.rectangle((0, 0, WIDTH - 1, height - 1), outline="#000000", width=2)
     result = BytesIO()
     image.save(result, format="PNG")
     return result.getvalue()

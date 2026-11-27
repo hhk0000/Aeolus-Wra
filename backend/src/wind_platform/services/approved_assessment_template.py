@@ -30,6 +30,16 @@ SAMPLE_FIELDS = {
 def format_report_picture(shape):
     shape.height = Emu(round(Cm(14) * shape.height / shape.width))
     shape.width = Cm(14)
+    extent = shape._inline.find(qn("wp:effectExtent"))
+    if extent is None:
+        extent = OxmlElement("wp:effectExtent")
+        wp_extent = shape._inline.find(qn("wp:extent"))
+        if wp_extent is not None:
+            wp_extent.addnext(extent)
+        else:
+            shape._inline.insert(0, extent)
+    for side in ("l", "t", "r", "b"):
+        extent.set(side, "9525")
     properties = shape._inline.graphic.graphicData.pic.spPr
     for existing in properties.xpath("./a:ln"):
         properties.remove(existing)

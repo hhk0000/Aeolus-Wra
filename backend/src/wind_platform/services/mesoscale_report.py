@@ -2,6 +2,8 @@
 
 import math
 import re
+from calendar import isleap
+from collections import Counter
 from copy import deepcopy
 from datetime import datetime
 from io import BytesIO
@@ -61,6 +63,13 @@ def hourly_records(raw):
     return height, records
 
 
+def parse_wind_observation(text):
+    if text.strip().casefold() in {"", "na", "n/a", "nan", "null", "--"}:
+        return np.nan
+    value = float(text)
+    return np.nan if value in {-9999, -999.9, -999, 999, 999.9, 9999} else value
+
+
 def _read_hourly(raw, source_details=False, speed_only=False):
     detected = preview(raw)
     ti = detected["detected"]["timestamp_column"]
@@ -98,7 +107,7 @@ def _read_hourly(raw, source_details=False, speed_only=False):
                         if highest_recorded is not None and channel["height"] <= highest_recorded:
                             continue
                         try:
-                            value = float(row[channel["index"]])
+                            value = parse_wind_observation(row[channel["index"]])
                         except (IndexError, ValueError):
                             continue
                         if math.isfinite(value) and value >= 0:
@@ -171,8 +180,8 @@ def _read_hourly(raw, source_details=False, speed_only=False):
             dt = datetime.fromisoformat(row[ti].strip().replace("/", "-"))
             if dt in records or dt.minute % 10 or dt.second or dt.microsecond or dt.tzinfo:
                 raise ValueError()
-            v = float(row[vi]) if row[vi].strip() else np.nan
-            d = float(row[di]) if di is not None and row[di].strip() else np.nan
+            v = parse_wind_observation(row[vi])
+            d = parse_wind_observation(row[di]) if di is not None else np.nan
             if np.isinf(v) or np.isinf(d) or v < 0 or d < 0 or d > 360:
                 raise ValueError()
             records[dt] = (v, d)
@@ -205,44 +214,44 @@ def _read_hourly(raw, source_details=False, speed_only=False):
 
 
 def record_interval(records):
-    if all(t.minute == 0 for t in records):
-        return 60
     stamps = sorted(records)
-    cadence = 0
-    for before, after in pairwise(stamps):
-        cadence = math.gcd(cadence, int((after - before).total_seconds() // 60))
-        if cadence == 10:
-            return cadence
-    raise CalculationError("资料须为整点逐小时序列或可识别的10分钟序列。")
-
-
-def natural_window(records, interval_minutes=60):
-    valid_years = {t.year for t, (speed, _) in records.items() if np.isfinite(speed)}
-    first, last = min(records), max(records)
-    last_minute = 60 - interval_minutes
-    legacy_end = (
-        last.year if last == datetime(last.year, 12, 31, 23, last_minute) else last.year - 1
+    if len(stamps) == 1:
+        return 10 if stamps[0].minute else 60
+    differences = Counter(
+        int((after - before).total_seconds() // 60) for before, after in pairwise(stamps)
     )
-    legacy_start = legacy_end - 19
-    if (
-        legacy_start >= 1
-        and first <= datetime(legacy_start, 1, 1)
-        and datetime(legacy_end, 12, 31, 23, last_minute) in records
-        and all(year in valid_years for year in range(legacy_start, legacy_end + 1))
-    ):
-        return legacy_start, legacy_end
+    interval = min(differences, key=lambda step: (-differences[step], step))
+    if interval == 10 or (interval == 60 and len({stamp.minute for stamp in stamps}) == 1):
+        return interval
+    raise CalculationError(
+        f"资料的主要时间间隔为 {interval} 分钟，或时间标签不在同一采样网格。"
+        "请使用 10 分钟或 1 小时资料。"
+    )
+
+
+def natural_year_coverage(records, interval_minutes):
+    valid_counts = Counter(t.year for t, (speed, _) in records.items() if math.isfinite(speed))
+    return [
+        {
+            "year": year,
+            "valid_count": valid_counts[year],
+            "expected_count": (365 + isleap(year)) * 1440 // interval_minutes,
+        }
+        for year in range(min(records).year, max(records).year + 1)
+    ]
+
+
+def natural_window(coverage):
     complete_years = {
-        year
-        for year in valid_years
-        if datetime(year, 1, 1) in records and datetime(year, 12, 31, 23, last_minute) in records
+        row["year"] for row in coverage if row["valid_count"] * 100 >= row["expected_count"] * 95
     }
     if not complete_years:
-        raise CalculationError(
-            f"资料未覆盖一个完整自然年（1月1日00:00至12月31日23:{last_minute:02d}）。"
-        )
+        raise CalculationError("没有自然年的有效风速覆盖率达到 95%，无法开启风资源分析。")
     end = start = max(complete_years)
     while start - 1 in complete_years and end - start < 19:
         start -= 1
+    if 10 <= end - start + 1 < 20:
+        start = end - 9
     return start, end
 
 
@@ -250,9 +259,11 @@ def hourly(raw):
     return select_year(*hourly_records(raw))
 
 
-def select_year(height, records, interval_minutes=None):
+def select_year(height, records, interval_minutes=None, coverage=None):
     interval_minutes = interval_minutes or record_interval(records)
-    start, end = natural_window(records, interval_minutes)
+    if coverage is None:
+        coverage = natural_year_coverage(records, interval_minutes)
+    start, end = natural_window(coverage)
     times = sorted(t for t in records if start <= t.year <= end)
     v, d = np.array([records[t] for t in times]).T
     years = np.array([t.year for t in times])
@@ -265,7 +276,7 @@ def select_year(height, records, interval_minutes=None):
     avg = float(np.nanmean(v))
     if avg <= 0:
         raise CalculationError("资料期平均风速为零，无法选择分析年。")
-    idx = int(np.argmin(np.abs(np.array(annual) - avg))) if len(annual) == 20 else len(annual) - 1
+    idx = int(np.argmin(np.abs(np.array(annual) - avg))) if len(annual) >= 10 else len(annual) - 1
     return height, times, v, d, years, start, annual, avg, start + idx, interval_minutes
 
 
@@ -312,10 +323,15 @@ def assessment_source(raw, speed_only=False):
             str(y): total / count for y, (total, count) in temperatures.items()
         },
         "interval_minutes": record_interval(records),
+        "missing_speed_count": sum(not math.isfinite(v) for v, _ in records.values()),
+        "missing_direction_count": (
+            None if speed_only else sum(not math.isfinite(d) for _, d in records.values())
+        ),
     }
+    source["year_coverage"] = natural_year_coverage(records, source["interval_minutes"])
     try:
         _, _, _, _, _, start, annual, mean, year, _ = select_year(
-            height, records, source["interval_minutes"]
+            height, records, source["interval_minutes"], source["year_coverage"]
         )
     except CalculationError as exc:
         return {**source, "window_years": 0, "coverage_error": str(exc)}
@@ -325,6 +341,7 @@ def assessment_source(raw, speed_only=False):
         "start_year": start,
         "end_year": end,
         "window_years": len(annual),
+        "year_selection_enabled": len(annual) >= 10,
         "density_period": period_mean(densities, start, end),
         "temperature_period": period_mean(temperatures, start, end),
         "coverage_error": None,
@@ -593,6 +610,7 @@ def build(
     reviewed_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
+    wind_shear_exponent=None,
     thunderstorm_options=None,
     thunderstorm_raw=None,
 ):
@@ -610,16 +628,25 @@ def build(
     short_window = window_years < 20
     if analysis_year is not None and not start <= analysis_year <= end:
         raise CalculationError(f"分析年须在本次资料期（{start}–{end}年）内。")
-    if short_window and analysis_year is not None and window_years > 1:
-        raise CalculationError("不足20年的已选资料按完整自然年合并分析。")
-    combined = short_window and window_years > 1
+    combined = 1 < window_years < 10
+    if combined and analysis_year is not None:
+        raise CalculationError("不足10年的已选资料按达标自然年合并分析。")
     year = recommended_year if analysis_year is None else analysis_year
     analysis_start = start if combined else year
     analysis_end = end if combined else year
     hub_height = float(height) if hub_height_m is None else hub_height_m
     source_density = rho
     density_adjustment = None
+    speed_factor = 1.0
     if hub_height != float(height):
+        if wind_shear_exponent is None or not math.isfinite(wind_shear_exponent):
+            raise CalculationError("源风速层与轮毂高度不同，请手填风切变指数。")
+        try:
+            speed_factor = (hub_height / float(height)) ** wind_shear_exponent
+        except (OverflowError, ZeroDivisionError) as exc:
+            raise CalculationError("风速外推系数无效，请检查高度和风切变指数。") from exc
+        if not math.isfinite(speed_factor) or speed_factor <= 0:
+            raise CalculationError("风速外推系数无效，请检查高度和风切变指数。")
         temperature = mean_temperature_c
         if temperature is None:
             temperature = period_mean(temperatures, analysis_start, analysis_end)
@@ -659,13 +686,22 @@ def build(
         thunderstorm = five_day_thunderstorm(
             storm_records,
             storm_year,
-            storm_height,
+            hub_height,
             thunderstorm_options.c1,
             thunderstorm_options.c2,
+            speed_factor=speed_factor,
         )
-    extreme = extreme_wind(
-        stats["mean_speed"], rho, extreme_multiplier, pressure_station, thunderstorm
-    )
+    hub_mean_speed = stats["mean_speed"] * speed_factor
+    if not math.isfinite(hub_mean_speed) or hub_mean_speed <= 0:
+        raise CalculationError("轮毂平均风速无效，请检查高度和风切变指数。")
+    extreme = extreme_wind(hub_mean_speed, rho, extreme_multiplier, pressure_station, thunderstorm)
+    if density_adjustment is not None:
+        extreme["wind_shear"] = {
+            "source_height_m": float(height),
+            "hub_height_m": hub_height,
+            "source_mean_speed": stats["mean_speed"],
+            "exponent": wind_shear_exponent,
+        }
     dates = [t for t in times if analysis_start <= t.year <= analysis_end]
 
     def groups(keys, choices):
@@ -720,18 +756,18 @@ def build(
     effective = (a >= 3) & (a <= 25)
     f = [r["frequency"] for r in freq]
     e = [r["energy_frequency"] or 0 for r in freq]
-    deviation = abs(annual[year - start] - avg) / avg
+    deviation = (annual[year - start] - avg) / avg
 
     def fmt(x):
         return f"{x:.2f}" if np.isfinite(x) else "—"
 
     if combined:
-        selection_note = "合并全部完整自然年统计"
+        selection_note = "合并资料期内全部达标自然年统计"
     elif window_years == 1:
-        selection_note = "仅有一个完整自然年，直接采用"
+        selection_note = "仅有一个达标自然年，直接采用"
     elif analysis_year is not None:
         selection_note = f"手动选择分析年，系统推荐年份为{recommended_year}年"
-    elif deviation <= 0.02 + 1e-12:
+    elif abs(deviation) <= 0.02 + 1e-12:
         selection_note = "平风年中偏差最小"
     else:
         selection_note = "无平风年，取偏差最小年份"
@@ -1138,7 +1174,7 @@ def build(
         pressure_station, extreme["pressure_standard"], extreme["pressure_site"], rho
     )
     fields["倍数法结果"] = (
-        f"{fields['分析期'] if combined else f'{year} 年'}分析高度 {height} m 的"
+        f"{fields['分析期'] if combined else f'{year} 年'}轮毂高度 {hub_height:g} m 的"
         f"{'平均风速' if combined else '年平均风速'}保留两位小数后为 "
         f"{extreme['mean_speed_used']:.2f} m/s，乘以 {extreme_multiplier:g}，"
         f"场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
@@ -1236,7 +1272,7 @@ def build(
                 year == recommended_year,
                 review_required,
                 analysis_year is None and review_required,
-                deviation <= 0.02 + 1e-12,
+                abs(deviation) <= 0.02 + 1e-12,
             )
             txt = para.text
         if combined and "区间累计时数为" in txt:
@@ -1246,6 +1282,8 @@ def build(
             txt = para.text
         if approved_layout and short_window and "选取代表年份为" in txt:
             para.clear()
+            if window_years == 10:
+                para.add_run("以最近 10 个达标自然年的平均风速为基准。")
             for label, field in (
                 ("分析期为", "分析期"),
                 ("。采用", "分析高度"),
@@ -1255,7 +1293,7 @@ def build(
                 value = para.add_run(fields[field])
                 value.font.color.rgb = RGBColor.from_string("008000")
                 approved_assessment_template.style_inserted_numbers(value)
-            para.add_run("。")
+            para.add_run(f"。{selection_note}。" if window_years == 10 else "。")
             return
         if approved_layout and "【实际参与比选的方法】" in txt:
             approved_assessment_template.revise_extreme_conclusion(
@@ -1311,7 +1349,8 @@ def build(
             (
                 m,
                 f"{hub_height:g}"
-                if m[1] == "分析高度" and txt[: m.start()].endswith("轮毂高度")
+                if m[1] == "分析高度"
+                and ("【五日雷暴分析年】" in txt or txt[: m.start()].endswith("轮毂高度"))
                 else fields[m[1]],
             )
             for m in re.finditer(r"【([^】]+)】", txt)

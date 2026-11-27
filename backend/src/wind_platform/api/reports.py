@@ -132,6 +132,8 @@ def get_assessment_source(file_id: str, request: Request):
         "temperature_by_year",
         "window_years",
         "interval_minutes",
+        "missing_speed_count",
+        "year_coverage",
     } <= record.keys():
         return record
     return {
@@ -150,7 +152,8 @@ def get_pressure_library(file_id: str, request: Request):
 
 @router.get("/reports/assessment/pressure-match")
 def get_pressure_match(place: str = ""):
-    return {"station": pressure_location.match_pressure(place[:120])}
+    station, provinces = pressure_location.pressure_lookup(place[:120])
+    return {"station": station, "candidate_provinces": provinces}
 
 
 class ThunderstormOptions(BaseModel):
@@ -223,6 +226,7 @@ class ExtremeOptions(BaseModel):
 class AssessmentHeights(BaseModel):
     hub_height_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     mean_temperature_c: float | None = Field(default=None, ge=-100, le=100)
+    wind_shear_exponent: float | None = Field(default=None, allow_inf_nan=False)
 
 
 class AssessmentOptions(AssessmentHeights):
@@ -244,9 +248,10 @@ def run_assessment(options: AssessmentOptions, request: Request):
         analysis_year=options.analysis_year,
         hub_height_m=options.hub_height_m,
         mean_temperature_c=options.mean_temperature_c,
+        wind_shear_exponent=options.wind_shear_exponent,
         **options.extreme.calculation_options(local),
     )
-    saved = local.put("assessment-runs", results)
+    saved = local.put("assessment-runs", {**results, "calculation_options": options.model_dump()})
     return {"id": saved["id"]}
 
 
@@ -266,7 +271,7 @@ def get_assessment(run_id: str, request: Request):
 @router.post("/reports/templates/{key}/{version}/export")
 async def export_registered(key: str, version: str, request: Request):
     data, render = release(key, version)
-    async with request.form(max_files=2, max_fields=13) as form:
+    async with request.form(max_files=2, max_fields=16) as form:
         upload = form.get("data")
         source_id = form.get("source_id")
         local = request.app.state.wind_store
@@ -293,7 +298,7 @@ async def export_registered(key: str, version: str, request: Request):
                 {key: form.get(key) or None for key in AssessmentHeights.model_fields}
             )
         except ValidationError as exc:
-            raise CalculationError("请检查轮毂高度和分析期平均气温。") from exc
+            raise CalculationError("请检查轮毂高度、分析期平均气温和风切变指数。") from exc
         energy = form.get("energy")
         if energy is not None and (
             not isinstance(energy, UploadFile) or energy.size is None or energy.size > 4 * MIB
@@ -322,6 +327,20 @@ async def export_registered(key: str, version: str, request: Request):
             extreme = ExtremeOptions.model_validate_json(str(form.get("extreme", "{}")))
         except ValidationError as exc:
             raise CalculationError("请检查风速倍数、风压和五日雷暴法选项。") from exc
+        run_id = form.get("run_id")
+        if isinstance(run_id, str) and run_id and key == "mesoscale":
+            saved = local.get("assessment-runs", run_id)
+            if not isinstance(source_id, str) or not source_id:
+                raise CalculationError("请使用本次分析保存的中尺度资料导出。")
+            current = AssessmentOptions(
+                source_id=source_id,
+                density=density,
+                analysis_year=analysis_year,
+                extreme=extreme,
+                **heights.model_dump(),
+            )
+            if saved.get("calculation_options") != current.model_dump():
+                raise CalculationError("分析配置与当前结果不一致，请重新分析后导出。")
         result = await run_in_threadpool(
             render,
             data,
@@ -335,6 +354,7 @@ async def export_registered(key: str, version: str, request: Request):
             weibull_method=str(form.get("weibull_method", "mle")),
             hub_height_m=heights.hub_height_m,
             mean_temperature_c=heights.mean_temperature_c,
+            wind_shear_exponent=heights.wind_shear_exponent,
             **extreme.calculation_options(local, for_export=True),
         )
     return Response(

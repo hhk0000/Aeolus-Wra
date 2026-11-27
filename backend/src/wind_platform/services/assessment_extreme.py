@@ -3,7 +3,7 @@
 import re
 from calendar import isleap
 from datetime import datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from math import isfinite, log, log1p, sqrt
 from statistics import mean, stdev
 
@@ -72,7 +72,7 @@ def pressure_site_speed(standard_speed, density):
     return standard_speed * sqrt(STANDARD_DENSITY / density) if standard_speed is not None else None
 
 
-def five_day_thunderstorm(records, year, height, c1, c2):
+def five_day_thunderstorm(records, year, height, c1, c2, *, speed_factor=1.0):
     """Apply the report's equations (1-7) and (1-8) to 73 five-day maxima."""
     start = datetime(year, 1, 1)
     sample_size = 73
@@ -89,7 +89,10 @@ def five_day_thunderstorm(records, year, height, c1, c2):
                     f"五日雷暴法需要连续有效的 10 分钟风速，{timestamp:%Y-%m-%d %H:%M} 缺测。"
                 )
             speeds.append(sample[0])
-        maxima.append(max(speeds))
+        maximum = max(speeds) * speed_factor
+        if not isfinite(maximum):
+            raise CalculationError("五日最大风速外推结果无效，请检查风切变指数。")
+        maxima.append(maximum)
     if isleap(year):
         # Equation (1-7) uses 73 groups. Require the full leap year's coverage.
         for index in range(steps_per_block // 5):
@@ -126,7 +129,10 @@ def five_day_thunderstorm(records, year, height, c1, c2):
 def extreme_wind(
     mean_speed, density, multiplier=DEFAULT_MULTIPLIER, station=None, thunderstorm=None
 ):
-    mean_speed_used = float(Decimal(str(mean_speed)).quantize(Decimal("0.01"), ROUND_HALF_UP))
+    try:
+        mean_speed_used = float(Decimal(str(mean_speed)).quantize(Decimal("0.01"), ROUND_HALF_UP))
+    except InvalidOperation as exc:
+        raise CalculationError("平均风速超出有效计算范围。") from exc
     site_speed = mean_speed_used * multiplier
     multiplier_standard = site_speed * sqrt(density / STANDARD_DENSITY)
     if not isfinite(site_speed) or not isfinite(multiplier_standard):

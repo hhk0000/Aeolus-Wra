@@ -106,9 +106,14 @@ def candidates(index, name, province):
 
 
 def match_pressure(place):
+    station, _ = pressure_lookup(place)
+    return station
+
+
+def pressure_lookup(place):
     place = unicodedata.normalize("NFKC", place).strip()
     if not place:
-        return None
+        return None, []
     index = pressure_index()
     parts = re.split(SEPARATORS, place, maxsplit=2)
     province = None
@@ -124,7 +129,7 @@ def match_pressure(place):
             parts = re.split(SEPARATORS, place, maxsplit=1) if place else []
             break
     if province is None and re.match(r"^[^ ,、·/，]{1,12}(?:省|自治区|特别行政区)", place):
-        return None
+        return None, []
     if len(parts) == 1:
         local = parts[0]
         exact_area = candidates(index, local, province)
@@ -133,7 +138,7 @@ def match_pressure(place):
             is_city = re.search(CITY_SUFFIX + "$", local) or re.search(
                 CITY_SUFFIX + "$", station["name"]
             )
-            return {**station, "level": "city" if is_city else "county"}
+            return {**station, "level": "city" if is_city else "county"}, []
         city_and_county = re.fullmatch(rf"(.+?{CITY_SUFFIX})(.+)", local)
         if city_and_county:
             parts = list(city_and_county.groups())
@@ -146,11 +151,14 @@ def match_pressure(place):
         local = parts[-1]
         local_matches = candidates(index, local, province)
         if len(local_matches) == 1:
-            return {**local_matches[0], "level": "county"}
+            return {**local_matches[0], "level": "county"}, []
         if len(city_matches) == 1:
-            return {**city_matches[0], "level": "city"}
+            return {**city_matches[0], "level": "city"}, []
+        provinces = sorted({station["province"] for station in local_matches})
+        if len(provinces) > 1:
+            return None, provinces
     if province:
         default = candidates(index, PROVINCE_DEFAULTS[province], province)
         if len(default) == 1:
-            return {**default[0], "level": "province"}
-    return None
+            return {**default[0], "level": "province"}, []
+    return None, []

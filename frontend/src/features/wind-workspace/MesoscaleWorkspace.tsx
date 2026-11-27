@@ -15,7 +15,15 @@ type Source = {
   start_year?: number;
   end_year?: number;
   window_years?: number;
+  year_selection_enabled?: boolean;
+  year_coverage?: {
+    year: number;
+    valid_count: number;
+    expected_count: number;
+  }[];
   interval_minutes?: number;
+  missing_speed_count?: number;
+  missing_direction_count?: number | null;
   density_period?: number | null;
   year?: number;
   mean_speed?: number;
@@ -42,6 +50,7 @@ type Assessment = {
   density: string;
   hubHeight?: string;
   meanTemperature?: string;
+  windShearExponent?: string;
   factor: string;
   manualLocation: boolean;
   lat: string;
@@ -74,7 +83,7 @@ function identifiedDensity(
   year: number | undefined,
 ) {
   return (
-    (source?.window_years && source.window_years < 20
+    (source?.year_selection_enabled === false
       ? source.density_period
       : year === undefined
         ? undefined
@@ -112,6 +121,12 @@ type Result = {
     station: (PressureStation & { library: string }) | null;
     mean_speed: number;
     mean_speed_used?: number;
+    wind_shear?: {
+      source_height_m: number;
+      hub_height_m: number;
+      source_mean_speed: number;
+      exponent: number;
+    };
     density: number;
     multiplier: number;
     site_speed: number;
@@ -258,17 +273,27 @@ export default function MesoscaleWorkspace({
       : Number(state.pressureOverride);
   const multiplier = Number(state.multiplier);
   const windowYears = source?.window_years ?? source?.annual?.length ?? 0;
-  const shortWindow = windowYears > 0 && windowYears < 20;
-  const selectedAnalysisYear = shortWindow ? undefined : state.analysisYear;
+  const canSelectYear = source?.year_selection_enabled ?? windowYears >= 10;
+  const selectedAnalysisYear =
+    canSelectYear &&
+    state.analysisYear !== undefined &&
+    state.analysisYear >= (source?.start_year ?? Infinity) &&
+    state.analysisYear <= (source?.end_year ?? -Infinity)
+      ? state.analysisYear
+      : undefined;
   const analysisYear = selectedAnalysisYear ?? source?.year;
-  const combinedWindow = shortWindow && windowYears > 1;
+  const combinedWindow = !canSelectYear && windowYears > 1;
   const stormSource =
     source?.interval_minutes === 10 ? source : state.thunderstormSource;
-  const stormYears = stormSource?.start_year
-    ? (stormSource.annual ?? []).map(
-        (_, index) => stormSource.start_year! + index,
+  const stormYears =
+    stormSource?.year_coverage
+      ?.filter(
+        ({ valid_count, expected_count }) => valid_count === expected_count,
       )
-    : [];
+      .map(({ year }) => year) ??
+    (stormSource?.annual ?? []).map(
+      (_, index) => (stormSource?.start_year ?? 0) + index,
+    );
   const stormYear = combinedWindow ? state.thunderstormYear : analysisYear;
   const c1 = Number(state.thunderstormC1);
   const c2 = Number(state.thunderstormC2);
@@ -281,14 +306,18 @@ export default function MesoscaleWorkspace({
     c1 > 0 &&
     !!state.thunderstormC2?.trim() &&
     Number.isFinite(c2);
-  const analysisStart = shortWindow ? source?.start_year : analysisYear;
-  const analysisEnd = shortWindow ? source?.end_year : analysisYear;
+  const analysisStart = combinedWindow ? source?.start_year : analysisYear;
+  const analysisEnd = combinedWindow ? source?.end_year : analysisYear;
   const sourceDensity = identifiedDensity(source, analysisYear);
   const density = sourceDensity ?? Number(state.density);
   const hubHeight = state.hubHeight ? Number(state.hubHeight) : undefined;
   const needsDensityAdjustment =
     !!source && hubHeight !== undefined && hubHeight !== source.height;
-  const sourceTemperature = shortWindow
+  const windShearExponent =
+    needsDensityAdjustment && state.windShearExponent?.trim()
+      ? Number(state.windShearExponent)
+      : undefined;
+  const sourceTemperature = combinedWindow
     ? (source?.temperature_period ?? undefined)
     : analysisYear === undefined
       ? undefined
@@ -302,7 +331,9 @@ export default function MesoscaleWorkspace({
     (source?.density_by_year === undefined ||
       source.temperature_by_year === undefined ||
       source.window_years === undefined ||
-      source.interval_minutes === undefined);
+      source.interval_minutes === undefined ||
+      source.missing_speed_count === undefined ||
+      source.year_coverage === undefined);
 
   useEffect(() => {
     try {
@@ -315,13 +346,24 @@ export default function MesoscaleWorkspace({
     if (!place) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void api<{ station: PressureStation | null }>(
+      void api<{
+        station: PressureStation | null;
+        candidate_provinces: string[];
+      }>(
         "/reports/assessment/pressure-match?place=" + encodeURIComponent(place),
         undefined,
         controller.signal,
       )
-        .then(({ station }) => {
-          if (!controller.signal.aborted) setPressureLookup({ place, station });
+        .then(({ station, candidate_provinces }) => {
+          if (!controller.signal.aborted) {
+            setPressureLookup({
+              place,
+              station,
+              error: candidate_provinces?.length
+                ? `地点存在重名，请补充省份（${candidate_provinces.join("、")}）。`
+                : undefined,
+            });
+          }
         })
         .catch(() => {
           if (!controller.signal.aborted)
@@ -366,13 +408,24 @@ export default function MesoscaleWorkspace({
           const previousDensity =
             identifiedDensity(current.source, previousYear) ??
             Number(current.density);
-          const nextYear = current.analysisYear ?? fresh.year;
+          const keepManualYear =
+            fresh.year_selection_enabled &&
+            current.analysisYear !== undefined &&
+            current.analysisYear >= (fresh.start_year ?? Infinity) &&
+            current.analysisYear <= (fresh.end_year ?? -Infinity);
+          const manualYear = keepManualYear ? current.analysisYear : undefined;
+          const nextYear = manualYear ?? fresh.year;
           const automatic = identifiedDensity(fresh, nextYear);
           return {
             ...current,
             source: fresh,
+            analysisYear: manualYear,
             runId:
               previousYear !== nextYear ||
+              current.source?.start_year !== fresh.start_year ||
+              current.source?.end_year !== fresh.end_year ||
+              current.source?.year_selection_enabled !==
+                fresh.year_selection_enabled ||
               (automatic !== undefined && automatic !== previousDensity)
                 ? undefined
                 : current.runId,
@@ -414,6 +467,7 @@ export default function MesoscaleWorkspace({
               source_id: sourceId,
               density,
               hub_height_m: hubHeight,
+              wind_shear_exponent: windShearExponent,
               mean_temperature_c: needsDensityAdjustment
                 ? manualTemperature
                 : undefined,
@@ -456,6 +510,7 @@ export default function MesoscaleWorkspace({
     sourceId,
     density,
     hubHeight,
+    windShearExponent,
     manualTemperature,
     needsDensityAdjustment,
     selectedAnalysisYear,
@@ -500,7 +555,8 @@ export default function MesoscaleWorkspace({
     (!needsDensityAdjustment ||
       (analysisTemperature !== undefined &&
         analysisTemperature >= -100 &&
-        analysisTemperature <= 100)) &&
+        analysisTemperature <= 100 &&
+        Number.isFinite(windShearExponent))) &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
     (!state.thunderstorm || stormReady) &&
@@ -606,6 +662,7 @@ export default function MesoscaleWorkspace({
         source_id: source.id,
         density,
         hub_height_m: hubHeight,
+        wind_shear_exponent: windShearExponent,
         mean_temperature_c: needsDensityAdjustment
           ? manualTemperature
           : undefined,
@@ -630,8 +687,12 @@ export default function MesoscaleWorkspace({
     try {
       const form = new FormData();
       form.set("source_id", source.id);
+      form.set("run_id", state.runId);
       form.set("density", String(density));
       if (hubHeight !== undefined) form.set("hub_height_m", String(hubHeight));
+      if (windShearExponent !== undefined) {
+        form.set("wind_shear_exponent", String(windShearExponent));
+      }
       if (needsDensityAdjustment && manualTemperature !== undefined) {
         form.set("mean_temperature_c", String(manualTemperature));
       }
@@ -693,7 +754,7 @@ export default function MesoscaleWorkspace({
     analysisStart !== undefined &&
     analysisEnd !== undefined && (
       <div className="ww-assessment-period">
-        {!shortWindow && (
+        {canSelectYear && (
           <label className="field">
             分析年
             <select
@@ -819,6 +880,15 @@ export default function MesoscaleWorkspace({
                         {source.first.slice(0, 10)} 至{" "}
                         {source.last.slice(0, 10)}
                       </p>
+                      {Boolean(
+                        source.missing_speed_count ||
+                        source.missing_direction_count,
+                      ) && (
+                        <p className="ww-inline-note">
+                          缺测记录 · 风速 {source.missing_speed_count ?? 0} 条 ·
+                          风向 {source.missing_direction_count ?? 0} 条
+                        </p>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -863,6 +933,56 @@ export default function MesoscaleWorkspace({
                     {source.coverage_error}
                   </p>
                 )}
+                {source?.year_coverage && (
+                  <details>
+                    <summary>自然年有效风速覆盖率</summary>
+                    <p className="ww-inline-note">
+                      覆盖率达到 95%
+                      的自然年可用于风资源分析。五日雷暴法须有完整的 10
+                      分钟资料。
+                    </p>
+                    <div className="ww-table-scroll">
+                      <table className="ww-result-table">
+                        <thead>
+                          <tr>
+                            <th>自然年</th>
+                            <th>有效条数 / 应有条数</th>
+                            <th>覆盖率</th>
+                            <th>是否纳入基准资料期</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {source.year_coverage.map(
+                            ({ year, valid_count, expected_count }) => (
+                              <tr key={year}>
+                                <td>{year}</td>
+                                <td>
+                                  {valid_count.toLocaleString("zh-CN")} /{" "}
+                                  {expected_count.toLocaleString("zh-CN")}
+                                </td>
+                                <td>
+                                  {(
+                                    (100 * valid_count) /
+                                    expected_count
+                                  ).toFixed(2)}
+                                  %
+                                </td>
+                                <td>
+                                  {valid_count * 100 < expected_count * 95
+                                    ? "未达 95%"
+                                    : year >= (source.start_year ?? Infinity) &&
+                                        year <= (source.end_year ?? -Infinity)
+                                      ? "已纳入"
+                                      : "在基准期外"}
+                                </td>
+                              </tr>
+                            ),
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
                 {source?.year && (
                   <button
                     className="ww-button primary"
@@ -881,10 +1001,10 @@ export default function MesoscaleWorkspace({
                   <p className="ww-inline-note">
                     {source.start_year}–{source.end_year} 年 · 共 {windowYears}{" "}
                     年资料
-                    {shortWindow
+                    {!canSelectYear
                       ? windowYears === 1
                         ? " · 直接分析该年"
-                        : " · 合并全部完整自然年统计"
+                        : " · 合并资料期内全部达标自然年统计"
                       : ` · 选定 ${analysisYear} 年 · 偏差 ${deviation?.toFixed(2)}% · ${
                           selectedAnalysisYear !== undefined
                             ? "手动选择"
@@ -961,6 +1081,27 @@ export default function MesoscaleWorkspace({
                             : "留空时采用导入数据的最高风速层。"}
                         </small>
                       </label>
+                      {needsDensityAdjustment && (
+                        <label>
+                          风切变指数
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            value={state.windShearExponent ?? ""}
+                            onChange={(event) => {
+                              setResult(undefined);
+                              change({
+                                windShearExponent: event.target.value,
+                                runId: undefined,
+                              });
+                            }}
+                          />
+                          <small className="ww-inline-note">
+                            用于把极值计算所用风速换算到轮毂高度。
+                          </small>
+                        </label>
+                      )}
                       {needsDensityAdjustment && (
                         <label className="ww-wide">
                           分析期平均气温（℃）
@@ -1318,8 +1459,8 @@ export default function MesoscaleWorkspace({
                       {source.start_year}–{source.end_year} 年均值（
                       {windowYears} 年资料） {source.mean_speed?.toFixed(3)}{" "}
                       m/s。
-                      {shortWindow
-                        ? "按完整资料期计算。"
+                      {!canSelectYear
+                        ? "按达标资料期计算。"
                         : `推荐分析年为 ${source.year} 年。`}
                     </p>
                     <div className="ww-table-scroll">
@@ -1338,10 +1479,10 @@ export default function MesoscaleWorkspace({
                               <tr key={year}>
                                 <td>
                                   {year}
-                                  {!shortWindow && year === analysisYear
+                                  {canSelectYear && year === analysisYear
                                     ? "（当前分析年）"
                                     : ""}
-                                  {!shortWindow &&
+                                  {canSelectYear &&
                                   year === source.year &&
                                   year !== analysisYear
                                     ? "（推荐）"
@@ -1727,9 +1868,11 @@ function ExtremeWindResult({
                   m/s × {result.multiplier}
                 </strong>
                 <small>
-                  {result.mean_speed_used === undefined
-                    ? "历史结果使用原始均值"
-                    : "平均风速保留两位小数后乘倍数"}
+                  {result.wind_shear
+                    ? `以 ${result.wind_shear.source_height_m} m 风速为基准，按风切变指数 ${result.wind_shear.exponent} 换算至 ${result.wind_shear.hub_height_m} m，均值保留两位小数后乘倍数`
+                    : result.mean_speed_used === undefined
+                      ? "历史结果使用原始均值"
+                      : "平均风速保留两位小数后乘倍数"}
                 </small>
               </td>
               <td>{result.site_speed.toFixed(2)}</td>

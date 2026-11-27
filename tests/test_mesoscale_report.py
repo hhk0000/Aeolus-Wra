@@ -11,15 +11,90 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
+from wind_platform.services import mesoscale_report
 from wind_platform.services.assessment_extreme import reference_wind_class
 from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 from wind_platform.services.pressure_location import match_pressure
 
 
+@pytest.fixture
+def sparse_report_fixture(monkeypatch):
+    """Keep the small layout/statistics fixtures independent of availability screening."""
+    actual_coverage = mesoscale_report.natural_year_coverage
+
+    def coverage(records, interval):
+        rows = actual_coverage(records, interval)
+        for row in rows:
+            year = row["year"]
+            if (
+                datetime(year, 1, 1) in records
+                and datetime(year, 12, 31, 23, 60 - interval) in records
+            ):
+                row["valid_count"] = row["expected_count"]
+        return rows
+
+    monkeypatch.setattr(mesoscale_report, "natural_year_coverage", coverage)
+    actual_interval = mesoscale_report.record_interval
+
+    def interval(records):
+        return 60 if all(stamp.minute == 0 for stamp in records) else actual_interval(records)
+
+    monkeypatch.setattr(mesoscale_report, "record_interval", interval)
+
+
+@pytest.mark.parametrize("step_minutes", [20, 30, 180, 1440])
+def test_unsupported_nominal_interval_is_reported(step_minutes):
+    first = datetime(2025, 1, 1)
+    records = {first + timedelta(minutes=i * step_minutes): (5, 90) for i in range(4)}
+    with pytest.raises(CalculationError, match=f"{step_minutes} 分钟"):
+        mesoscale_report.record_interval(records)
+
+
+def test_recent_ten_year_reference_and_signed_deviation():
+    records = {}
+    step = timedelta(hours=1)
+    for year in range(2017, 2027):
+        first = datetime(year, 1, 1)
+        count = (datetime(year + 1, 1, 1) - first).days * 24
+        speed = {2024: 7.9, 2025: 8.5}.get(year, 8.0)
+        hours = range(8, count) if year == 2017 else range(count)
+        for hour in hours:
+            records[first + hour * step] = (speed, 90)
+    records[datetime(2016, 12, 31, 23)] = (50, 90)
+    records[datetime(2027, 1, 1)] = (50, 90)
+    first = datetime(2028, 1, 1)
+    for hour in range(366 * 24 - 440):
+        records[first + hour * step] = (30, 90)
+    coverage = mesoscale_report.natural_year_coverage(records, 60)
+    assert coverage[1]["valid_count"] == 8760 - 8
+    assert coverage[-1]["expected_count"] == 8784
+    assert mesoscale_report.natural_window(coverage) == (2017, 2026)
+    raw = ["Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]"]
+    raw.extend(
+        f"{stamp:%Y-%m-%d %H:%M}\t{speed}\t{direction}"
+        for stamp, (speed, direction) in records.items()
+    )
+    raw = "\n".join(raw).encode()
+    source = assessment_source(raw)
+    assert source["window_years"] == 10 and source["year_selection_enabled"]
+    assert source["year"] == 2017 and source["deviation"] < 0
+    result = mesoscale_report.build(None, raw, 1.2, "", analysis_year=2024)
+    assert result["analysis_start_year"] == result["analysis_end_year"] == 2024
+    assert result["fields"]["相对偏差"].startswith("-")
+    assert result["extreme"]["mean_speed"] == pytest.approx(7.9)
+
+
 @pytest.mark.parametrize(
     ("speed", "expected"),
-    [(37.5, "III"), (37.50001, "II"), (42.5, "II"), (42.50001, "I"), (50, "I"), (50.00001, None)],
+    [
+        (37.5, "III"),
+        (37.50001, "II"),
+        (42.5, "II"),
+        (42.50001, "I"),
+        (50, "I"),
+        (50.00001, None),
+    ],
 )
 def test_reference_wind_class_boundaries(speed, expected):
     assert reference_wind_class(speed) == expected
@@ -39,7 +114,11 @@ def test_reference_wind_class_boundaries(speed, expected):
 )
 def test_pressure_lookup_uses_supplied_station_table(place, level, station, pressure):
     result = match_pressure(place)
-    assert (result["level"], result["name"], result["pressure"]) == (level, station, pressure)
+    assert (result["level"], result["name"], result["pressure"]) == (
+        level,
+        station,
+        pressure,
+    )
     assert "elevation" not in result
 
 
@@ -48,6 +127,7 @@ def test_pressure_lookup_leaves_unknown_place_empty():
     assert match_pressure("未知省张家口市") is None
 
 
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_versioned_mesoscale_download_and_export(tmp_path):
     client = TestClient(create_app(tmp_path))
     entry = client.get("/api/v1/reports/templates").json()[0]
@@ -81,19 +161,26 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     ]
     assert (
         client.post(
-            stations_url, files={"file": ("无效.txt", "繁峙县,113.27,39.19,-0.45".encode())}
+            stations_url,
+            files={"file": ("无效.txt", "繁峙县,113.27,39.19,-0.45".encode())},
         ).status_code
         == 422
     )
     result = client.post(
         path + "/export",
-        files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
+        files={
+            "data": ("a.txt", "\n".join(rows).encode()),
+            "energy": ("a.csv", energy.encode()),
+        },
         data={"density": "1.2", "project": "测试场址", "factor": "75"},
     )
     assert result.status_code == 422 and "手填后再导出" in result.json()["detail"]
     result = client.post(
         path + "/export",
-        files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
+        files={
+            "data": ("a.txt", "\n".join(rows).encode()),
+            "energy": ("a.csv", energy.encode()),
+        },
         data={
             "density": "1.2",
             "project": "测试场址",
@@ -113,7 +200,10 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert doc.tables[6].rows[1].cells[9].text == "7500.00"
     formal = client.post(
         f"/api/v1/reports/templates/{entry['id']}/1.3.0/export",
-        files={"data": ("a.txt", "\n".join(rows).encode()), "energy": ("a.csv", energy.encode())},
+        files={
+            "data": ("a.txt", "\n".join(rows).encode()),
+            "energy": ("a.csv", energy.encode()),
+        },
         data={
             "density": "1.2",
             "project": "测试场址",
@@ -220,7 +310,11 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     place = "河北省张家口市怀来县"
     lookup = client.get("/api/v1/reports/assessment/pressure-match", params={"place": place}).json()
     assert lookup["station"]["pressure"] == 0.35
-    location_options = {"source_id": data["id"], "density": 1.2, "extreme": {"place": place}}
+    location_options = {
+        "source_id": data["id"],
+        "density": 1.2,
+        "extreme": {"place": place},
+    }
     location_run = client.post("/api/v1/reports/assessment/runs", json=location_options)
     location_result = client.get(
         "/api/v1/reports/assessment/runs/" + location_run.json()["id"]
@@ -243,7 +337,13 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert "采用手动填写的风压" in manual_text
     assert "河北怀来站的 0.35 kN/m²" in manual_text
     assert "30.98 m/s" in manual_text
-    assert [len(table["rows"]) for table in output["tables"].values()] == [13, 24, 27, 16, 16]
+    assert [len(table["rows"]) for table in output["tables"].values()] == [
+        13,
+        24,
+        27,
+        16,
+        16,
+    ]
     for index, table in enumerate(output["tables"].values(), 1):
         assert table["rows"] == [
             [cell.text for cell in row.cells] for row in doc.tables[index].rows[1:]
@@ -295,7 +395,11 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert selected_result["adopted"] == selected_result["multiplier_standard"]
     archive_export = client.post(
         path + "/export",
-        data={**options, "extreme": dumps(options["extreme"]), "weibull_method": "moments"},
+        data={
+            **options,
+            "extreme": dumps(options["extreme"]),
+            "weibull_method": "moments",
+        },
     )
     assert archive_export.status_code == 200
     archive_doc = Document(BytesIO(archive_export.content))
@@ -319,6 +423,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
 
 
 @pytest.mark.parametrize("year_count", [1, 2])
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
     client = TestClient(create_app(tmp_path))
     start = 2022
@@ -384,6 +489,7 @@ def test_short_assessment_exports_only_the_actual_period(tmp_path, year_count):
     ]
 
 
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_ten_minute_assessment_uses_native_samples_and_real_hours(tmp_path):
     client = TestClient(create_app(tmp_path))
     raw = (
@@ -416,6 +522,7 @@ def test_ten_minute_assessment_uses_native_samples_and_real_hours(tmp_path):
     )
 
 
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
     client = TestClient(create_app(tmp_path))
     rows = ["Date & Time Stamp\tCH1Anem125m m/s\tCH2Vane125m Deg"]
@@ -436,11 +543,25 @@ def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
     assert result["year"] == 2004
     assert result["tables"]["风速和风功率密度月变化图"]["rows"][0][1] == "8.00"
     export_url = "/api/v1/reports/templates/mesoscale/1.0.0/export"
-    word = client.post(export_url, data={**options, "extreme": dumps({"pressure_override": 0.45})})
+    export_options = {**options, "extreme": dumps({"pressure_override": 0.45})}
+    word = client.post(export_url, data=export_options)
     assert word.status_code == 200
     report = Document(BytesIO(word.content))
     assert report.tables[1].rows[1].cells[1].text == "8.00"
     assert "手动选择分析年，系统推荐年份为2003年" in "".join(p.text for p in report.paragraphs)
+    assert (
+        client.post(export_url, data={**export_options, "run_id": run.json()["id"]}).status_code
+        == 422
+    )
+    options["extreme"] = {"pressure_override": 0.45}
+    matching_run = client.post(run_url, json=options)
+    assert matching_run.status_code == 200
+    assert (
+        client.post(
+            export_url, data={**export_options, "run_id": matching_run.json()["id"]}
+        ).status_code
+        == 200
+    )
     options["analysis_year"] = 2023
     assert client.post(run_url, json=options).status_code == 422
     assert (
@@ -451,6 +572,7 @@ def test_selected_natural_year_is_shared_by_results_and_word(tmp_path):
     )
 
 
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     client = TestClient(create_app(tmp_path))
     path = "/api/v1/reports/assessment"
@@ -611,6 +733,7 @@ def test_assessment_source_lookup_recognizes_density_in_older_upload(tmp_path):
     assert response.json()["density_by_year"] == {"2022": 1.09}
 
 
+@pytest.mark.usefixtures("sparse_report_fixture")
 def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_path):
     client = TestClient(create_app(tmp_path))
     raw = (
@@ -629,6 +752,9 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
     assert source["density_period"] == pytest.approx(1.211)
     assert source["temperature_period"] == pytest.approx(15)
     options = {"source_id": source["id"], "density": 1.211, "hub_height_m": 125}
+    missing_shear = client.post(path + "/runs", json=options)
+    assert missing_shear.status_code == 422 and "风切变指数" in missing_shear.json()["detail"]
+    options["wind_shear_exponent"] = 0.2
     response = client.post(path + "/runs", json=options)
     assert response.status_code == 200, response.text
     output = client.get(f"{path}/runs/{response.json()['id']}").json()
@@ -636,6 +762,8 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
     assert adjustment["hub_density"] == pytest.approx(1.21028539)
     assert adjustment["temperature_source"] == "file"
     assert output["extreme"]["density"] == adjustment["hub_density"]
+    assert output["extreme"]["mean_speed"] == pytest.approx(8 * (125 / 120) ** 0.2)
+    assert output["extreme"]["site_speed"] == pytest.approx(8.07 * 5)
     assert output["power_density_grade"]["height_m"] == 120
     assert output["power_density_grade"]["grade"] == "2"
     assert output["power_density_grade"]["power_density"] == pytest.approx(319.704)

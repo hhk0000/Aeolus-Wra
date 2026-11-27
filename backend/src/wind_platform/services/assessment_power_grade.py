@@ -1,6 +1,7 @@
 """NB/T 31147—2018 tables 5.3.6-1 and 5.3.6-2, W/m² upper boundaries."""
 
 from bisect import bisect_right
+from math import isfinite
 
 LEVELS = ("D-1", "D-2", "D-3", "1", "2", "3", "4", "5", "6", "7")
 UPPER_BY_HEIGHT = {
@@ -23,7 +24,12 @@ def classify_power_density(height, power_density):
         "grade": None,
         "threshold_heights_m": [],
     }
-    if height < HEIGHTS[0]:
+    if (
+        not isfinite(height)
+        or height < HEIGHTS[0]
+        or not isfinite(power_density)
+        or power_density < 0
+    ):
         return result
     reference_height = min(height, HEIGHTS[-1])
     if reference_height in UPPER_BY_HEIGHT:

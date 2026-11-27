@@ -283,6 +283,21 @@ def select_year(height, records, interval_minutes=None, coverage=None):
     return height, times, v, d, years, start, annual, avg, start + idx, interval_minutes
 
 
+def recommend_extreme_multiplier(raw, analysis_year=None):
+    _, _, speed, _, years, start, annual, _, suggested_year, _ = hourly(raw)
+    end = start + len(annual) - 1
+    if analysis_year is not None and not start <= analysis_year <= end:
+        raise CalculationError(f"分析年须在本次资料期（{start}–{end}年）内。")
+    selected = suggested_year if analysis_year is None else analysis_year
+    samples = speed if 1 < len(annual) < 10 else speed[years == selected]
+    try:
+        fit = fit_weibull(samples)
+    except (CalculationError, ValueError):
+        return {"k": None, "multiplier": None}
+    k = float(fit["k"])
+    return {"k": k, "multiplier": 5 if k > 1.8 else 6 if k >= 1.5 else 7}
+
+
 def period_mean(buckets, start, end):
     totals = [value for year, value in buckets.items() if start <= year <= end]
     count = sum(n for _, n in totals)
@@ -664,6 +679,7 @@ def build(
     reviewed_layout=False,
     figure_review_layout=False,
     conclusion_layout=False,
+    updated_template_layout=False,
     hub_height_m=None,
     mean_temperature_c=None,
     wind_shear_exponent=None,
@@ -1243,14 +1259,21 @@ def build(
         if wind_shear_exponent is not None:
             fields["风切变指数"] = f"{wind_shear_exponent:g}"
     if conclusion_layout:
-        for name, values in (("主风向", direction), ("主风能方向", energy)):
+        limit = 3 if updated_template_layout else 2
+        for name, frequency_field, values in (
+            ("主风向", "主风向频率", direction),
+            ("主风能方向", "主风能频率", energy),
+        ):
             ranked = sorted(
                 (i for i, value in enumerate(values) if value > 0),
                 key=lambda i: -values[i],
-            )[:2]
-            fields[f"结论{name}"] = "、".join(COMPASS[i] for i in ranked)
-            frequency_field = "结论主风向频率" if name == "主风向" else "结论主风能频率"
-            fields[frequency_field] = fmt(sum(values[i] for i in ranked))
+            )[:limit]
+            bearings = "、".join(COMPASS[i] for i in ranked)
+            share = fmt(sum(values[i] for i in ranked))
+            fields[f"结论{name}"] = bearings
+            fields[f"结论{frequency_field}"] = share
+            if updated_template_layout and ranked:
+                fields.update({name: bearings, frequency_field: share})
     fields["换图"] = ""
     grade = power_grade["grade"]
     grade_needs_input = not grade and power_grade.get("manual_review", False)
@@ -1304,6 +1327,9 @@ def build(
                     "机组参考风速类别": f"IEC {wind_class} 类及以上" if wind_class else "S 类",
                 }
             )
+        if updated_template_layout:
+            fields["综合修正系数"] = f"{factor:g}"
+            fields["报告采用倍数"] = f"（采用倍数 {extreme_multiplier:g}）"
         if short_window:
             for field in ("20年起止年月", "20年平均风速", "代表年份", "相对偏差", "代表年选取说明"):
                 fields.pop(field, None)
@@ -1361,6 +1387,29 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if updated_template_layout and txt.startswith("（3）五日雷暴法"):
+            approved_assessment_template.replace_wording(
+                para._p, "【勾选并完成计算时输出本小节】", ""
+            )
+            return
+        if (
+            updated_template_layout
+            and density_adjustment is None
+            and txt.startswith("分析期为【分析期】")
+        ):
+            approved_assessment_template.replace_wording(
+                para._p, "，外推至轮毂高度 【分析高度】 m", ""
+            )
+            txt = para.text
+        if (
+            updated_template_layout
+            and wind_shear_exponent is None
+            and txt.startswith("本次分析采用的风切变指数为")
+        ):
+            approved_assessment_template.replace_wording(
+                para._p, txt, "本次采用与轮毂同高的风速资料。"
+            )
+            return
         if conclusion_layout and "结论主风" in txt:
             direction_field = "结论主风向" if "【结论主风向】" in txt else "结论主风能方向"
             if not fields[direction_field]:
@@ -1445,7 +1494,11 @@ def build(
                 bind_class=figure_review_layout,
             )
             txt = para.text
-        if figure_review_layout and "【分析高度空气密度】" in txt:
+        if (
+            figure_review_layout
+            and "【分析高度空气密度】" in txt
+            and (not updated_template_layout or density_adjustment is None)
+        ):
             para.clear()
             if density_adjustment is None:
                 parts = [
@@ -1590,7 +1643,11 @@ def build(
                 bound.text = prefix + value + suffix
             bound.font.color.rgb = RGBColor.from_string("008000")
             bound.font.highlight_color = None
-            if reviewed_layout and reviewed_marks.get(m[1]):
+            if (
+                reviewed_layout
+                and reviewed_marks.get(m[1])
+                and (not updated_template_layout or value == m[0])
+            ):
                 bound.font.color.rgb = RGBColor.from_string("000000")
                 bound.font.highlight_color = WD_COLOR_INDEX.YELLOW
             if approved_layout and m[0] == "【风功率密度等级】":
@@ -1599,7 +1656,7 @@ def build(
                 bound.font.highlight_color = WD_COLOR_INDEX.RED
             for shade in bound._r.xpath("./w:rPr/w:shd"):
                 shade.getparent().remove(shade)
-            if approved_layout and not reviewed_marks.get(m[1]):
+            if approved_layout and (updated_template_layout or not reviewed_marks.get(m[1])):
                 approved_assessment_template.style_inserted_numbers(
                     bound, density_units=m[0] == "【空气密度说明】"
                 )

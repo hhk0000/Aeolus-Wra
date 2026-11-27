@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 from io import BytesIO
-from json import dumps
+from json import dumps, loads
 from math import log, log1p, sqrt
+from pathlib import Path
 from statistics import mean, stdev
 from zipfile import ZipFile
 
@@ -9,6 +10,7 @@ import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 from PIL import Image
+from wind_platform.api import reports
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
 from wind_platform.services import mesoscale_report
@@ -16,11 +18,25 @@ from wind_platform.services.assessment_extreme import reference_wind_class
 from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 from wind_platform.services.pressure_location import match_pressure
+from wind_platform.services.report_catalog import RENDERERS, release
 
 
 @pytest.fixture
 def sparse_report_fixture(monkeypatch):
     """Keep the small layout/statistics fixtures independent of availability screening."""
+    archive = Path(__file__).parent / "fixtures" / "mesoscale"
+    legacy_settings = loads((archive / "catalog.json").read_text(encoding="utf-8"))["mesoscale"][
+        "releases"
+    ]
+
+    def fixture_release(key, version):
+        if key == "mesoscale" and version in legacy_settings:
+            return (archive / f"{version}.docx").read_bytes(), RENDERERS[
+                legacy_settings[version]["renderer"]
+            ]
+        return release(key, version)
+
+    monkeypatch.setattr(reports, "release", fixture_release)
     actual_coverage = mesoscale_report.natural_year_coverage
 
     def coverage(records, interval):
@@ -41,6 +57,37 @@ def sparse_report_fixture(monkeypatch):
         return 60 if all(stamp.minute == 0 for stamp in records) else actual_interval(records)
 
     monkeypatch.setattr(mesoscale_report, "record_interval", interval)
+
+
+def test_assessment_library_exposes_only_updated_template(tmp_path):
+    client = TestClient(create_app(tmp_path))
+    base = "/api/v1/reports/templates"
+    assert [item["version"] for item in client.get(base).json()] == ["1.3.4"]
+    assert client.get(f"{base}/mesoscale/1.3.3/source").status_code == 422
+    current = client.get(f"{base}/mesoscale/1.3.4/source")
+    assert current.status_code == 200
+    doc = Document(BytesIO(current.content))
+    assert not any("（3）五日雷暴法" in p.text for p in doc.paragraphs)
+    assert "威布尔形状参数 k" in "\n".join(p.text for p in doc.paragraphs)
+
+
+@pytest.mark.parametrize(("k", "expected"), [(1.49, 7), (1.5, 6), (1.8, 6), (1.81, 5)])
+@pytest.mark.usefixtures("sparse_report_fixture")
+def test_assessment_recommends_multiplier_from_unrounded_k(tmp_path, monkeypatch, k, expected):
+    client = TestClient(create_app(tmp_path))
+    raw = (
+        b"Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\n"
+        b"2023-01-01 00:00\t4\t0\n2023-12-31 23:00\t6\t90\n"
+    )
+    source = client.post(
+        "/api/v1/reports/assessment/files/source", files={"file": ("wind.txt", raw)}
+    )
+    assert source.status_code == 200
+    monkeypatch.setattr(mesoscale_report, "fit_weibull", lambda _speed: {"k": k})
+    response = client.get(
+        f"/api/v1/reports/assessment/multiplier-recommendation/{source.json()['id']}"
+    )
+    assert response.json() == {"k": k, "multiplier": expected}
 
 
 @pytest.mark.parametrize("step_minutes", [20, 30, 180, 1440])
@@ -192,7 +239,7 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     doc = Document(BytesIO(result.content))
     text = "".join(p.text for p in doc.paragraphs)
     assert "测试场址" in text and "【分析高度】" not in text
-    assert entry["version"] == "1.3.3"
+    assert entry["version"] == "1.3.4"
     assert "五日雷暴法" not in text and "取风压法" in text
     assert "24.74 m/s" in text
     assert doc.tables[0].rows[-1].cells[1].text == "5.00"
@@ -732,6 +779,14 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     assert any(
         f"50 年一遇最大风速取 {extreme['adopted']:.2f} m/s" in paragraph for paragraph in paragraphs
     )
+    revised = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.4/export",
+        data={**options, "extreme": dumps(options["extreme"])},
+    )
+    assert revised.status_code == 200, revised.text[:400]
+    revised_doc = Document(BytesIO(revised.content))
+    assert any(p.text == "（3）五日雷暴法" for p in revised_doc.paragraphs)
+    assert all("【勾选并完成计算时输出本小节】" not in p.text for p in revised_doc.paragraphs)
 
     two_years = hourly + hourly[hourly.index("\n") + 1 :].replace("2023", "2022")
     source = client.post(path + "/files/source", files={"file": ("two-years.txt", two_years)})

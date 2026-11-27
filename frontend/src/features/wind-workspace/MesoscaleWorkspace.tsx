@@ -64,6 +64,7 @@ type Assessment = {
   thunderstormC1?: string;
   thunderstormC2?: string;
   multiplier: string;
+  manualMultiplier?: boolean;
   density: string;
   windShear?: string;
   hubHeight?: string;
@@ -280,6 +281,11 @@ export default function MesoscaleWorkspace({
     error?: string;
   }>();
   const [template, setTemplate] = useState<Template>();
+  const [multiplierSuggestion, setMultiplierSuggestion] = useState<{
+    key: string;
+    k: number | null;
+    multiplier: number | null;
+  }>();
   const [error, setError] = useState("");
   const [resultError, setResultError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -318,11 +324,21 @@ export default function MesoscaleWorkspace({
     state.pressureOverride === undefined || state.pressureOverride.trim() === ""
       ? undefined
       : Number(state.pressureOverride);
-  const multiplier = Number(state.multiplier);
   const windowYears = source?.window_years ?? source?.annual?.length ?? 0;
   const combinedWindow = windowYears > 1 && windowYears < 10;
   const selectedAnalysisYear = combinedWindow ? undefined : state.analysisYear;
   const analysisYear = selectedAnalysisYear ?? source?.year;
+  const multiplierKey =
+    source?.id && `${source.id}:${selectedAnalysisYear ?? ""}`;
+  const recommendation =
+    multiplierKey && multiplierSuggestion?.key === multiplierKey
+      ? multiplierSuggestion
+      : undefined;
+  const manualMultiplier = state.manualMultiplier ?? state.multiplier !== "5";
+  const multiplierText = manualMultiplier
+    ? state.multiplier
+    : String(recommendation?.multiplier ?? 5);
+  const multiplier = Number(multiplierText);
   const analysisYears = source?.start_year
     ? (source.annual ?? []).map((_, index) => source.start_year! + index)
     : [];
@@ -520,6 +536,34 @@ export default function MesoscaleWorkspace({
     return () => controller.abort();
   }, [page]);
 
+  useEffect(() => {
+    if (!sourceId || !source?.year || !multiplierKey) return;
+    const controller = new AbortController();
+    const query =
+      selectedAnalysisYear === undefined
+        ? ""
+        : `?analysis_year=${selectedAnalysisYear}`;
+    void api<{ k: number | null; multiplier: number | null }>(
+      "/reports/assessment/multiplier-recommendation/" + sourceId + query,
+      undefined,
+      controller.signal,
+    )
+      .then((suggestion) => {
+        if (!controller.signal.aborted)
+          setMultiplierSuggestion({ key: multiplierKey, ...suggestion });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setMultiplierSuggestion({
+            key: multiplierKey,
+            k: null,
+            multiplier: null,
+          });
+        }
+      });
+    return () => controller.abort();
+  }, [sourceId, source?.year, selectedAnalysisYear, multiplierKey]);
+
   const yearMean =
     analysisYear !== undefined && source?.start_year !== undefined
       ? source.annual?.[analysisYear - source.start_year]
@@ -546,6 +590,7 @@ export default function MesoscaleWorkspace({
         windShear <= 2)) &&
     Number.isFinite(multiplier) &&
     multiplier > 0 &&
+    (manualMultiplier || recommendation !== undefined) &&
     combinedFactorNum !== undefined &&
     (!state.thunderstorm || stormReady) &&
     (pressureOverride === undefined ||
@@ -687,6 +732,7 @@ export default function MesoscaleWorkspace({
     try {
       const form = new FormData();
       form.set("source_id", source.id);
+      form.set("run_id", state.runId);
       form.set("density", String(density));
       if (hubHeight !== undefined) form.set("hub_height_m", String(hubHeight));
       if (needsExtrapolation) {
@@ -1171,20 +1217,44 @@ export default function MesoscaleWorkspace({
                   {/* 第 6 行：五倍平均风速法计算倍数 + 五日雷暴法可选开关 */}
                   <div className="ww-form-row ww-row-2">
                     <label>
-                      五倍平均风速法计算倍数
+                      平均风速倍数法计算倍数
                       <input
                         required
                         type="number"
                         step="any"
                         min="0.1"
-                        value={state.multiplier}
+                        value={multiplierText}
                         onChange={(event) =>
                           change({
                             multiplier: event.target.value,
+                            manualMultiplier: true,
                             runId: undefined,
                           })
                         }
                       />
+                      <small className="ww-inline-note" role="status">
+                        {recommendation?.k != null
+                          ? `威布尔 k（最大似然法）= ${recommendation.k.toFixed(3)}，推荐 ${recommendation.multiplier} 倍。`
+                          : recommendation
+                            ? "无法拟合威布尔 k 时默认采用 5 倍，可手动修改。"
+                            : source?.year
+                              ? "正在计算推荐倍数…"
+                              : "导入资料后按威布尔 k 推荐。"}
+                      </small>
+                      {manualMultiplier && (
+                        <button
+                          type="button"
+                          className="ww-button"
+                          onClick={() =>
+                            change({
+                              manualMultiplier: false,
+                              runId: undefined,
+                            })
+                          }
+                        >
+                          使用推荐倍数
+                        </button>
+                      )}
                     </label>
                     <div className="ww-thunderstorm-box">
                       <label className="ww-checkbox-inline">

@@ -31,6 +31,15 @@ RENDERERS = {
         figure_review_layout=True,
         conclusion_layout=True,
     ),
+    "mesoscale-updated-template": partial(
+        mesoscale_report.build,
+        formal_layout=True,
+        approved_layout=True,
+        reviewed_layout=True,
+        figure_review_layout=True,
+        conclusion_layout=True,
+        updated_template_layout=True,
+    ),
 }
 
 

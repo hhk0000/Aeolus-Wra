@@ -1,35 +1,11 @@
 {
   "mesoscale": {
     "title": "前期中尺度评估",
-    "active": "1.3.3",
+    "active": "1.3.4",
     "releases": {
-      "1.0.0": {
-        "renderer": "mesoscale-v1",
-        "sha256": "1eb8ccda41cd5faf9656a7bd170bf8bd9e9a1ac2bb7f613d8626fc88bc0046e9"
-      },
-      "1.1.0": {
-        "renderer": "mesoscale-v1",
-        "sha256": "29b4c85915f47bb63d7c041d2606132d4dcba721bee233413627a0381f950b54"
-      },
-      "1.2.0": {
-        "renderer": "mesoscale-formal",
-        "sha256": "a73520b32741259c74b51ac1a1ea9fec513d6e2f33455e8aab5505aa3d00b2d6"
-      },
-      "1.3.0": {
-        "renderer": "mesoscale-approved",
-        "sha256": "f6321215c50d02ed2deb4777459f1ec927365fed7ae277ec419fcb201b72da72"
-      },
-      "1.3.1": {
-        "renderer": "mesoscale-reviewed",
-        "sha256": "b451565724c5ce860b0b0922b332f5590c8235209d569d05783da17a2079b5aa"
-      },
-      "1.3.2": {
-        "renderer": "mesoscale-figure-review",
-        "sha256": "24dd8485436354c96214ae0921affd1453d7367f7272b015a69633a5a75cb229"
-      },
-      "1.3.3": {
-        "renderer": "mesoscale-conclusion-review",
-        "sha256": "7f5bffa599c940fc7ff10ab875d53e315f7d749e56e8e002cb37427f6d890cab"
+      "1.3.4": {
+        "renderer": "mesoscale-updated-template",
+        "sha256": "4fd9094ed4f24b026c3c99ea6fb990bda3084505264564866766e3946f8305c0"
       }
     }
   }

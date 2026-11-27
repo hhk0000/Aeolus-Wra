@@ -1,5 +1,8 @@
 """Local Word report downloads. Uploaded templates and charts are request-scoped."""
 
+from io import BytesIO
+
+from docx import Document
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError
@@ -8,6 +11,7 @@ from starlette.datastructures import UploadFile
 
 from wind_platform.core.calculations import CalculationError
 from wind_platform.services import assessment_extreme, mesoscale_report, pressure_location
+from wind_platform.services.approved_assessment_template import select_thunderstorm_section
 from wind_platform.services.report_catalog import catalog, release
 from wind_platform.services.word_report import MAX_FIGURES, MIB, ReportManifest, build_report
 
@@ -70,6 +74,13 @@ def report_templates():
 @router.get("/reports/templates/{key}/{version}/source")
 def report_template_source(key: str, version: str):
     data, _ = release(key, version)
+    settings = catalog().get(key, {}).get("releases", {}).get(version, {})
+    if settings.get("renderer") == "mesoscale-updated-template":
+        template = Document(BytesIO(data))
+        select_thunderstorm_section(template, enabled=False)
+        output = BytesIO()
+        template.save(output)
+        data = output.getvalue()
     return Response(
         data,
         media_type=DOCX,
@@ -154,6 +165,15 @@ def get_pressure_library(file_id: str, request: Request):
 def get_pressure_match(place: str = ""):
     station, provinces = pressure_location.pressure_lookup(place[:120])
     return {"station": station, "candidate_provinces": provinces}
+
+
+@router.get("/reports/assessment/multiplier-recommendation/{source_id}")
+def get_multiplier_recommendation(
+    source_id: str, request: Request, analysis_year: int | None = None
+):
+    local = request.app.state.wind_store
+    raw = assessment_file(local, source_id, "source")
+    return mesoscale_report.recommend_extreme_multiplier(raw, analysis_year)
 
 
 class ThunderstormOptions(BaseModel):

@@ -127,7 +127,7 @@ def adjust_reviewed_year_wording(paragraph, direct, review_required, pending, is
         replace_wording(
             paragraph._p, "考虑到【偏差最小年份】年距本阶段较远，经比选，", "经人工比选，"
         )
-    if not is_flat:
+    if not is_flat and "，符合本项目平风年判定条件" in paragraph.text:
         replace_wording(paragraph._p, "，符合本项目平风年判定条件", "")
 
 
@@ -211,7 +211,13 @@ def select_thunderstorm_section(doc, enabled):
     if start is None:
         raise CalculationError("评估模板缺少章节：五日雷暴法")
     end = next(
-        (i for i in range(start + 1, len(texts)) if "【实际参与比选的方法】" in texts[i]), None
+        (
+            i
+            for i in range(start + 1, len(texts))
+            if "【实际参与比选的方法】" in texts[i]
+            or (texts[i].startswith("综合以上方法计算结果") and "【机组参考风速类别】" in texts[i])
+        ),
+        None,
     )
     if end is None:
         raise CalculationError("评估模板缺少字段：实际参与比选的方法")
@@ -358,9 +364,15 @@ def validate_release(doc, *, reviewed_layout=False):
         restore_sample_fields(section.header.paragraphs, fields, reviewed_layout=reviewed_layout)
     select_thunderstorm_section(doc, enabled=True)
     summary = next((p for p in doc.paragraphs if "【实际参与比选的方法】" in p.text), None)
-    if summary is None:
+    if summary is not None:
+        revise_extreme_conclusion(summary, "【标准空气密度下最大风速】", None)
+    elif not any(
+        p.text.startswith("综合以上方法计算结果")
+        and {"【标准空气密度下最大风速】", "【机组参考风速类别】"}
+        <= set(re.findall(r"【[^】]+】", p.text))
+        for p in doc.paragraphs
+    ):
         raise CalculationError("评估模板缺少极大风速结论段落")
-    revise_extreme_conclusion(summary, "【标准空气密度下最大风速】", None)
     if reviewed_layout:
         body = "\n".join(p.text for p in doc.paragraphs)
         for field in (

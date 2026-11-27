@@ -40,6 +40,42 @@ def is_green(run):
     )
 
 
+def replace_wording(paragraph, old, new):
+    nodes = list(paragraph.iter(qn("w:t")))
+    text = "".join(node.text or "" for node in nodes)
+    start = text.find(old)
+    if start < 0:
+        raise CalculationError(f"评估模板缺少文字锚点：{old}")
+    end = start + len(old)
+    offset = 0
+    for node in nodes:
+        value = node.text or ""
+        next_offset = offset + len(value)
+        if offset < end and next_offset > start:
+            prefix = value[: max(0, start - offset)]
+            suffix = value[max(0, end - offset) :]
+            node.text = prefix + (new if offset <= start < next_offset else "") + suffix
+        offset = next_offset
+
+
+def remove_long_term_word_content(doc):
+    for paragraph in doc.paragraphs:
+        content = paragraph.text
+        if "按年平均风速相对20年平均风速" in content or content.startswith("图1.3-2"):
+            paragraph._p.getparent().remove(paragraph._p)
+        elif "近20年各年风速表" in content:
+            replace_wording(paragraph._p, "近20年各年风速表", "资料期各年风速表")
+    for shape in doc.inline_shapes:
+        if shape._inline.docPr.name == "近20年平均风速图":
+            rid = shape._inline.graphic.graphicData.pic.blipFill.blip.embed
+            paragraph = shape._inline.xpath("ancestor::w:p[1]")[0]
+            paragraph.getparent().remove(paragraph)
+            if rid not in doc.element.xpath(".//@r:id | .//@r:embed | .//@r:link"):
+                doc.part.drop_rel(rid)
+            return
+    raise CalculationError("评估模板缺少图位：近20年平均风速图")
+
+
 def restore_chart_anchors(doc, titles, *, sample_title=None):
     for paragraph in doc.paragraphs:
         for shape in paragraph._p.xpath(".//w:pict/*[local-name()='shape']"):
@@ -53,6 +89,8 @@ def restore_chart_anchors(doc, titles, *, sample_title=None):
             if not width or not height or len(images) != 1:
                 raise CalculationError(f"评估模板图位无效：{title}")
             rid = images[0].get(qn("r:id"))
+            if rid not in doc.part.related_parts:
+                raise CalculationError(f"评估模板图位缺少图片：{title}")
             image = BytesIO(doc.part.related_parts[rid].blob)
             if title == sample_title:
                 with Image.open(image) as raw:
@@ -79,16 +117,24 @@ def restore_sample_fields(paragraphs, fields):
             name = bookmark.get(qn("w:name"), "")
             if not name.startswith(prefix):
                 continue
-            field = SAMPLE_FIELDS.get(int(name.removeprefix(prefix)))
+            number = name.removeprefix(prefix)
+            if not re.fullmatch(r"[0-9]+", number):
+                raise CalculationError(f"评估模板书签编号无效：{name}")
+            field = SAMPLE_FIELDS.get(int(number))
             if field not in fields:
                 continue
             start = paragraph._p.index(bookmark)
             end = next(
-                element
-                for element in paragraph._p[start + 1 :]
-                if element.tag == qn("w:bookmarkEnd")
-                and element.get(qn("w:id")) == bookmark.get(qn("w:id"))
+                (
+                    element
+                    for element in paragraph._p[start + 1 :]
+                    if element.tag == qn("w:bookmarkEnd")
+                    and element.get(qn("w:id")) == bookmark.get(qn("w:id"))
+                ),
+                None,
             )
+            if end is None:
+                raise CalculationError(f"评估模板书签缺少结束位置：{name}")
             text_nodes = [
                 node
                 for element in paragraph._p[start + 1 : paragraph._p.index(end)]
@@ -103,8 +149,14 @@ def restore_sample_fields(paragraphs, fields):
 def select_thunderstorm_section(doc, enabled):
     children = list(doc.element.body)
     texts = ["".join(node.text or "" for node in child.iter(qn("w:t"))) for child in children]
-    start = next(i for i, text in enumerate(texts) if text.startswith("（3）五日雷暴法"))
-    end = next(i for i in range(start + 1, len(texts)) if "【实际参与比选的方法】" in texts[i])
+    start = next((i for i, text in enumerate(texts) if text.startswith("（3）五日雷暴法")), None)
+    if start is None:
+        raise CalculationError("评估模板缺少章节：五日雷暴法")
+    end = next(
+        (i for i in range(start + 1, len(texts)) if "【实际参与比选的方法】" in texts[i]), None
+    )
+    if end is None:
+        raise CalculationError("评估模板缺少字段：实际参与比选的方法")
     if not enabled:
         for child in children[start:end]:
             doc.element.body.remove(child)
@@ -189,8 +241,10 @@ def remove_pressure_height_note(paragraph):
 
 def revise_extreme_conclusion(paragraph, speed):
     runs = [run for run in paragraph.runs if run.text]
+    green = next((run._r for run in runs if run.text == speed and is_green(run._r)), None)
+    if green is None:
+        raise CalculationError("评估模板缺少绿色字段：标准空气密度下最大风速")
     black = runs[0]._r
-    green = next(run._r for run in runs if run.text == speed and is_green(run._r))
     anchor = next(iter(paragraph._p.findall(qn("w:commentRangeEnd"))), None)
     for template, text in (
         (
@@ -209,3 +263,29 @@ def revise_extreme_conclusion(paragraph, speed):
             anchor.addprevious(new._r)
     for run in runs:
         paragraph._p.remove(run._r)
+
+
+def validate_release(doc):
+    titles = {
+        "近20年平均风速图",
+        "风速和风功率密度月变化图",
+        "风速和风功率密度日变化图",
+        "风速和风能频率图",
+        "风向频率玫瑰图",
+        "风能频率玫瑰图",
+        "威布尔分布图",
+    }
+    restore_chart_anchors(doc, titles)
+    missing = titles - {shape._inline.docPr.name for shape in doc.inline_shapes}
+    if missing:
+        raise CalculationError(f"评估模板缺少图位：{'、'.join(sorted(missing))}")
+    fields = set(SAMPLE_FIELDS.values())
+    restore_sample_fields(doc.paragraphs, fields)
+    for section in doc.sections:
+        restore_sample_fields(section.header.paragraphs, fields)
+    select_thunderstorm_section(doc, enabled=True)
+    summary = next((p for p in doc.paragraphs if "【实际参与比选的方法】" in p.text), None)
+    if summary is None:
+        raise CalculationError("评估模板缺少极大风速结论段落")
+    revise_extreme_conclusion(summary, "【标准空气密度下最大风速】")
+    remove_long_term_word_content(doc)

@@ -488,9 +488,17 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
         data={**options, "extreme": dumps(options["extreme"])},
     )
     assert report.status_code == 200
-    paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
+    short_doc = Document(BytesIO(report.content))
+    paragraphs = [p.text for p in short_doc.paragraphs]
     assert "（3）五日雷暴法【勾选并完成计算时输出本小节】" in paragraphs
-    assert any("近20年平均风速为【20年平均风速】" in paragraph for paragraph in paragraphs)
+    assert not any("近20年" in paragraph for paragraph in paragraphs)
+    assert not any(
+        shape._inline.docPr.name == "近20年平均风速图" for shape in short_doc.inline_shapes
+    )
+    assert [[c.text for c in row.cells] for row in short_doc.tables[0].rows[1:]] == [
+        ["2023", "5.00", "/", "/"],
+        ["1年平均", "5.00", "10年平均", "资料不足"],
+    ]
     assert any(
         f"50 年一遇最大风速取 {extreme['adopted']:.2f} m/s" in paragraph for paragraph in paragraphs
     )
@@ -507,6 +515,16 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     combined = client.get(f"{path}/runs/{response.json()['id']}").json()
     assert combined["analysis_start_year"] == 2022
     assert combined["analysis_end_year"] == combined["extreme"]["thunderstorm"]["year"] == 2023
+    assert combined["fields"]["区间累计时数"] == "3"
+    mismatch = client.post(
+        path + "/files/source",
+        files={"file": ("different-height.txt", hourly.replace("100m", "125m"))},
+    )
+    assert mismatch.status_code == 200
+    options["source_id"] = mismatch.json()["id"]
+    response = client.post(path + "/runs", json=options)
+    assert response.status_code == 422
+    assert "分析高度 125 m 一致" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
@@ -620,7 +638,7 @@ def test_assessment_uses_highest_populated_layer_for_grade_and_hub_density(tmp_p
     )
     assert report.status_code == 200
     paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
-    assert any("轮毂高度 125 m 处的空气密度为 1.210285" in p for p in paragraphs)
+    assert any("轮毂高度 125 m 处的空气密度为 1.210 kg/m³" in p for p in paragraphs)
     assert any("场址风功率密度等级及风能资源评价：2 级。" == p for p in paragraphs)
     no_temperature = raw.replace(b"288.15", b"")
     source = client.post(

@@ -561,7 +561,7 @@ def pressure_result_text(station, speed, site_speed, density):
     source = pressure_source_text(station)
     return (
         f"{source}50 年一遇基本风压为 {station['pressure']:g} kN/m²，"
-        f"标准空气密度参考风速为 {speed:.2f} m/s。按场址空气密度 {density:g} kg/m³ "
+        f"标准空气密度参考风速为 {speed:.2f} m/s。按场址空气密度 {density:.3f} kg/m³ "
         f"反算的等效参考风速为 {site_speed:.2f} m/s。"
     )
 
@@ -642,7 +642,7 @@ def build(
             raise CalculationError("五日雷暴法需要 10 分钟风速资料，请另传 10 分钟 TXT。")
         if storm_height != height:
             raise CalculationError(
-                f"五日雷暴法资料的最高有效风速层须与分析高度 {height:g} m 一致。"
+                f"五日雷暴法资料的最高有效风速层须与分析高度 {float(height):g} m 一致。"
             )
         thunderstorm = five_day_thunderstorm(
             storm_records,
@@ -724,6 +724,9 @@ def build(
     else:
         selection_note = "无平风年，取偏差最小年份"
 
+    effective_hours = effective.sum() * interval_minutes / 60
+    if combined:
+        effective_hours /= window_years
     fields = {
         "分析高度": height,
         "时间步长": "1 h" if interval_minutes == 60 else "10 min",
@@ -737,12 +740,12 @@ def build(
         "分析期": f"{analysis_start}年1月—{analysis_end}年12月",
         "相对偏差": fmt(deviation * 100),
         "代表年选取说明": selection_note,
-        "轮毂高度空气密度": f"{rho:.10g}",
+        "轮毂高度空气密度": f"{rho:.3f}",
         "年平均风速": fmt(stats["mean_speed"]),
         "年平均风功率密度": fmt(stats["power_density"]),
         "大风月": f"{np.nanargmax(months[:, 0]) + 1}月",
         "小风月": f"{np.nanargmin(months[:, 0]) + 1}月",
-        "区间累计时数": f"{effective.sum() * interval_minutes / 60:.2f}".rstrip("0").rstrip("."),
+        "区间累计时数": f"{effective_hours:.2f}".rstrip("0").rstrip("."),
         "区间风速频率": fmt(100 * effective.sum() / np.isfinite(a).sum()),
         "区间风能频率": fmt(100 * np.nansum(a[effective] ** 3) / np.nansum(a**3)),
         "风速频率最高区间": freq[np.argmax(f)]["label"],
@@ -883,6 +886,8 @@ def build(
         approved_assessment_template.restore_chart_anchors(
             doc, chart_titles, sample_title=None if fit else "威布尔分布图"
         )
+        if short_window:
+            approved_assessment_template.remove_long_term_word_content(doc)
 
     def fill_cell(cell, value):
         if approved_layout:
@@ -916,27 +921,27 @@ def build(
             [
                 start + i,
                 fmt(annual[i]),
-                start + j if j < window_years else None if approved_layout else "/",
-                fmt(annual[j]) if j < window_years else None if approved_layout else "/",
+                start + j if j < window_years else "/",
+                fmt(annual[j]) if j < window_years else "/",
             ],
+        )
+    if approved_layout and short_window:
+        summary = doc.tables[0].rows[12].cells
+        approved_assessment_template.replace_wording(
+            summary[0]._tc, "20年平均", f"{window_years}年平均"
         )
     row(
         0,
         12,
         [
             f"{window_years}年平均",
-            None if approved_layout and short_window else fmt(avg),
+            fmt(avg),
             "近10年平均" if short_window else "10年平均",
-            fields["10年平均风速"]
-            if window_years >= 10
-            else None
-            if approved_layout
-            else "资料不足",
+            fields["10年平均风速"] if window_years >= 10 else "资料不足",
         ],
     )
-    if not approved_layout:
-        for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
-            unused._tr.getparent().remove(unused._tr)
+    for unused in doc.tables[0].rows[min(11, window_years) + 1 : 12]:
+        unused._tr.getparent().remove(unused._tr)
     for table_index, table in enumerate(tables.values(), 1):
         for row_index, values in enumerate(table["rows"], 1):
             if formal_layout and table_index == 3 and row_index <= 26:
@@ -955,9 +960,13 @@ def build(
             shape.height = Emu(round(shape.width * image.px_height / image.px_width))
 
     for title, labels, ss, kind in series:
+        if approved_layout and short_window and kind == "annual":
+            continue
         caption = "资料期各年平均风速图" if kind == "annual" and short_window else title
         fit_label = WEIBULL_METHOD_LABELS[weibull_method] if kind == "fit" else None
-        shape = shapes[title]
+        shape = shapes.get(title)
+        if shape is None:
+            raise CalculationError(f"评估模板缺少图位：{title}")
         if formal_layout:
             if kind == "line" and len(labels) == 12:
                 labels = [f"{month}月" for month in labels]
@@ -1090,7 +1099,7 @@ def build(
         f"{'平均风速' if combined else '年平均风速'}保留两位小数后为 "
         f"{extreme['mean_speed_used']:.2f} m/s，乘以 {extreme_multiplier:g}，"
         f"场址密度下估算风速为 {extreme['site_speed']:.2f} m/s。"
-        f"分析配置采用空气密度 {rho:g} kg/m³，折算至标准空气密度后为 "
+        f"分析配置采用空气密度 {rho:.3f} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
     )
     methods = "风压法和平均风速倍数法"
@@ -1112,7 +1121,7 @@ def build(
                 "风压来源": pressure_source_text(pressure_station).rstrip("。"),
                 "风压法标准风速": f"{extreme['pressure_standard']:.2f}",
                 "风压法场址风速": f"{extreme['pressure_site']:.2f}",
-                "场址空气密度": f"{rho:g}",
+                "场址空气密度": f"{rho:.3f}",
                 "分析期平均风速": f"{extreme['mean_speed_used']:.2f}",
                 "风速倍数": f"{extreme_multiplier:g}",
                 "倍数法场址风速": f"{extreme['site_speed']:.2f}",
@@ -1174,6 +1183,24 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
+        if combined and "区间累计时数为" in txt:
+            approved_assessment_template.replace_wording(
+                para._p, "区间累计时数为", "区间年均有效时数为"
+            )
+            txt = para.text
+        if approved_layout and short_window and "选取代表年份为" in txt:
+            para.clear()
+            for label, field in (
+                ("分析期为", "分析期"),
+                ("。采用", "分析高度"),
+                (" m 高度风速、风向资料，时间步长为 ", "时间步长"),
+            ):
+                para.add_run(label)
+                value = para.add_run(fields[field])
+                value.font.color.rgb = RGBColor.from_string("008000")
+                approved_assessment_template.style_inserted_numbers(value)
+            para.add_run("。")
+            return
         if approved_layout and "【实际参与比选的方法】" in txt:
             approved_assessment_template.revise_extreme_conclusion(
                 para, "【标准空气密度下最大风速】"
@@ -1185,7 +1212,7 @@ def build(
         if "【空气密度说明】" in txt or (
             "【100 m处空气密度】" in txt and "【轮毂高度空气密度】" in txt
         ):
-            density_digits = 3 if approved_layout else 6
+            density_digits = 3
             if density_adjustment:
                 temp_source = "按源文件识别" if mean_temperature_c is None else "由分析配置填写"
                 description = (

@@ -33,6 +33,11 @@ def publish(source, family, version):
                         e.getparent().remove(e)
                 data = ET.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
             dst.writestr(name, data)
+    if family == "mesoscale" and tuple(map(int, version.split("."))) >= (1, 3, 0):
+        from docx import Document
+        from wind_platform.services.approved_assessment_template import validate_release
+
+        validate_release(Document(buf))
     path = ROOT / family / (version + ".docx")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("xb") as f:

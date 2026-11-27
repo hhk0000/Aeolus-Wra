@@ -35,7 +35,7 @@ from wind_platform.services.assessment_extreme import (
     five_day_thunderstorm,
 )
 from wind_platform.services.assessment_power_grade import HEIGHTS, classify_power_density
-from wind_platform.services.mesoscale_word_charts import formal_figure
+from wind_platform.services.mesoscale_word_charts import formal_figure, power_density_axis
 
 ASSESSMENT_CALCULATION_VERSION = 2
 
@@ -503,15 +503,10 @@ def figure(title, labels, series, kind, *, fit_label=None):
             elif frequency_plot:
                 limit = frequency_top
             draw.text((50 + j * 470, 45), name, font=font, fill=colors[j])
-            step = (
-                1
-                if kind == "annual" or kind == "line" and j == 0
-                else 100
-                if kind == "line"
-                else 2
-                if frequency_plot
-                else None
-            )
+            if kind == "line" and j == 1:
+                limit, step = power_density_axis(limit)
+            else:
+                step = 1 if kind in ("annual", "line") else 2 if frequency_plot else None
             if step:
                 limit = math.ceil(limit / step) * step
                 ticks = range(0, limit + step, step)

@@ -13,12 +13,36 @@ from PIL import Image
 from wind_platform.api import reports
 from wind_platform.core.calculations import CalculationError
 from wind_platform.main import create_app
-from wind_platform.services import mesoscale_report
+from wind_platform.services import mesoscale_report, mesoscale_word_charts
 from wind_platform.services.assessment_extreme import reference_wind_class
 from wind_platform.services.assessment_power_grade import classify_power_density
 from wind_platform.services.mesoscale_report import assessment_source, hourly_records
 from wind_platform.services.pressure_location import match_pressure
 from wind_platform.services.report_catalog import RENDERERS, release
+
+
+@pytest.mark.parametrize(
+    ("peak", "step"),
+    [(0, 10), (85, 10), (100, 10), (100.01, 20), (300, 30), (1000, 100), (1001, 110)],
+)
+def test_word_power_density_axis_uses_ten_steps_and_one_extra_grid(monkeypatch, peak, step):
+    ticks = []
+
+    def capture_label(_draw, _xy, text, _size, *, anchor="mm"):
+        if anchor == "lm":
+            ticks.append(int(text))
+
+    monkeypatch.setattr(mesoscale_word_charts, "label", capture_label)
+    image = Image.new("RGB", (900, 650), "white")
+    mesoscale_word_charts.draw_cartesian(
+        image,
+        (100, 50, 800, 580),
+        ["1", "2"],
+        [("风速", [2, 3]), ("风功率密度", [0, peak])],
+        "line",
+        approved_layout=True,
+    )
+    assert ticks == [step * index for index in range(12)]
 
 
 @pytest.fixture

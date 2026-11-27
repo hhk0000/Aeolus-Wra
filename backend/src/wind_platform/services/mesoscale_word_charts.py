@@ -108,6 +108,12 @@ def short_dashes(draw, start, end, color, phase=0):
     return (phase + length) % period
 
 
+def power_density_axis(peak):
+    """Return the power-density axis upper limit and tick spacing in W/m²."""
+    top = max(1, ceil(peak / 100)) * 100
+    return top, top // 10
+
+
 def draw_cartesian(image, box, labels, values, kind, *, approved_layout=False):
     draw = ImageDraw.Draw(image)
     left, top, right, bottom = box
@@ -121,14 +127,17 @@ def draw_cartesian(image, box, labels, values, kind, *, approved_layout=False):
     domains = []
     for index, column in enumerate(series):
         available = [v for v in column if isfinite(v)]
-        step = (1 if index == 0 else 100) if dual else 2
+        step = 1 if dual else 2
         minimum = 0
         peak = max(available, default=0) if dual or annual else shared_peak
         if annual:
             span = max(peak - min(available), 0.2)
             step = next((s for s in (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50) if span / 8 <= s), 100)
             minimum = max(0, floor((min(available) - step * 0.35) / step) * step)
-        top_value = max(minimum + step, ceil(peak / step) * step)
+        if dual and index == 1:
+            top_value, step = power_density_axis(peak)
+        else:
+            top_value = max(minimum + step, ceil(peak / step) * step)
         if approved_layout and kind in {"line", "freq"}:
             top_value += step
         domains.append((minimum, top_value, step))

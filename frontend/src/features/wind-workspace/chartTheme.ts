@@ -27,16 +27,23 @@ export function excelSvgProps() {
   } as const;
 }
 
-export const windAxes = [
-  { field: "mean_speed", step: 1 },
-  { field: "power_density", step: 100 },
-] as const;
+export const windAxes = ["mean_speed", "power_density"] as const;
+const powerAxisIntervals = 10;
 
 export function windAxisMaximum(field: string, maximum: number) {
-  const axis = windAxes.find((item) => item.field === field);
-  return axis
-    ? Math.max(axis.step, Math.ceil(maximum / axis.step) * axis.step)
-    : maximum;
+  if (field === "power_density") {
+    return Math.max(1, Math.ceil(maximum / 100)) * 100;
+  }
+  return field === "mean_speed" ? Math.max(1, Math.ceil(maximum)) : maximum;
+}
+
+export function windAxisStep(
+  field: (typeof windAxes)[number],
+  maximum: number,
+) {
+  return field === "power_density"
+    ? Math.max(10, maximum / powerAxisIntervals)
+    : 1;
 }
 
 export const frequencyTickStep = 2;

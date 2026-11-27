@@ -1,4 +1,4 @@
-import { EXCEL, frequencyTickStep, windAxes } from "./chartTheme";
+import { EXCEL, frequencyTickStep, windAxes, windAxisStep } from "./chartTheme";
 
 export function FrequencyAxisTicks({
   left,
@@ -47,8 +47,10 @@ export function WindAxisTicks({
   maximum: (field: string) => number;
   y: (value: number, field: string) => number;
 }) {
-  return windAxes.flatMap(({ field, step }, side) =>
-    Array.from({ length: Math.round(maximum(field) / step) + 1 }, (_, i) => {
+  return windAxes.flatMap((field, side) => {
+    const top = maximum(field);
+    const step = windAxisStep(field, top);
+    return Array.from({ length: Math.round(top / step) + 1 }, (_, i) => {
       const tick = i * step;
       const position = y(tick, field);
       return (
@@ -70,6 +72,6 @@ export function WindAxisTicks({
           </text>
         </g>
       );
-    }),
-  );
+    });
+  });
 }

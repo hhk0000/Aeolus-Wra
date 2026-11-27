@@ -101,8 +101,8 @@ async def upload_assessment_file(kind: str, request: Request):
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw)
         elif kind == "thunderstorm":
             detail = await run_in_threadpool(mesoscale_report.assessment_source, raw, True)
-            if detail["interval_minutes"] != 10:
-                raise CalculationError("五日雷暴法资料须为 10 分钟步长。")
+            if detail["interval_minutes"] not in (10, 60):
+                raise CalculationError("五日雷暴法资料须为 10 分钟或逐小时步长。")
             if detail["coverage_error"]:
                 raise CalculationError(detail["coverage_error"])
         elif kind == "pressure":

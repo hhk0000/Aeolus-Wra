@@ -678,8 +678,8 @@ def build(
         if thunderstorm_raw is not None:
             storm_height, storm_records, _, _, _ = _read_hourly(thunderstorm_raw, speed_only=True)
             storm_interval = record_interval(storm_records)
-        if storm_interval != 10:
-            raise CalculationError("五日雷暴法需要 10 分钟风速资料，请另传 10 分钟 TXT。")
+        if storm_interval not in (10, 60):
+            raise CalculationError("五日雷暴法仅支持 10 分钟或逐小时风速资料。")
         if storm_height != height:
             raise CalculationError(
                 f"五日雷暴法资料的最高有效风速层须与分析高度 {float(height):g} m 一致。"
@@ -691,6 +691,7 @@ def build(
             thunderstorm_options.c1,
             thunderstorm_options.c2,
             speed_factor=speed_factor,
+            interval_minutes=storm_interval,
         )
     hub_mean_speed = stats["mean_speed"] * speed_factor
     if not math.isfinite(hub_mean_speed) or hub_mean_speed <= 0:

@@ -42,6 +42,8 @@ ASSESSMENT_CALCULATION_VERSION = 2
 DENSITY_NAME = r"空气密度|(?:air[ _-]*)?density(?![a-z])|rho(?![a-z])|ρ"
 DENSITY_UNIT = r"kg\s*(?:/\s*m\s*\^?[3³]|[· ]\s*m\s*(?:\^?-3|⁻³))"
 MEASUREMENT_HEIGHT = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*m(?![/A-Za-z\d²³])", re.I)
+DIRECTION_DEGREES = re.compile(r"°|\bdeg(?:rees?)?\b", re.I)
+SOLARWIND_DIRECTION = re.compile(r"\s*direction_(\d+(?:\.\d+)?)\s*\[\s*degrees?\s*\]\s*", re.I)
 WEIBULL_METHOD_LABELS = {
     "mle": "二参数最大似然法（MLE）",
     "least-squares": "累计概率线性最小二乘",
@@ -82,6 +84,25 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
     delimiter = detected["delimiter"]
     lines = text.splitlines()
     data_lines = lines[header_line:]
+    headers = detected["headers"]
+    solarwind_header = False
+    for channel in detected["suggestions"]:
+        if channel["quantity"] == "direction" and channel["height"] is None:
+            match = SOLARWIND_DIRECTION.fullmatch(headers[channel["index"]])
+            if match:
+                channel["height"] = float(match[1])
+                solarwind_header = True
+    first_data_line = next((line for line in data_lines if line.strip()), "")
+    space_padded = solarwind_header and delimiter == "tab" and "\t" not in first_data_line
+
+    def split_data_row(line):
+        if space_padded:
+            cells = re.split(r" {2,}", line.strip())
+            if len(cells) != len(headers):
+                raise ValueError("Space-padded row width differs from the header.")
+            return cells
+        return split_line(line, delimiter)
+
     columns = {}
     for quantity in ("speed",) if speed_only else ("speed", "direction"):
         candidates = [
@@ -105,7 +126,10 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
             if len(heights) > 1:
                 highest_recorded = None
                 for line in data_lines:
-                    row = split_line(line, delimiter)
+                    try:
+                        row = split_data_row(line)
+                    except ValueError:
+                        continue  # The record loop below reports the original row number.
                     for channel in candidates:
                         if highest_recorded is not None and channel["height"] <= highest_recorded:
                             continue
@@ -130,10 +154,10 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
     height = speed["height"]
     vi = speed["index"]
     di = None if speed_only else columns["direction"]["index"]
-    if not re.search(r"\bm\s*/\s*s\b", detected["headers"][vi], re.I) or (
-        di is not None and not re.search(r"°|\bdeg\b", detected["headers"][di], re.I)
+    if not re.search(r"\bm\s*/\s*s\b", headers[vi], re.I) or (
+        di is not None and not DIRECTION_DEGREES.search(headers[di])
     ):
-        raise CalculationError("平均风速须为 m/s，风向须为度（° 或 Deg）。")
+        raise CalculationError("平均风速须为 m/s，风向须为度（°、Deg 或 degrees）。")
     preamble = "\n".join(lines[: header_line - 1]) if source_details else ""
     density_columns = (
         [
@@ -179,7 +203,7 @@ def _read_hourly(raw, source_details=False, speed_only=False, *, below_height=No
         if not line.strip():
             continue
         try:
-            row = split_line(line, delimiter)
+            row = split_data_row(line)
             dt = datetime.fromisoformat(row[ti].strip().replace("/", "-"))
             if dt in records or dt.minute % 10 or dt.second or dt.microsecond or dt.tzinfo:
                 raise ValueError()

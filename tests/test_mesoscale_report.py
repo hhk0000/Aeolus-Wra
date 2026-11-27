@@ -865,6 +865,34 @@ def test_hourly_report_does_not_pair_different_heights():
         hourly_records(raw)
 
 
+@pytest.mark.parametrize("height", [50, 100])
+@pytest.mark.parametrize("separator", ["\t", "  "])
+def test_assessment_reads_solarwind_direction_height_without_metre_suffix(
+    tmp_path, height, separator
+):
+    raw = (
+        "\n" * 10 + f"Date/time [UTC]\tSpeed_{height}m [m/s]\tDirection_{height} [degrees]\t"
+        "Temperature_2m [degrees C]\tPressure_0m [kPa]\n"
+        + separator.join(("2025-01-01T00:00:00", "5", "90", "10", "89.9"))
+        + "\n"
+        + separator.join(("2025-01-01T01:00:00", "6", "100", "11", "89.9"))
+    ).encode()
+    client = TestClient(create_app(tmp_path))
+    response = client.post(
+        "/api/v1/reports/assessment/files/source", files={"file": ("wind.txt", raw)}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["height"] == height
+    assert list(hourly_records(raw)[1].values()) == [(5, 90), (6, 100)]
+    mismatched = raw.replace(f"Direction_{height} [".encode(), b"Direction_125 [")
+    with pytest.raises(CalculationError, match="高度不同"):
+        hourly_records(mismatched)
+    if separator == "  ":
+        missing = raw.replace(b"  6  100", b"  100")
+        with pytest.raises(CalculationError, match="第 13 行"):
+            hourly_records(missing)
+
+
 def test_assessment_recognizes_density_per_natural_year_without_requiring_valid_density_rows():
     raw = (
         "Date/Time\tSpeed_100m [m/s]\tDirection_100m [Deg]\tAir_Density_100m [kg/m³]\n"

@@ -221,7 +221,8 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
         },
         data={"density": "1.2", "project": "测试场址", "factor": "75"},
     )
-    assert result.status_code == 422 and "手填后再导出" in result.json()["detail"]
+    assert result.status_code == 200, result.text[:400]
+    assert not any("风压法" in p.text for p in Document(BytesIO(result.content)).paragraphs)
     result = client.post(
         path + "/export",
         files={
@@ -352,7 +353,21 @@ def test_versioned_mesoscale_download_and_export(tmp_path):
     assert run.status_code == 200
     output = client.get("/api/v1/reports/assessment/runs/" + run.json()["id"]).json()
     assert output["year"] == data["year"]
-    assert output["extreme"]["adopted"] is None and output["extreme"]["multiplier"] == 5
+    no_pressure = output["extreme"]
+    assert no_pressure["adopted_method"] == "平均风速倍数法" and no_pressure["multiplier"] == 5
+    assert no_pressure["adopted"] == no_pressure["multiplier_standard"]
+    report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.4/export",
+        data={"source_id": data["id"], "density": "1.2", "run_id": run.json()["id"]},
+    )
+    assert report.status_code == 200, report.text[:400]
+    paragraphs = [p.text for p in Document(BytesIO(report.content)).paragraphs]
+    assert "（1）平均风速倍数法" in paragraphs
+    assert not any("风压法" in p or "五日雷暴法" in p for p in paragraphs)
+    assert any(
+        "根据平均风速倍数法计算结果" in p and f"{no_pressure['adopted']:.2f} m/s" in p
+        for p in paragraphs
+    )
 
     place = "河北省张家口市怀来县"
     lookup = client.get("/api/v1/reports/assessment/pressure-match", params={"place": place}).json()
@@ -787,6 +802,22 @@ def test_optional_five_day_thunderstorm_uses_ten_minute_observations(tmp_path):
     revised_doc = Document(BytesIO(revised.content))
     assert any(p.text == "（3）五日雷暴法" for p in revised_doc.paragraphs)
     assert all("【勾选并完成计算时输出本小节】" not in p.text for p in revised_doc.paragraphs)
+
+    without_pressure = {"thunderstorm": options["extreme"]["thunderstorm"], "place": "未知县"}
+    no_pressure_run = client.post(path + "/runs", json={**options, "extreme": without_pressure})
+    assert no_pressure_run.status_code == 200, no_pressure_run.text
+    no_pressure_extreme = client.get(f"{path}/runs/{no_pressure_run.json()['id']}").json()[
+        "extreme"
+    ]
+    assert no_pressure_extreme["adopted_method"] == "五日雷暴法"
+    no_pressure_report = client.post(
+        "/api/v1/reports/templates/mesoscale/1.3.4/export",
+        data={**options, "extreme": dumps(without_pressure)},
+    )
+    assert no_pressure_report.status_code == 200, no_pressure_report.text[:400]
+    no_pressure_doc = Document(BytesIO(no_pressure_report.content))
+    assert any(p.text == "（2）五日雷暴法" for p in no_pressure_doc.paragraphs)
+    assert all("风压法" not in p.text for p in no_pressure_doc.paragraphs)
 
     two_years = hourly + hourly[hourly.index("\n") + 1 :].replace("2023", "2022")
     source = client.post(path + "/files/source", files={"file": ("two-years.txt", two_years)})

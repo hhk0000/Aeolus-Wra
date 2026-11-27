@@ -8,6 +8,10 @@
 
 Gemini、Codex、DSH 接手风资源评估前先读 [开发前置条件与交接](docs/WIND_ASSESSMENT_HANDOFF.md)，核对规则、原因与例外。每轮交付一份独立接续文档，格式见 [协作交接文档模板](docs/COLLABORATION.md#交接文档模板)。以下按时间保留历史记录。
 
+## 2026-11-27 无基本风压时的极大风速
+
+- 未填地区且未提供风压，或按地区查不到风压时，允许直接分析及导出。网页与 Word 只显示有结果的方法。见 [极大风速交接](docs/ASSESSMENT_OPTIONAL_PRESSURE_HANDOFF_20261127.md)。
+
 ## 2026-11-27 SolarWind 中尺度 TXT 导入
 
 - SolarWind 的 ERA5 和 MERRA2 TXT 风向列可写为 `Direction_100 [degrees]` 或 `Direction_50 [degrees]`，表头用制表符，数据行可用多个空格对齐。前 13 行搜索范围及同高配对仍适用。见 [SolarWind 导入交接](docs/ASSESSMENT_SOLARWIND_HANDOFF_20261127.md)。

@@ -139,8 +139,13 @@ def extreme_wind(
         raise CalculationError("风速倍数过大，无法计算有效的风速。")
     pressure_standard = sqrt(1600 * station["pressure"]) if station else None
     pressure_site = pressure_site_speed(pressure_standard, density)
-    candidates = {"风压法": pressure_site, "平均风速倍数法": site_speed}
-    standard_candidates = {"风压法": pressure_standard, "平均风速倍数法": multiplier_standard}
+    candidates = {}
+    standard_candidates = {}
+    if pressure_standard is not None:
+        candidates["风压法"] = pressure_site
+        standard_candidates["风压法"] = pressure_standard
+    candidates["平均风速倍数法"] = site_speed
+    standard_candidates["平均风速倍数法"] = multiplier_standard
     if thunderstorm is not None:
         candidates["五日雷暴法"] = thunderstorm["site_speed"]
         standard_speed = thunderstorm["site_speed"] * sqrt(density / STANDARD_DENSITY)
@@ -148,9 +153,9 @@ def extreme_wind(
             raise CalculationError("五日雷暴法折算后的风速超出有效范围。")
         thunderstorm = {**thunderstorm, "standard_speed": standard_speed}
         standard_candidates["五日雷暴法"] = standard_speed
-    adopted_method = max(candidates, key=candidates.get) if station else None
-    adopted_site = candidates[adopted_method] if adopted_method else None
-    adopted = standard_candidates[adopted_method] if adopted_method else None
+    adopted_method = max(candidates, key=candidates.get)
+    adopted_site = candidates[adopted_method]
+    adopted = standard_candidates[adopted_method]
     return {
         "station": station,
         "mean_speed": mean_speed,

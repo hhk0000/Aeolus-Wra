@@ -596,8 +596,6 @@ export default function MesoscaleWorkspace({
     (pressureOverride === undefined ||
       (Number.isFinite(pressureOverride) && pressureOverride > 0));
 
-  const exportPressure = pressureOverride ?? pressureStation?.pressure;
-  const canExport = exportPressure !== undefined && exportPressure > 0;
   const templateUrl =
     template &&
     "/api/v1/reports/templates/" + template.id + "/" + template.version;
@@ -726,7 +724,7 @@ export default function MesoscaleWorkspace({
   }
 
   async function download() {
-    if (!templateUrl || !source || !state.runId || busy || !canExport) return;
+    if (!templateUrl || !source || !state.runId || busy) return;
     setBusy(true);
     setError("");
     try {
@@ -1849,17 +1847,11 @@ export default function MesoscaleWorkspace({
           请先在「风资源分析」完成配置并运行分析。
         </p>
       )}
-      {state.runId && !canExport && (
-        <p className="ww-inline-note">
-          请先在「风资源分析」确认 50 年基本风压后再导出。
-        </p>
-      )}
-
       <div className="ww-report-actions">
         <button
           className="ww-button primary"
           type="button"
-          disabled={!templateUrl || !state.runId || busy || !canExport}
+          disabled={!templateUrl || !state.runId || busy}
           onClick={() => void download()}
         >
           {busy ? "正在生成报告…" : "生成 Word 评估报告"}
@@ -1895,17 +1887,13 @@ function ExtremeWindResult({
         ]
           .filter(Boolean)
           .join(" · ")
-      : "待补充基本风压";
+      : "";
   return (
     <>
       <div className="ww-extreme-summary">
         <div>
           <span>前期采用值 · 标准空气密度</span>
-          <strong>
-            {result.adopted === null
-              ? "待确定"
-              : `${result.adopted.toFixed(2)} m/s`}
-          </strong>
+          <strong>{result.adopted?.toFixed(2)} m/s</strong>
         </div>
         <span>场址空气密度 {result.density.toFixed(3)} kg/m³</span>
       </div>
@@ -1928,15 +1916,17 @@ function ExtremeWindResult({
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <th scope="row">风压法</th>
-              <td>
-                {station && <strong>{station.pressure} kN/m²</strong>}
-                <small>{pressureSource}</small>
-              </td>
-              <td>{result.pressure_site?.toFixed(2) ?? "—"}</td>
-              <td>{result.pressure_standard?.toFixed(2) ?? "—"}</td>
-            </tr>
+            {station && result.pressure_standard !== null && (
+              <tr>
+                <th scope="row">风压法</th>
+                <td>
+                  <strong>{station.pressure} kN/m²</strong>
+                  <small>{pressureSource}</small>
+                </td>
+                <td>{result.pressure_site?.toFixed(2) ?? "—"}</td>
+                <td>{result.pressure_standard.toFixed(2)}</td>
+              </tr>
+            )}
             <tr>
               <th scope="row">平均风速倍数法</th>
               <td>

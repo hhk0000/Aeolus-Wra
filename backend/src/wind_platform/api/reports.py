@@ -193,10 +193,8 @@ class ExtremeOptions(BaseModel):
     pressure_override: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     thunderstorm: ThunderstormOptions | None = None
 
-    def calculation_options(self, local, *, for_export=False):
+    def calculation_options(self, local):
         station = self.station(local)
-        if for_export and station is None:
-            raise CalculationError("风压库未匹配到基本风压，请在分析配置中手填后再导出。")
         thunderstorm_raw = None
         if self.thunderstorm and self.thunderstorm.source_id:
             thunderstorm_raw = assessment_file(local, self.thunderstorm.source_id, "thunderstorm")
@@ -279,6 +277,14 @@ def run_assessment(options: AssessmentOptions, request: Request):
 def get_assessment(run_id: str, request: Request):
     run = request.app.state.wind_store.get("assessment-runs", run_id)
     extreme = run.get("extreme")
+    if extreme and extreme["adopted"] is None:
+        run["extreme"] = extreme = assessment_extreme.extreme_wind(
+            extreme["mean_speed"],
+            extreme["density"],
+            extreme["multiplier"],
+            extreme.get("station"),
+            extreme.get("thunderstorm"),
+        )
     if extreme and "pressure_site" not in extreme:
         extreme["pressure_site"] = assessment_extreme.pressure_site_speed(
             extreme["pressure_standard"], extreme["density"]
@@ -377,7 +383,7 @@ async def export_registered(key: str, version: str, request: Request):
             hub_height_m=heights.hub_height_m,
             mean_temperature_c=heights.mean_temperature_c,
             wind_shear_exponent=heights.wind_shear_exponent,
-            **extreme.calculation_options(local, for_export=True),
+            **extreme.calculation_options(local),
         )
     return Response(
         result,

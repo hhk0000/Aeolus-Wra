@@ -1315,25 +1315,40 @@ def build(
         f"分析配置采用空气密度 {rho:.3f} kg/m³，折算至标准空气密度后为 "
         f"{extreme['multiplier_standard']:.2f} m/s。"
     )
-    methods = "风压法和平均风速倍数法"
+    methods = ["平均风速倍数法"]
+    if pressure_station:
+        methods.insert(0, "风压法")
     if thunderstorm:
-        methods = "风压法、平均风速倍数法和五日雷暴法"
+        methods.append("五日雷暴法")
+    basis = (
+        f"比较{'、'.join(methods[:-1])}和{methods[-1]}在场址空气密度下的估算结果，"
+        if len(methods) > 1
+        else ""
+    )
     fields["前期风速判断"] = (
-        f"比较{methods}在场址空气密度下的估算结果，"
-        f"取{extreme['adopted_method']}的 {extreme['adopted_site']:.2f} m/s，"
+        f"{basis}取{extreme['adopted_method']}在场址空气密度下的 "
+        f"{extreme['adopted_site']:.2f} m/s，"
         f"折算至标准空气密度后为 {extreme['adopted']:.2f} m/s，作为前期判断依据。"
-        if extreme["adopted"] is not None
-        else "待补齐风压法结果后，再取各方法的较大值形成前期判断。"
     )
     if approved_layout:
         approved_assessment_template.select_thunderstorm_section(doc, thunderstorm is not None)
+    if not pressure_station:
+        approved_assessment_template.omit_pressure_section(
+            doc, thunderstorm=thunderstorm is not None
+        )
+    if approved_layout:
+        if pressure_station:
+            fields.update(
+                {
+                    "基本风压": f"{pressure_station['pressure']:g}",
+                    "风压来源": pressure_source_text(pressure_station).rstrip("。"),
+                    "风压法标准风速": f"{extreme['pressure_standard']:.2f}",
+                    "风压法场址风速": f"{extreme['pressure_site']:.2f}",
+                }
+            )
         fields.update(
             {
                 "风功率密度等级": fields["风功率密度等级及评价待校审"],
-                "基本风压": f"{pressure_station['pressure']:g}",
-                "风压来源": pressure_source_text(pressure_station).rstrip("。"),
-                "风压法标准风速": f"{extreme['pressure_standard']:.2f}",
-                "风压法场址风速": f"{extreme['pressure_site']:.2f}",
                 "场址空气密度": f"{rho:.3f}",
                 "分析期平均风速": f"{extreme['mean_speed_used']:.2f}",
                 "风速倍数": f"{extreme_multiplier:g}",
@@ -1386,9 +1401,13 @@ def build(
         if not approved_layout and para.text == "本节按标准空气密度口径比较两种方法的估算结果。":
             para.clear().add_run(
                 "本节比较各启用方法在场址空气密度下的估算结果，再将最大值折算至标准空气密度。"
+                if len(methods) > 1
+                else "本节采用平均风速倍数法估算，并将结果折算至标准空气密度。"
             )
         if not approved_layout and thunderstorm and para.text.startswith("【前期风速判断】"):
-            para.insert_paragraph_before("（3）五日雷暴法", style=para.style)
+            para.insert_paragraph_before(
+                "（3）五日雷暴法" if pressure_station else "（2）五日雷暴法", style=para.style
+            )
             para.insert_paragraph_before(
                 f"采用 {thunderstorm['year']} 年 {thunderstorm['height']:g} m 高度的"
                 " 10 分钟风速资料，"
@@ -1411,7 +1430,7 @@ def build(
     def replace(para):
         runs = para.runs
         txt = "".join(r.text for r in runs)
-        if updated_template_layout and txt.startswith("（3）五日雷暴法"):
+        if updated_template_layout and txt.startswith(("（2）五日雷暴法", "（3）五日雷暴法")):
             approved_assessment_template.replace_wording(
                 para._p, "【勾选并完成计算时输出本小节】", ""
             )

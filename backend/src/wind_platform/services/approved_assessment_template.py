@@ -226,6 +226,27 @@ def select_thunderstorm_section(doc, enabled):
             doc.element.body.remove(child)
 
 
+def omit_pressure_section(doc, *, thunderstorm):
+    body = doc.element.body
+    children = list(body)
+    texts = ["".join(node.text or "" for node in child.iter(qn("w:t"))) for child in children]
+    start = next((i for i, text in enumerate(texts) if text.strip() == "（1）风压法"), None)
+    end = next((i for i, text in enumerate(texts) if text.strip() == "（2）平均风速倍数法"), None)
+    if start is None or end is None or end <= start:
+        return
+    for child in children[start:end]:
+        body.remove(child)
+    replace_wording(children[end], "（2）平均风速倍数法", "（1）平均风速倍数法")
+    for child, text in zip(children, texts, strict=True):
+        if thunderstorm and text.startswith("（3）五日雷暴法"):
+            replace_wording(child, "（3）五日雷暴法", "（2）五日雷暴法")
+        if not thunderstorm:
+            if text.startswith("本节估算场址"):
+                replace_wording(child, "各方法统一换算至场址空气密度后进行比较。", "")
+            if text.startswith("综合以上方法计算结果"):
+                replace_wording(child, "综合以上方法计算结果", "根据平均风速倍数法计算结果")
+
+
 def clear_generated_chart_note(caption):
     if caption is None or caption.tag != qn("w:p"):
         return
